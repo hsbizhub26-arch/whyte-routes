@@ -36,13 +36,16 @@ service cloud.firestore {
     }
 
     // ── users/{uid} — role + subscription permissions ──────────
-    // Every signed-in user may read/create/update only their own
-    // document. Creating with role "owner" is only allowed for the
-    // two whitelisted UIDs above; everyone else is blocked from
-    // ever setting role to "owner" or isAdmin to true. Once created,
-    // role/isAdmin can't be changed by the user themselves (prevents
-    // self-escalation after the fact) - changing a role requires a
-    // deliberate admin action outside the app for now.
+    // Every signed-in user may read/create only their own document.
+    // Creating with role "owner" is only allowed for the two
+    // whitelisted UIDs above; everyone else is blocked from ever
+    // setting role to "owner" or isAdmin to true.
+    //
+    // Updates: an Owner account may update ANY user's document
+    // (e.g. managing roles/subscriptions from a future admin
+    // screen). Everyone else may only update their own document,
+    // and may not touch role, isAdmin, or subscription themselves -
+    // those three fields can only ever be changed by an Owner.
 
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId;
@@ -58,22 +61,25 @@ service cloud.firestore {
                            && request.resource.data.isAdmin == false)
                        );
 
-      allow update: if isSignedIn() && request.auth.uid == userId
-                    && request.resource.data.role == resource.data.role
-                    && request.resource.data.isAdmin == resource.data.isAdmin;
+      allow update: if isSignedIn() && (
+                         isOwner()
+                         ||
+                         (request.auth.uid == userId
+                           && request.resource.data.role == resource.data.role
+                           && request.resource.data.isAdmin == resource.data.isAdmin
+                           && request.resource.data.subscription == resource.data.subscription)
+                       );
     }
 
     // ── drivers/{driverId} ───────────────────────────────────
-    // Owner/Manager manage the roster. `get` (single-document read,
-    // by known ID) is open to anyone so an unauthenticated customer
-    // following a tracking link can see that one driver's live
-    // position - the same "anyone with the link" model as the
-    // tracking link itself. `list` (browsing/scraping the whole
-    // collection) stays locked to signed-in users only.
+    // Contains PII (name, phone) alongside location, so this is
+    // NOT publicly readable - authenticated staff only, full stop.
+    // Public tracking data lives under trackingLinks/{linkId}/location
+    // instead (see below), which carries a position only, never a
+    // driver's name or phone number.
 
     match /drivers/{driverId} {
-      allow get: if true;
-      allow list: if isSignedIn();
+      allow read: if isSignedIn();
       allow create, delete: if isOwnerOrManager();
       // Driver-self location updates aren't tied to a Firebase Auth
       // UID yet (driver login is phone/code-based, not an account) -
@@ -84,11 +90,17 @@ service cloud.firestore {
 
     // ── routes/{routeId} and stops subcollection ────────────
     // Route documents (assignment, status, customer-adjacent data)
-    // are Owner/Manager only. Stops need to be completable by
-    // whoever's actually driving, and today that isn't a verifiable
-    // Auth UID either - scoped to any signed-in user as a deliberate,
-    // visible tradeoff (see driver note above) rather than a silent
-    // hole; tighten this once driver accounts exist.
+    // are Owner/Manager only.
+    //
+    // TODO(driver accounts): stop writes are scoped to any signed-in
+    // user for now because driver login isn't tied to a Firebase Auth
+    // UID yet (it's phone/code-based). Once drivers have real Auth
+    // accounts, replace `allow write: if isSignedIn();` below with
+    // something like:
+    //   allow write: if isOwnerOrManager()
+    //     || (isSignedIn() && resource.data.driverId == request.auth.uid);
+    // so only the driver actually assigned to a stop (or staff) can
+    // update it.
 
     match /routes/{routeId} {
       allow read: if isSignedIn();
@@ -96,7 +108,7 @@ service cloud.firestore {
 
       match /stops/{stopId} {
         allow read: if isSignedIn();
-        allow write: if isSignedIn();
+        allow write: if isSignedIn(); // TODO(driver accounts): see above
       }
     }
 
@@ -121,6 +133,16 @@ service cloud.firestore {
       allow list: if isSignedIn();
       allow create, update: if isSignedIn();
       allow delete: if isOwnerOrManager();
+
+      // Public-safe live position for the customer tracking view -
+      // a location only, never the driver's name/phone. Staff/system
+      // write it; anyone with the link can read it. (App-side: this
+      // path isn't populated yet - writing to it is a small follow-up
+      // change, not yet built.)
+      match /location/{locId} {
+        allow get: if true;
+        allow write: if isSignedIn();
+      }
     }
 
     // ── driverReports/{driverId}/reports/{reportId} ─────────
