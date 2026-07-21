@@ -38,6 +38,7 @@
 				Entitlements/EntitlementKeys.swift,
 				Entitlements/LocalEntitlementStore.swift,
 				Entitlements/SubscriptionSyncService.swift,
+				Entitlements/UserPermissionsService.swift,
 				App/AdminSession.swift,
 				Models/Customer.swift,
 				Models/Driver.swift,

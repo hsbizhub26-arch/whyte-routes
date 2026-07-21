@@ -2,7 +2,15 @@ import Foundation
 
 struct AccessControl {
 
-    /// Emails with permanent Owner role + Premium Plus
+    /// Firebase UIDs with permanent Owner role + Premium Plus. This is the
+    /// real source of truth - UIDs don't change if an account's email does.
+    static let ownerUIDs: Set<String> = [
+        "x5cxMZN5TKTXcIwrVMAPmQJOp3R2", // teamdwlandscaping@gmail.com
+        "bMeTRuhikKVlCU6rE8QFBp0TXAz1"  // hopeseneoudom@icloud.com
+    ]
+
+    /// Email fallback, used only until a user's Firestore users/{uid}
+    /// permissions document has been created (see UserPermissionsService).
     static let ownerEmails: Set<String> = [
         "teamdwlandscaping@gmail.com",
         "hopeseneoudom@icloud.com"
@@ -12,6 +20,12 @@ struct AccessControl {
     static let premiumPlusWhitelist = ownerEmails
 
     // MARK: - Role Logic
+    static func isOwner(uid: String?, email: String?) -> Bool {
+        if let uid, ownerUIDs.contains(uid) { return true }
+        if let email = email?.lowercased(), ownerEmails.contains(email) { return true }
+        return false
+    }
+
     static func role(for email: String?) -> UserRole {
         guard let email = email?.lowercased() else { return .none }
 

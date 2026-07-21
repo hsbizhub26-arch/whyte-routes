@@ -32,19 +32,40 @@ final class AuthSession: ObservableObject {
                     return
                 }
 
-                // 1. Assign local role instantly
-                self.role = AccessControl.role(for: user.email)
-
-                // 2. Whitelist unlock
-                if AccessControl.isWhitelisted(user.email) {
-                    AppEntitlements.shared.setPremiumPlus(
-                        unlocked: true,
-                        source: EntitlementSource.whitelist.rawValue
-                    )
-                }
-
-                // 3. Sync entitlements from server
+                // 1. Sync legacy entitlements from server first, so the
+                //    permission checks below always have the final say.
                 await SubscriptionSyncService().syncEntitlements(uid: user.uid)
+
+                // 2. Firestore users/{uid} document is the real source of
+                //    truth for role + subscription.
+                if let permissions = await UserPermissionsService.shared.fetch(uid: user.uid) {
+                    self.role = permissions.role
+
+                    if permissions.subscription == "premiumPlus" {
+                        AppEntitlements.shared.setPremiumPlus(unlocked: true, source: EntitlementSource.whitelist.rawValue)
+                    } else if permissions.subscription == "premium" {
+                        AppEntitlements.shared.setPremium(unlocked: true, source: EntitlementSource.whitelist.rawValue)
+                    }
+
+                } else if AccessControl.isOwner(uid: user.uid, email: user.email) {
+                    // 3. Fallback for accounts that haven't been migrated to
+                    //    a Firestore permissions document yet - grants owner
+                    //    access now, and creates the real document so this
+                    //    fallback isn't needed again next time.
+                    self.role = .owner
+                    AppEntitlements.shared.setPremiumPlus(unlocked: true, source: EntitlementSource.whitelist.rawValue)
+
+                    await UserPermissionsService.shared.createIfNeeded(
+                        uid: user.uid,
+                        email: user.email ?? "",
+                        role: .owner,
+                        subscription: "premiumPlus",
+                        isAdmin: true
+                    )
+
+                } else {
+                    self.role = .driver
+                }
 
                 // 4. Restore saved entitlements
                 AppEntitlements.shared.restoreFromDefaults()
