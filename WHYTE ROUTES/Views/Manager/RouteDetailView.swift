@@ -34,7 +34,7 @@ struct RouteDetailView: View {
                 } label: {
                     Text("Assign Driver").bold()
                 }
-                .buttonStyle(GoldButton())
+                .buttonStyle(GoldButtonStyle())
                 
                 // MARK: - Generate Tracking Link Button
                 if let driver = selectedDriver,
@@ -49,7 +49,7 @@ struct RouteDetailView: View {
                         }
                         .foregroundColor(AppTheme.gold)
                     }
-                    .buttonStyle(GoldButton())
+                    .buttonStyle(GoldButtonStyle())
                     .sheet(isPresented: $showShareSheet) {
                         ActivityView(activityItems: [generatedLink])
                     }
@@ -63,7 +63,7 @@ struct RouteDetailView: View {
                 Button("Optimize Route") {
                     optimize()
                 }
-                .buttonStyle(GoldButton())
+                .buttonStyle(GoldButtonStyle())
             }
             .tint(AppTheme.gold)
         }

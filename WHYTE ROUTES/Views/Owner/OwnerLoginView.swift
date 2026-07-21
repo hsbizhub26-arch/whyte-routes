@@ -52,7 +52,7 @@ struct OwnerLoginView: View {
                             Text(isLoading ? "SIGNING IN…" : "LOGIN")
                                 .fontWeight(.bold)
                         }
-                        .buttonStyle(GoldButton())
+                        .buttonStyle(GoldButtonStyle())
                         .padding(.horizontal)
                         .disabled(!isFormValid || isLoading)
                         .opacity(!isFormValid || isLoading ? 0.6 : 1)
