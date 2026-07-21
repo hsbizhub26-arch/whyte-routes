@@ -186,14 +186,17 @@ service cloud.firestore {
         allow read: if isCompanyMember(companyId);
         allow create, update, delete: if isCompanyStaff(companyId);
 
-        // TODO(driver accounts): stop writes are scoped to any
-        // signed-in company member for now, because driver login isn't
-        // tied to a Firebase Auth UID yet. Once it is, replace with:
-        //   allow write: if isCompanyStaff(companyId)
-        //     || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
+        // Driver login is now tied to a real Firebase Auth UID (see
+        // AuthSession.bridgeDriverSession), so a driver can write only
+        // the stop already assigned to them (resource.data.driverId
+        // matches their own uid) - staff can write any stop. Stops are
+        // always created by staff building a route, never by a driver,
+        // so create requires isCompanyStaff (resource doesn't exist
+        // yet on create, so the driver branch can't match).
         match /stops/{stopId} {
           allow read: if isCompanyMember(companyId);
-          allow write: if isCompanyMember(companyId); // TODO(driver accounts): see above
+          allow write: if isCompanyStaff(companyId)
+                       || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
 
           // ── .../stops/{stopId}/photos/{photoId} ─────────
           // Proof-of-work photo metadata (the actual image lives in
