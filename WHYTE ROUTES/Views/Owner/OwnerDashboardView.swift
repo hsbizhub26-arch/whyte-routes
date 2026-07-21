@@ -3,7 +3,7 @@ import SwiftUI
 struct OwnerDashboardView: View {
     
     @StateObject private var admin = AdminSession.shared
-    @StateObject private var driverService = DriverService.shared
+    @StateObject private var driverVM = DriverViewModel()
     @StateObject private var routeService = RouteService.shared
     
     @State private var showCustomers = false
@@ -20,7 +20,7 @@ struct OwnerDashboardView: View {
                 header
                 
                 HStack(spacing: 14) {
-                    dashboardBox(title: "Drivers", value: "\(driverService.drivers.count)")
+                    dashboardBox(title: "Drivers", value: "\(driverVM.drivers.count)")
                     dashboardBox(title: "Active Routes", value: "\(routeService.routes.count)")
                 }
                 .padding(.horizontal)

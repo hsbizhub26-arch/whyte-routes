@@ -57,4 +57,25 @@ final class TrackingLinkRepository {
                 "completedAt": FieldValue.serverTimestamp()
             ])
     }
+
+    // MARK: - Listen to a Tracking Link (Customer Tracking View)
+    func listenTo(linkId: String, handler: @escaping (TrackingLink?) -> Void) {
+        db.collection("trackingLinks")
+            .document(linkId)
+            .addSnapshotListener { snap, error in
+
+                if let error = error {
+                    print("❌ Failed listening to tracking link:", error.localizedDescription)
+                    handler(nil)
+                    return
+                }
+
+                guard let snap = snap, let data = snap.data() else {
+                    handler(nil)
+                    return
+                }
+
+                handler(TrackingLink(from: data, id: snap.documentID))
+            }
+    }
 }

@@ -1,6 +1,23 @@
 import SwiftUI
 import FirebaseFirestore
 
+struct AssignRoutesView: View {
+
+    @StateObject private var routeService = RouteService.shared
+
+    var body: some View {
+        NavigationStack {
+            List(routeService.routes) { route in
+                NavigationLink(route.name) {
+                    AssignRouteView(routeId: route.id)
+                }
+            }
+            .navigationTitle("Assign Routes")
+            .onAppear { routeService.loadRoutesOnce() }
+        }
+    }
+}
+
 struct AssignRoutesDriver: Identifiable, Codable {
     let id: String
     var name: String
@@ -58,4 +75,3 @@ struct AssignRouteView: View {
             .updateData(["activeRoute": routeId])
     }
 }
-

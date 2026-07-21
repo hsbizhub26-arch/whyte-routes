@@ -17,8 +17,11 @@ struct RoleRouterView: View {
             else {
                 switch auth.role {
 
+                case .owner:
+                    OwnerTabView()       // business owner - full admin access
+
                 case .manager:
-                    ManagerTabView()     // full business dashboard
+                    ManagerTabView()     // dispatcher / supervisor
 
                 case .driver:
                     DriverTabView()      // driver assigned routes / tracking

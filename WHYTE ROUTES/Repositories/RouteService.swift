@@ -2,6 +2,12 @@ import Foundation
 import Combine
 import FirebaseFirestore
 
+struct DriverReportSummary {
+    var completedStops: Int
+    var totalKM: Double
+    var totalTimeMinutes: Int
+}
+
 @MainActor
 final class RouteService: ObservableObject {
 
@@ -101,6 +107,21 @@ final class RouteService: ObservableObject {
     // MARK: - Deactivate a Tracking Link
     func deactivateTrackingLink(_ linkId: String) {
         trackingRepo.deactivate(id: linkId)
+    }
+
+    // MARK: - Driver Report Summary
+    func reportFor(_ driver: Driver) -> DriverReportSummary {
+        let driverStops = routes
+            .filter { $0.driverId == driver.id }
+            .flatMap { $0.stops }
+
+        let completed = driverStops.filter { $0.isCompleted }.count
+
+        return DriverReportSummary(
+            completedStops: completed,
+            totalKM: 0,
+            totalTimeMinutes: 0
+        )
     }
 
     // MARK: - Remove Listeners (important for performance)

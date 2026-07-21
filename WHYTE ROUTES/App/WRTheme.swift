@@ -5,6 +5,7 @@ struct WRTheme {
     // Keep these if you still want a centralized theme
     static let gold = Color(hex: "#F5C451")
     static let darkGold = Color(hex: "#D9A63A")
+    static let softBlack = Color(hex: "#1C1C1E")
 
     static let gradient = LinearGradient(
         colors: [.wrBlack, .wrDeepBlack],
