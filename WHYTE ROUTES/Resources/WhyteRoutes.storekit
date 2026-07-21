@@ -1,0 +1,163 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "01ADE3CB",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6755896122",
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_developerTeamID" : "FW57G974CG",
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 786347500.40153098,
+    "_locale" : "en_US",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21845631",
+      "localizations" : [
+
+      ],
+      "name" : "Auto-Renewable Subscription",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "129.0",
+          "familyShareable" : false,
+          "groupNumber" : 4,
+          "internalID" : "6755915612",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Monthly access to all WhyteRoutes tools.",
+              "displayName" : "Premium Monthly",
+              "locale" : "en_CA"
+            }
+          ],
+          "productID" : "whyteroutes.premium.monthly.v2",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Premium Monthly",
+          "subscriptionGroupID" : "21845631",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "199.99",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "6755917178",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Full access to WhyteRoutes monthly.",
+              "displayName" : "Premium Plus Monthly",
+              "locale" : "en_CA"
+            }
+          ],
+          "productID" : "whyteroutes.premiumplus.monthly.v2",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Premium Plus Monthly",
+          "subscriptionGroupID" : "21845631",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "999.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "6755915292",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Full access to all WhyteRoutes features.",
+              "displayName" : "Premium Plus Yearly",
+              "locale" : "en_CA"
+            }
+          ],
+          "productID" : "whyteroutes.premiumplus.yearly.v2",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Premium Plus Yearly",
+          "subscriptionGroupID" : "21845631",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "799.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "6755916605",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Full yearly access to WhyteRoutes tools.",
+              "displayName" : "Premium Yearly",
+              "locale" : "en_CA"
+            }
+          ],
+          "productID" : "whyteroutes.premium.yearly.v2",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Premium Yearly",
+          "subscriptionGroupID" : "21845631",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Whyte Routes — Live Tracking</title>
+
+<link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+
+<style>
+  body {
+    margin: 0;
+    background: black;
+    color: white;
+    font-family: Arial, sans-serif;
+  }
+  #map {
+    width: 100vw;
+    height: 100vh;
+  }
+  #etaBox {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    padding: 12px 18px;
+    font-size: 16px;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid gold;
+    border-radius: 10px;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+<div id="etaBox">Calculating ETA...</div>
+
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+
+<!-- Import our Firebase config file -->
+<script type="module">
+  import { db } from "./firebase.js";
+  import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+  // Mapbox token (replace later with your token)
+  mapboxgl.accessToken = "pk.eyJ1Ijoicm91dGVnb2VzMSIsImEiOiJjbWlkenM2c3IwYXpwMmluMzF1M2ozcWhiIn0.8j6Gxpu-9iauVFt_NIepFA";
+
+  // Create map
+  const map = new mapboxgl.Map({
+    container: "map",
+    style: "mapbox://styles/mapbox/dark-v11",
+    zoom: 13,
+    center: [-79.44, 43.7] // fallback
+  });
+
+  // Read tracking ID from URL: /tracking/ABC123
+  const trackingId = new URLSearchParams(window.location.search).get("id");
+
+  if (!trackingId) {
+    document.getElementById("etaBox").innerHTML = "Invalid tracking link.";
+    throw new Error("Missing ?id= parameter");
+  }
+
+  // Fetch tracking link
+  onSnapshot(doc(db, "trackingLinks", trackingId), (docSnap) => {
+    if (!docSnap.exists()) {
+      document.getElementById("etaBox").innerHTML = "Tracking not found.";
+      return;
+    }
+
+    const data = docSnap.data();
+    const driverId = data.driverId;
+
+    // Listen to driver GPS
+    onSnapshot(doc(db, "drivers", driverId), (driverDoc) => {
+      if (!driverDoc.exists()) return;
+
+      const d = driverDoc.data();
+      const coords = [d.lng, d.lat];
+
+      // Create or update marker
+      if (!window.driverMarker) {
+        window.driverMarker = new mapboxgl.Marker({ color: "gold" })
+          .setLngLat(coords)
+          .addTo(map);
+      } else {
+        window.driverMarker.setLngLat(coords);
+      }
+
+      map.setCenter(coords);
+
+      document.getElementById("etaBox").innerHTML =
+        "Your technician is en route...";
+    });
+  });
+</script>
+
+</body>
+</html>

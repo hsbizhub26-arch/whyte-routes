@@ -1,0 +1,8 @@
+// ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+PREFIX = -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/Library/Frameworks
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+ENABLE_BITCODE = YES;
+LD_RUNPATH_SEARCH_PATHS = @executable_path/Frameworks;
+PRODUCT_BUNDLE_IDENTIFIER = com.example.myapp;
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+OTHER_LDFLAGS = -ObjC;

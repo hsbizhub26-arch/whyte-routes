@@ -1,0 +1,42 @@
+function calculateETA(driverLat, driverLng, stopLat, stopLng) {
+  const R = 6371; // km
+  const dLat = (stopLat - driverLat) * Math.PI / 180;
+  const dLng = (stopLng - driverLng) * Math.PI / 180;
+
+  const a =
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(driverLat * Math.PI/180) * Math.cos(stopLat * Math.PI/180) *
+    Math.sin(dLng/2) * Math.sin(dLng/2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distance = R * c;
+
+  // assume 35 km/h (plow slow speed) → 0.6 km/min
+  const etaMinutes = distance / 0.6;
+
+  return Math.round(etaMinutes);
+}
+<!DOCTYPE html>
+<html>
+<head>
+<title>Whyte Routes - Live Tracking</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body {
+  background: black;
+  color: #f5c451;
+  font-family: Arial;
+  text-align: center;
+  padding: 40px;
+}
+</style>
+</head>
+<body>
+<h1>Whyte Routes</h1>
+<p>Your driver is on the way.</p>
+<p>Please open this link on your phone:</p>
+<a href="whyteroutes://track?id={{TRACKING_ID}}" style="color:white;font-size:20px;">
+Open in Whyte Routes App
+</a>
+</body>
+</html>

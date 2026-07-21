@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyCCUKUXXitMtYQ68g2oqD92qnm0Wgv6C24</string>
+	<key>GCM_SENDER_ID</key>
+	<string>1092024277372</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.hope.WHYTE-ROUTES</string>
+	<key>PROJECT_ID</key>
+	<string>whyte-routes</string>
+	<key>STORAGE_BUCKET</key>
+	<string>whyte-routes.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:1092024277372:ios:11db4b02292fa98bbdecf9</string>
+</dict>
+</plist>
