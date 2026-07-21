@@ -33,5 +33,13 @@
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to show your position on the map and provide route guidance.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>We use your location, even in the background, to track your progress for route management and delivery accuracy.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is needed to take photos as proof for deliveries and job completion.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo Library access is needed to allow you to choose images as proof for reports.</string>
 </dict>
 </plist>

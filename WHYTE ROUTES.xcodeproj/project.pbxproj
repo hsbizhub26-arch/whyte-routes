@@ -20,10 +20,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		8D711A992EE629D4003E9009 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		8D792BE92EDC236C00586CA8 /* WHYTE ROUTES.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "WHYTE ROUTES.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		8DB4DC182EE4D88700DCC302 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		8DB4DC1E2EE4DF7800DCC302 /* Info 2.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Info 2.plist"; sourceTree = "<group>"; };
 		8DB903422EE7C755008AF683 /* IconPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPreview.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -83,9 +80,6 @@
 			children = (
 				8D6E77142EDEF576003D193B /* WHYTE ROUTES */,
 				8D792BEA2EDC236C00586CA8 /* Products */,
-				8DB4DC182EE4D88700DCC302 /* Info.plist */,
-				8DB4DC1E2EE4DF7800DCC302 /* Info 2.plist */,
-				8D711A992EE629D4003E9009 /* LaunchScreen.storyboard */,
 				8DB903422EE7C755008AF683 /* IconPreview.swift */,
 			);
 			sourceTree = "<group>";
