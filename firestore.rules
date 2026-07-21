@@ -1,0 +1,152 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // The only two accounts allowed to ever hold role "owner".
+    // Enforced here (not just in app code) so nobody can grant
+    // themselves owner/admin by writing to Firestore directly.
+    function isOwnerUID(uid) {
+      return uid in [
+        'x5cxMZN5TKTXcIwrVMAPmQJOp3R2', // teamdwlandscaping@gmail.com
+        'bMeTRuhikKVlCU6rE8QFBp0TXAz1'  // hopeseneoudom@icloud.com
+      ];
+    }
+
+    function myPermissions() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isOwner() {
+      return isSignedIn() && myPermissions().role == 'owner';
+    }
+
+    function isManager() {
+      return isSignedIn() && myPermissions().role == 'manager';
+    }
+
+    function isOwnerOrManager() {
+      return isOwner() || isManager();
+    }
+
+    // ── users/{uid} — role + subscription permissions ──────────
+    // Every signed-in user may read/create/update only their own
+    // document. Creating with role "owner" is only allowed for the
+    // two whitelisted UIDs above; everyone else is blocked from
+    // ever setting role to "owner" or isAdmin to true. Once created,
+    // role/isAdmin can't be changed by the user themselves (prevents
+    // self-escalation after the fact) - changing a role requires a
+    // deliberate admin action outside the app for now.
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() && request.auth.uid == userId
+                    && (
+                         (isOwnerUID(userId)
+                           && request.resource.data.role == 'owner'
+                           && request.resource.data.isAdmin == true)
+                         ||
+                         (!isOwnerUID(userId)
+                           && request.resource.data.role != 'owner'
+                           && request.resource.data.isAdmin == false)
+                       );
+
+      allow update: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.data.role == resource.data.role
+                    && request.resource.data.isAdmin == resource.data.isAdmin;
+    }
+
+    // ── drivers/{driverId} ───────────────────────────────────
+    // Owner/Manager manage the roster. `get` (single-document read,
+    // by known ID) is open to anyone so an unauthenticated customer
+    // following a tracking link can see that one driver's live
+    // position - the same "anyone with the link" model as the
+    // tracking link itself. `list` (browsing/scraping the whole
+    // collection) stays locked to signed-in users only.
+
+    match /drivers/{driverId} {
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create, delete: if isOwnerOrManager();
+      // Driver-self location updates aren't tied to a Firebase Auth
+      // UID yet (driver login is phone/code-based, not an account) -
+      // until that link exists, writes are Owner/Manager only. This
+      // is the one place to revisit once drivers get real accounts.
+      allow update: if isOwnerOrManager();
+    }
+
+    // ── routes/{routeId} and stops subcollection ────────────
+    // Route documents (assignment, status, customer-adjacent data)
+    // are Owner/Manager only. Stops need to be completable by
+    // whoever's actually driving, and today that isn't a verifiable
+    // Auth UID either - scoped to any signed-in user as a deliberate,
+    // visible tradeoff (see driver note above) rather than a silent
+    // hole; tighten this once driver accounts exist.
+
+    match /routes/{routeId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwnerOrManager();
+
+      match /stops/{stopId} {
+        allow read: if isSignedIn();
+        allow write: if isSignedIn();
+      }
+    }
+
+    // ── customers/{customerId} ───────────────────────────────
+    // Customer PII (name, address). Customers never sign in to this
+    // app themselves (they use tracking links) - so only staff need
+    // access at all.
+
+    match /customers/{customerId} {
+      allow read, write: if isOwnerOrManager();
+    }
+
+    // ── trackingLinks/{linkId} ────────────────────────────────
+    // The core of unauthenticated customer tracking: a customer who
+    // taps their texted link needs to read this one specific
+    // document with no login. `get` by known ID is public; `list`
+    // (enumerating every active link) is not. Writes (creating /
+    // deactivating a link) require sign-in.
+
+    match /trackingLinks/{linkId} {
+      allow get: if true;
+      allow list: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isOwnerOrManager();
+    }
+
+    // ── driverReports/{driverId}/reports/{reportId} ─────────
+    // End-of-shift reports. Any signed-in user can submit one (same
+    // driver-identity caveat as above); only Owner/Manager can read
+    // the roll-up or edit/delete after submission, so a report can't
+    // be quietly altered once turned in.
+
+    match /driverReports/{driverId}/reports/{reportId} {
+      allow read: if isOwnerOrManager();
+      allow create: if isSignedIn();
+      allow update, delete: if isOwnerOrManager();
+    }
+
+    // ── entitlements/{uid} — legacy subscription sync ───────
+    // Standard user-owns-their-own-document pattern.
+
+    match /entitlements/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ── Everything else: locked ──────────────────────────────
+    // No implicit access to anything not explicitly listed above.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
