@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CLIENT_ID</key>
+	<string>1092024277372-rddk1bij01gjq3censt7sudt7ohg1o0n.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.1092024277372-rddk1bij01gjq3censt7sudt7ohg1o0n</string>
 	<key>API_KEY</key>
 	<string>AIzaSyCCUKUXXitMtYQ68g2oqD92qnm0Wgv6C24</string>
 	<key>GCM_SENDER_ID</key>
