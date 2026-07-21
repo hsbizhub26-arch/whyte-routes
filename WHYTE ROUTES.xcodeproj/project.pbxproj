@@ -92,6 +92,7 @@
 				Views/Shared/DeleteAccountSection.swift,
 				Views/Shared/SettingsView.swift,
 				Resources/Assets.xcassets,
+				WHYTE-ROUTES.entitlements,
 				"Resources/GoogleService-Info.plist",
 				Resources/LaunchScreen.storyboard,
 				Resources/WhyteRoutes.storekit,
@@ -195,6 +196,11 @@
 				TargetAttributes = {
 					8D792BE82EDC236C00586CA8 = {
 						CreatedOnToolsVersion = 26.1.1;
+						SystemCapabilities = {
+							"com.apple.Keychain" = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
