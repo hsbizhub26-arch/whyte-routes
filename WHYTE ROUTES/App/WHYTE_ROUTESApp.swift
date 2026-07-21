@@ -10,11 +10,12 @@ struct WHYTE_ROUTESApp: App {
     init() {
         FirebaseApp.configure()
         AppEntitlements.shared.restoreFromDefaults()
+        AuthSession.shared.listenForAuthChanges()
     }
 
     var body: some Scene {
         WindowGroup {
-            OwnerLoginView()
+            RoleRouterView()
                 .environmentObject(auth)
                 .environmentObject(entitlements)
                 .preferredColorScheme(.dark)

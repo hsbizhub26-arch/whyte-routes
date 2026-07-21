@@ -4,6 +4,7 @@ import FirebaseFirestore
 struct Route: Identifiable {
 
     var id: String
+    var name: String
     var fleetId: String?
     var driverId: String?
     var status: String
@@ -17,6 +18,7 @@ extension Route {
     init?(from dict: [String: Any], id: String) {
 
         self.id = id
+        self.name = dict["name"] as? String ?? "Untitled Route"
         self.fleetId = dict["fleetId"] as? String
         self.driverId = dict["driverId"] as? String
         self.status = dict["status"] as? String ?? "pending"
@@ -45,6 +47,7 @@ extension Route {
 extension Route {
     func toDict() -> [String: Any] {
         var dict: [String: Any] = [
+            "name": name,
             "status": status,
             "createdAt": Timestamp(date: createdAt),
             "stops": stops.map { $0.toDict() }

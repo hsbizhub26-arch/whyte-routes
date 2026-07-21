@@ -25,7 +25,7 @@ struct DriverTabView: View {
                 .tag(1)
 
             // LIVE MAP
-            DriverLiveMapView()
+            DriverMapView()
                 .tabItem {
                     Image(systemName: "map.fill")
                     Text("Live Map")

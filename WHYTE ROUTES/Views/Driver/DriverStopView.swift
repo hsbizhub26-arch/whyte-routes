@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import Combine
 
 @MainActor
 final class DriverStopViewModel: ObservableObject {
@@ -19,14 +20,12 @@ final class DriverStopViewModel: ObservableObject {
     // MARK: - MARK STOP COMPLETED
     func markCompleted() {
         guard let route else { return }
-        guard let stopId = stop.id else { return }
 
         isCompleting = true
+        stop.isCompleted = true
 
-        routeService.markStopCompleted(stop: stop, in: route) {
-            self.isCompleting = false
-            self.stop.completed = true
-        }
+        routeService.updateStop(routeId: route.id, stop: stop)
+        isCompleting = false
     }
 }
 
@@ -59,7 +58,13 @@ struct DriverStopView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            DriverLocationManager.shared.startTracking(stopId: vm.stop.id)
+            if let driverId = session.driver?.id {
+                LocationService.shared.startTracking(
+                    driverId: driverId,
+                    stopLat: vm.stop.latitude,
+                    stopLng: vm.stop.longitude
+                )
+            }
         }
     }
 }
@@ -82,19 +87,22 @@ extension DriverStopView {
     }
 
     // MARK: MAP
+    @ViewBuilder
     private var mapSection: some View {
-        Map(coordinateRegion: .constant(
-            MKCoordinateRegion(
-                center: vm.stop.coordinate,
-                span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)
+        if let coordinate = vm.stop.coordinate {
+            Map(coordinateRegion: .constant(
+                MKCoordinateRegion(
+                    center: coordinate,
+                    span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                )
+            ))
+            .frame(height: 280)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color("WRThemeGold"), lineWidth: 2)
             )
-        ))
-        .frame(height: 280)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(Color("WRThemeGold"), lineWidth: 2)
-        )
+        }
     }
 
     // MARK: ACTION BUTTONS
@@ -111,7 +119,7 @@ extension DriverStopView {
             if let phone = vm.stop.customerPhone {
                 SMSButton(title: "Text Customer",
                           phone: phone,
-                          link: "https://whyteroutes.app/tracking/\(vm.stop.id ?? "")")
+                          link: "https://whyteroutes.app/tracking/\(vm.stop.id)")
             }
         }
     }
@@ -136,8 +144,8 @@ extension DriverStopView {
             .background(Color("WRThemeGold"))
             .cornerRadius(14)
         }
-        .disabled(vm.isCompleting || vm.stop.completed)
-        .opacity(vm.stop.completed ? 0.4 : 1)
+        .disabled(vm.isCompleting || vm.stop.isCompleted)
+        .opacity(vm.stop.isCompleted ? 0.4 : 1)
         .padding(.top, 10)
     }
 }

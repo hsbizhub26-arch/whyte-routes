@@ -3,11 +3,13 @@ import CoreLocation
 
 struct NavigationButton: View {
 
-    let coordinate: CLLocationCoordinate2D
+    let coordinate: CLLocationCoordinate2D?
 
     var body: some View {
         Button {
-            NavigationService.navigate(to: coordinate)
+            if let coordinate {
+                NavigationService.navigate(to: coordinate)
+            }
         } label: {
             Text("Navigate")
                 .font(.headline)
@@ -17,5 +19,7 @@ struct NavigationButton: View {
                 .foregroundColor(.white)
                 .cornerRadius(12)
         }
+        .disabled(coordinate == nil)
+        .opacity(coordinate == nil ? 0.5 : 1)
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import Combine
 
 @MainActor
 final class DriverMapViewModel: ObservableObject {
@@ -14,7 +15,7 @@ final class DriverMapViewModel: ObservableObject {
     @Published var selectedStop: Stop?
 
     private let session = DriverSession.shared
-    private let routeService = RouteService.shared
+    private var cancellables = Set<AnyCancellable>()
 
     init() {
         loadStops()
@@ -22,20 +23,22 @@ final class DriverMapViewModel: ObservableObject {
     }
 
     func loadStops() {
-        if let driver = session.driver {
-            stops = routeService.stopsForDriver(driver)
-        }
+        stops = session.activeStops
     }
 
-    // Live GPS updates via DriverLocationManager (you already have this)
+    // Live GPS updates via LocationService
     func startLocationUpdates() {
-        LocationService.shared.onLocationUpdate = { [weak self] coordinate in
-            guard let self else { return }
-            DispatchQueue.main.async {
-                self.driverCoordinate = coordinate
-                self.region.center = coordinate
+        guard let driverId = session.driver?.id else { return }
+        LocationService.shared.startTracking(driverId: driverId, stopLat: nil, stopLng: nil)
+
+        LocationService.shared.$currentLocation
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] coordinate in
+                self?.driverCoordinate = coordinate
+                self?.region.center = coordinate
             }
-        }
+            .store(in: &cancellables)
     }
 
     func centerOnDriver() {

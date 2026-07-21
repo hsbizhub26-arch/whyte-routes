@@ -9,6 +9,7 @@ final class AuthSession: ObservableObject {
 
     @Published var user: User? = nil
     @Published var role: UserRole = .none
+    @Published var isLoading: Bool = true
 
     private var authListener: AuthStateDidChangeListenerHandle?
 
@@ -24,6 +25,7 @@ final class AuthSession: ObservableObject {
         authListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
                 self?.user = user
+                defer { self?.isLoading = false }
 
                 guard let self = self, let user = user else {
                     self?.role = .none

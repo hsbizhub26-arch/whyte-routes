@@ -33,11 +33,14 @@ final class NavigationService {
         }
     }
 
+    // MARK: - Navigate to a Coordinate
+    static func navigate(to coordinate: CLLocationCoordinate2D) {
+        openInAppleMaps(coordinate)  // default navigation
+    }
+
     // MARK: - Navigate to a Stop
     static func navigate(to stop: Stop) {
-        let coordinate = CLLocationCoordinate2D(latitude: stop.latitude,
-                                                longitude: stop.longitude)
-
+        guard let coordinate = stop.coordinate else { return }
         openInAppleMaps(coordinate)  // default navigation
     }
 }

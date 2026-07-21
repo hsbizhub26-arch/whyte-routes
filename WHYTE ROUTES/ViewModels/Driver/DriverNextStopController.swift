@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Combine
 
 @MainActor
 final class DriverNextStopController: ObservableObject {
@@ -15,17 +16,17 @@ final class DriverNextStopController: ObservableObject {
 
     // MARK: - The next stop
     var nextStop: Stop? {
-        session.activeStops.first { !$0.completed }
+        session.activeStops.first { !$0.isCompleted }
     }
 
     // MARK: - All remaining stops
     var remainingStops: [Stop] {
-        session.activeStops.filter { !$0.completed }
+        session.activeStops.filter { !$0.isCompleted }
     }
 
     // MARK: - Completed count
     var completedCount: Int {
-        session.activeStops.filter { $0.completed }.count
+        session.activeStops.filter { $0.isCompleted }.count
     }
 
     // MARK: - Total count
@@ -36,5 +37,10 @@ final class DriverNextStopController: ObservableObject {
     // MARK: - Complete current stop
     func complete(stop: Stop) {
         session.completeStop(stop)
+    }
+
+    // MARK: - Force a UI refresh (called on screen appear)
+    func updateNextStop() {
+        objectWillChange.send()
     }
 }

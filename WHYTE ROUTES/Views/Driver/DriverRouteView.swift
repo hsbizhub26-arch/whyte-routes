@@ -3,13 +3,12 @@ import SwiftUI
 struct DriverRouteView: View {
 
     @ObservedObject private var session = DriverSession.shared
-    @ObservedObject private var routeService = RouteService.shared
 
     @State private var selectedStop: Stop?
     @State private var showStop = false
 
     var activeStops: [Stop] {
-        routeService.stopsForDriver(session.driver)
+        session.activeStops
     }
 
     var body: some View {

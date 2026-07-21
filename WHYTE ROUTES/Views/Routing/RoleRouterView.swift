@@ -12,19 +12,19 @@ struct RoleRouterView: View {
                 LoadingScreen()
             }
             else if auth.user == nil {
-                LoginFlowView()     // login / signup screen
+                OwnerLoginView()     // login screen
             }
             else {
-                switch auth.role ?? .none {
+                switch auth.role {
 
                 case .manager:
                     ManagerTabView()     // full business dashboard
-                    
+
                 case .driver:
                     DriverTabView()      // driver assigned routes / tracking
-                    
+
                 case .none:
-                    LoginFlowView()      // should not happen, but safe fallback
+                    OwnerLoginView()     // should not happen, but safe fallback
                 }
             }
         }

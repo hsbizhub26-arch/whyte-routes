@@ -45,6 +45,29 @@ final class RouteRepository {
             }
     }
 
+    // MARK: - Fetch Current Route for a Driver
+    func fetchRouteForDriver(driverId: String, completion: @escaping (Route?) -> Void) {
+        db.collection("routes")
+            .whereField("driverId", isEqualTo: driverId)
+            .whereField("status", isNotEqualTo: "completed")
+            .limit(to: 1)
+            .getDocuments { snapshot, error in
+
+                guard error == nil else {
+                    print("❌ Failed to fetch route for driver:", error?.localizedDescription ?? "")
+                    completion(nil)
+                    return
+                }
+
+                guard let doc = snapshot?.documents.first else {
+                    completion(nil)
+                    return
+                }
+
+                completion(Route(from: doc.data(), id: doc.documentID))
+            }
+    }
+
     // MARK: - Update Route Status
     func updateStatus(routeId: String, status: String) {
         db.collection("routes")

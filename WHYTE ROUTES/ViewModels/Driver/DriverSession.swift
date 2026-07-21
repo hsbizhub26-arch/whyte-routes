@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import CoreLocation
 
 @MainActor
@@ -11,13 +12,25 @@ final class DriverSession: ObservableObject {
     @Published var assignedRoute: Route?
     @Published var activeStops: [Stop] = []
 
-    private let routeRepo = FirestoreRouteRepository()
-    private let stopsRepo = FirestoreStopsRepository()
+    private let routeRepo = RouteRepository()
+    private let stopsRepo = StopsRepository()
 
     // MARK: Load driver after login
     func setDriver(_ driver: Driver) {
         self.driver = driver
         loadAssignedRoute()
+    }
+
+    // MARK: Refresh current driver's route/stops (called when the tab view appears)
+    func refresh() {
+        loadAssignedRoute()
+    }
+
+    // MARK: Log out (clears local driver session state)
+    func logout() {
+        driver = nil
+        assignedRoute = nil
+        activeStops = []
     }
 
     // MARK: Load assigned route
@@ -28,7 +41,20 @@ final class DriverSession: ObservableObject {
             Task { @MainActor in
                 self.assignedRoute = route
                 if let route = route {
-                    self.loadStops(routeId: route.id!)
+                    self.loadStops(routeId: route.id)
+                }
+            }
+        }
+    }
+
+    // MARK: Load a specific route by id (used to restore an active route on relaunch)
+    func loadAssignedRoute(routeId: String) async {
+        guard let id = driver?.id else { return }
+        routeRepo.fetchRouteForDriver(driverId: id) { route in
+            Task { @MainActor in
+                self.assignedRoute = route
+                if let route = route {
+                    self.loadStops(routeId: route.id)
                 }
             }
         }
@@ -49,7 +75,7 @@ final class DriverSession: ObservableObject {
 
         var updatedStops = activeStops
         if let index = updatedStops.firstIndex(where: { $0.id == stop.id }) {
-            updatedStops[index].completed = true
+            updatedStops[index].isCompleted = true
         }
 
         activeStops = updatedStops
@@ -58,7 +84,7 @@ final class DriverSession: ObservableObject {
 
     // MARK: Next stop
     var nextStop: Stop? {
-        activeStops.first { !$0.completed }
+        activeStops.first { !$0.isCompleted }
     }
 }
 

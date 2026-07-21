@@ -11,7 +11,7 @@ struct DriverDashboardView: View {
     }
 
     var completedCount: Int {
-        session.activeStops.filter { $0.completed }.count
+        session.activeStops.filter { $0.isCompleted }.count
     }
 
     var totalStops: Int {

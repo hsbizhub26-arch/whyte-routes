@@ -8,7 +8,6 @@ struct OwnerLoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var error = ""
-    @State private var goHome = false
 
     @State private var isSecure = true
     @State private var isLoading = false
@@ -65,9 +64,6 @@ struct OwnerLoginView: View {
                     .padding(.vertical, 24)
                 }
             }
-        }
-        .fullScreenCover(isPresented: $goHome) {
-            DashboardPlaceholderView()
         }
         .onAppear {
             if let saved = getRememberedEmail() {
@@ -286,7 +282,6 @@ extension OwnerLoginView {
 
             do {
                 _ = try await Auth.auth().signIn(withEmail: email, password: password)
-                goHome = true
                 saveRememberedEmail(rememberMe ? email : nil)
             } catch let authError {
                 let nsError = authError as NSError
@@ -310,17 +305,5 @@ extension OwnerLoginView {
 
     func getRememberedEmail() -> String? {
         UserDefaults.standard.string(forKey: "WRRememberedEmail")
-    }
-}
-
-// MARK: - Placeholder Dashboard
-private struct DashboardPlaceholderView: View {
-    var body: some View {
-        ZStack {
-            WRTheme.gradient.ignoresSafeArea()
-            Text("Owner Dashboard")
-                .foregroundColor(WRTheme.gold)
-                .font(.largeTitle.bold())
-        }
     }
 }
