@@ -45,13 +45,16 @@ final class UserPermissionsService {
     /// used to migrate whitelist-based accounts into real Firestore records
     /// the first time they sign in. Never blocks local access: the caller
     /// grants access from the whitelist check regardless of whether this
-    /// write succeeds.
-    func createIfNeeded(uid: String, email: String, role: UserRole, subscription: String, isAdmin: Bool) async {
+    /// write succeeds. Returns whether the document is confirmed to exist
+    /// in Firestore (already there, or just created) so the caller can
+    /// surface a real warning instead of failing silently.
+    @discardableResult
+    func createIfNeeded(uid: String, email: String, role: UserRole, subscription: String, isAdmin: Bool) async -> Bool {
         let docRef = db.collection("users").document(uid)
 
         do {
             let existing = try await docRef.getDocument()
-            if existing.exists { return }
+            if existing.exists { return true }
 
             let data: [String: Any] = [
                 "uid": uid,
@@ -63,8 +66,10 @@ final class UserPermissionsService {
 
             try await docRef.setData(data)
             print("✅ Created users/\(uid) permissions document for \(email)")
+            return true
         } catch {
             print("⚠️ Failed to create users/\(uid) permissions document: \(error.localizedDescription)")
+            return false
         }
     }
 }

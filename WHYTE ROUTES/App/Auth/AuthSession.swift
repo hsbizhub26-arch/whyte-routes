@@ -11,6 +11,13 @@ final class AuthSession: ObservableObject {
     @Published var role: UserRole = .none
     @Published var isLoading: Bool = true
 
+    /// True if this account's owner access is only active locally because
+    /// the Firestore users/{uid} permissions document couldn't be read or
+    /// written (most commonly: Firestore security rules blocking the write).
+    /// Access still works via the whitelist fallback - this just means it
+    /// isn't persisted server-side yet.
+    @Published var permissionsSyncFailed: Bool = false
+
     private var authListener: AuthStateDidChangeListenerHandle?
 
     private init() {}
@@ -40,6 +47,7 @@ final class AuthSession: ObservableObject {
                 //    truth for role + subscription.
                 if let permissions = await UserPermissionsService.shared.fetch(uid: user.uid) {
                     self.role = permissions.role
+                    self.permissionsSyncFailed = false
 
                     if permissions.subscription == "premiumPlus" {
                         AppEntitlements.shared.setPremiumPlus(unlocked: true, source: EntitlementSource.whitelist.rawValue)
@@ -55,13 +63,14 @@ final class AuthSession: ObservableObject {
                     self.role = .owner
                     AppEntitlements.shared.setPremiumPlus(unlocked: true, source: EntitlementSource.whitelist.rawValue)
 
-                    await UserPermissionsService.shared.createIfNeeded(
+                    let persisted = await UserPermissionsService.shared.createIfNeeded(
                         uid: user.uid,
                         email: user.email ?? "",
                         role: .owner,
                         subscription: "premiumPlus",
                         isAdmin: true
                     )
+                    self.permissionsSyncFailed = !persisted
 
                 } else {
                     self.role = .driver
