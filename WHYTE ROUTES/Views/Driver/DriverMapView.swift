@@ -65,9 +65,9 @@ struct DriverMapView: View {
     private var mapLayer: some View {
         Map(coordinateRegion: $vm.region,
             showsUserLocation: true,
-            annotationItems: vm.stops
+            annotationItems: vm.stops.filter { $0.coordinate != nil }
         ) { stop in
-            MapAnnotation(coordinate: stop.coordinate) {
+            MapAnnotation(coordinate: stop.coordinate!) {
                 VStack(spacing: 2) {
                     Circle()
                         .fill(stop.isCompleted ? .green : Color("WRThemeGold"))

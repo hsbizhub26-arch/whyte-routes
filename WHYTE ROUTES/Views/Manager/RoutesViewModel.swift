@@ -1,11 +1,12 @@
 import Foundation
+import Combine
 
 @MainActor
 final class RoutesViewModel: ObservableObject {
 
     @Published var routes: [Route] = []
 
-    private let repo = FirestoreRouteRepository()
+    private let repo = RouteRepository()
 
     init() {
         load()

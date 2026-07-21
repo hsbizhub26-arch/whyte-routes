@@ -70,12 +70,11 @@ final class DeleteAccountManager: ObservableObject {
 
     private func handleDeletionError(_ error: Error) {
         let nsError = error as NSError
-        if nsError.domain == AuthErrorDomain {
-            let authError = AuthErrorCode(_nsError: nsError)
-            if authError.code == .requiresRecentLogin {
-                self.errorMessage = "Please sign in again to delete your account."
-                return
-            }
+        if nsError.domain == AuthErrorDomain,
+           let authError = AuthErrorCode(_bridgedNSError: nsError),
+           authError == .requiresRecentLogin {
+            self.errorMessage = "Please sign in again to delete your account."
+            return
         }
         self.errorMessage = Self.friendlyErrorMessage(from: error)
     }
@@ -93,9 +92,9 @@ final class DeleteAccountManager: ObservableObject {
 
     private static func friendlyErrorMessage(from error: Error) -> String {
         let nsError = error as NSError
-        if nsError.domain == AuthErrorDomain {
-            let authError = AuthErrorCode(_nsError: nsError)
-            switch authError.code {
+        if nsError.domain == AuthErrorDomain,
+           let authError = AuthErrorCode(_bridgedNSError: nsError) {
+            switch authError {
             case .networkError:
                 return "Network error occurred. Please check your connection."
             case .userDisabled:

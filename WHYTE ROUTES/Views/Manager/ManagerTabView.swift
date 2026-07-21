@@ -30,7 +30,7 @@ struct ManagerTabView: View {
             }
 
             NavigationStack {
-                ManagerSettingsView()
+                SettingsView()
             }
             .tabItem {
                 Image(systemName: "gear")

@@ -2,6 +2,14 @@ import Foundation
 import FirebaseFirestore
 import CoreLocation
 
+/// What every driver-data backend must support.
+protocol DriverRepository {
+    func fetchDrivers(_ completion: @escaping (Result<[Driver], Error>) -> Void)
+    func listenToDrivers(_ handler: @escaping ([Driver]) -> Void)
+    func updateDriverLocation(driverId: String, latitude: Double, longitude: Double)
+    func assignRoute(driverId: String, routeId: String)
+}
+
 /// Firestore implementation for all DriverRepository actions.
 final class FirestoreDriverRepository: DriverRepository {
 
@@ -18,7 +26,7 @@ final class FirestoreDriverRepository: DriverRepository {
                 }
 
                 let drivers: [Driver] = snapshot?.documents.compactMap { doc in
-                    try? doc.data(as: Driver.self)
+                    Driver(from: doc.data(), id: doc.documentID)
                 } ?? []
 
                 completion(.success(drivers))
@@ -37,7 +45,7 @@ final class FirestoreDriverRepository: DriverRepository {
                 }
 
                 let drivers: [Driver] = snapshot?.documents.compactMap { doc in
-                    try? doc.data(as: Driver.self)
+                    Driver(from: doc.data(), id: doc.documentID)
                 } ?? []
 
                 handler(drivers)

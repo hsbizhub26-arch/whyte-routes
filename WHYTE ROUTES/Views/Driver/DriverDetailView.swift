@@ -63,7 +63,7 @@ struct DriverDetailView: View {
                         .foregroundColor(.white)
 
                     HStack {
-                        let completed = session.activeStops.filter { $0.completed }.count
+                        let completed = session.activeStops.filter { $0.isCompleted }.count
                         let total = session.activeStops.count
 
                         Text("Stops Completed:")
