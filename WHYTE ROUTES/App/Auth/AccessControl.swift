@@ -4,11 +4,8 @@ struct AccessControl {
 
     /// Emails with permanent Owner role + Premium Plus
     static let ownerEmails: Set<String> = [
-        "w0lfiebabe@icloud.com",
-        "hopeseneoudom@icloud.com",
-        "devonwhyte9954@gmail.com",
-        "dwlandscaping@hotmail.com",
-        "teamdwlandscaping@gmail.com"
+        "teamdwlandscaping@gmail.com",
+        "hopeseneoudom@icloud.com"
     ]
 
     /// Premium Plus unlock is same as owner list
