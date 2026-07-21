@@ -289,6 +289,12 @@ extension OwnerLoginView {
                 goHome = true
                 saveRememberedEmail(rememberMe ? email : nil)
             } catch let authError {
+                let nsError = authError as NSError
+                print("⛔️ Sign-in failed: domain=\(nsError.domain) code=\(nsError.code)")
+                print("⛔️ userInfo=\(nsError.userInfo)")
+                if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+                    print("⛔️ underlying: domain=\(underlying.domain) code=\(underlying.code) userInfo=\(underlying.userInfo)")
+                }
                 self.error = authError.localizedDescription
             }
         }

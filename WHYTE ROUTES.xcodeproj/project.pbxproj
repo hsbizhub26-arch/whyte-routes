@@ -35,6 +35,7 @@
 				Entitlements/AppEntitlements.swift,
 				Resources/Assets.xcassets,
 				"Resources/GoogleService-Info.plist",
+				Resources/LaunchScreen.storyboard,
 				Resources/WhyteRoutes.storekit,
 				Views/Owner/OwnerLoginView.swift,
 				Views/Shared/GoldButton.swift,
