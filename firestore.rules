@@ -152,11 +152,27 @@ service cloud.firestore {
       // for why customer tracking does NOT read this collection.)
       match /drivers/{driverId} {
         allow read: if isCompanyMember(companyId);
-        allow create, delete: if isCompanyStaff(companyId);
-        // TODO(driver accounts): once driver login is tied to a real
-        // Firebase Auth UID, scope self-location-updates to
-        // isSignedIn() && request.auth.uid == driverId as well.
-        allow update: if isCompanyStaff(companyId);
+        // A driver's own record is created/updated by themselves on
+        // first sign-in and while working (name, GPS, shift status) -
+        // but only the ONE doc whose ID is their own uid, never any
+        // other driver's. Staff can manage any driver record.
+        allow create: if isCompanyStaff(companyId)
+                      || (isCompanyMember(companyId) && request.auth.uid == driverId);
+        allow update: if isCompanyStaff(companyId)
+                      || (isCompanyMember(companyId) && request.auth.uid == driverId);
+        allow delete: if isCompanyStaff(companyId);
+
+        // ── companies/{companyId}/drivers/{driverId}/shifts/{shiftId} ─
+        // Clock-in/clock-out records. A driver logs only their own
+        // (driverId's own uid must match the parent drivers/{driverId}
+        // doc they're nested under); staff can read for hours/payroll
+        // reporting but never edit a driver's own logged time.
+        match /shifts/{shiftId} {
+          allow read: if isCompanyStaff(companyId)
+                      || (isCompanyMember(companyId) && request.auth.uid == driverId);
+          allow create, update: if isCompanyMember(companyId) && request.auth.uid == driverId;
+          allow delete: if isCompanyStaff(companyId);
+        }
       }
 
       // ── companies/{companyId}/customers/{customerId} ─────
@@ -178,6 +194,16 @@ service cloud.firestore {
         match /stops/{stopId} {
           allow read: if isCompanyMember(companyId);
           allow write: if isCompanyMember(companyId); // TODO(driver accounts): see above
+
+          // ── .../stops/{stopId}/photos/{photoId} ─────────
+          // Proof-of-work photo metadata (the actual image lives in
+          // Firebase Storage - see storage.rules). Any company member
+          // can add one (drivers uploading); only staff edit/delete.
+          match /photos/{photoId} {
+            allow read: if isCompanyMember(companyId);
+            allow create: if isCompanyMember(companyId);
+            allow update, delete: if isCompanyStaff(companyId);
+          }
         }
       }
 

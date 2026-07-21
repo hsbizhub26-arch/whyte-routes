@@ -1,10 +1,21 @@
 import SwiftUI
 import MapKit
+import Combine
 
 struct DriverDashboardView: View {
 
     @ObservedObject var session = DriverSession.shared
     @ObservedObject var nextController = DriverNextStopController.shared
+
+    @State private var now = Date()
+    @State private var isTogglingShift = false
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var elapsedShiftText: String {
+        guard let startedAt = session.activeShift?.startedAt else { return "0:00:00" }
+        let seconds = max(0, Int(now.timeIntervalSince(startedAt)))
+        return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+    }
 
     var nextStop: Stop? {
         nextController.nextStop
@@ -42,6 +53,11 @@ struct DriverDashboardView: View {
                     }
                     .padding(.horizontal)
                 }
+
+                Divider().overlay(Color("WRThemeGold"))
+
+                // MARK: - Shift Start/End
+                shiftControl
 
                 Divider().overlay(Color("WRThemeGold"))
 
@@ -131,7 +147,57 @@ struct DriverDashboardView: View {
             }
             .navigationTitle("")
             .navigationBarHidden(true)
+            .onReceive(clock) { now = $0 }
         }
+    }
+
+    // MARK: - Shift Control
+    private var shiftControl: some View {
+        VStack(spacing: 10) {
+            if let shift = session.activeShift, shift.isActive {
+                Text("On Shift")
+                    .font(.caption.bold())
+                    .foregroundColor(.green)
+
+                Text(elapsedShiftText)
+                    .font(.system(size: 34, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+
+                Button {
+                    isTogglingShift = true
+                    Task {
+                        await session.endShift()
+                        isTogglingShift = false
+                    }
+                } label: {
+                    Text(isTogglingShift ? "Ending…" : "End Shift")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.red.opacity(0.7))
+                        .foregroundColor(.white)
+                        .cornerRadius(14)
+                }
+                .disabled(isTogglingShift)
+            } else {
+                Button {
+                    isTogglingShift = true
+                    Task {
+                        await session.startShift()
+                        isTogglingShift = false
+                    }
+                } label: {
+                    Text(isTogglingShift ? "Starting…" : "Start Shift")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color("WRThemeGold"))
+                        .foregroundColor(.black)
+                        .fontWeight(.bold)
+                        .cornerRadius(14)
+                }
+                .disabled(isTogglingShift)
+            }
+        }
+        .padding(.horizontal)
     }
 }
 

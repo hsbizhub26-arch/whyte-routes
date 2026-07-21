@@ -26,11 +26,10 @@ final class DriverMapViewModel: ObservableObject {
         stops = session.activeStops
     }
 
-    // Live GPS updates via LocationService
+    // Observes whatever LocationService is already publishing - actual
+    // tracking start/stop is tied to the shift lifecycle (see
+    // DriverSession.startShift/endShift), not to this screen appearing.
     func startLocationUpdates() {
-        guard let driverId = session.driver?.id else { return }
-        LocationService.shared.startTracking(driverId: driverId, stopLat: nil, stopLng: nil)
-
         LocationService.shared.$currentLocation
             .compactMap { $0 }
             .receive(on: DispatchQueue.main)

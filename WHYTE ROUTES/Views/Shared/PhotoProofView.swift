@@ -9,9 +9,12 @@ struct PhotoProofView: View {
 
     @StateObject var uploader = PhotoUploader()
 
+    let companyId: String
+    let routeId: String
     let stopId: String
     let driverId: String
-    let type: String // "before" or "after"
+    let type: String // "before" or "after" or "completion"
+    var onUploaded: ((String) -> Void)? = nil
 
     var body: some View {
 
@@ -66,8 +69,9 @@ struct PhotoProofView: View {
         isUploading = true
 
         do {
-            let url = try await uploader.uploadPhoto(image: img, stopId: stopId, driverId: driverId, type: type)
+            let url = try await uploader.uploadPhoto(image: img, companyId: companyId, routeId: routeId, stopId: stopId, driverId: driverId, type: type)
             uploadMessage = "Uploaded ✓"
+            onUploaded?(url)
         } catch {
             uploadMessage = "Failed: \(error.localizedDescription)"
         }

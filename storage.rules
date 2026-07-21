@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Cross-service check against the same users/{uid} permissions
+    // doc Firestore rules use, so Storage access follows the exact
+    // same company-membership rule as everything else - no separate
+    // source of truth to keep in sync.
+    function myCompanyId() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.companyId;
+    }
+
+    // Photo proof-of-work: companies/{companyId}/photos/{driverId}/{stopId}/{fileName}
+    // Any signed-in member of the same company can read/write - staff
+    // reviewing proof, drivers uploading it. Never cross-company.
+    match /companies/{companyId}/photos/{allPaths=**} {
+      allow read, write: if isSignedIn() && myCompanyId() == companyId;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

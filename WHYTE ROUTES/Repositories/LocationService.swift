@@ -1,6 +1,5 @@
 import Foundation
 import CoreLocation
-import FirebaseFirestore
 import Combine
 
 @MainActor
@@ -9,7 +8,7 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     static let shared = LocationService()
 
     private let manager = CLLocationManager()
-    private let db = Firestore.firestore()
+    private let driverRepo = FirestoreDriverRepository()
 
     @Published var currentLocation: CLLocationCoordinate2D?
 
@@ -26,10 +25,11 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     // MARK: - Start Tracking
-    func startTracking(driverId: String, stopLat: Double?, stopLng: Double?) {
+    // Tied to the driver's shift lifecycle (see DriverSession.startShift) -
+    // GPS should only run while a driver is actually on shift, not just
+    // because a screen happened to appear.
+    func startTracking(driverId: String) {
         self.driverId = driverId
-        self.stopLat = stopLat
-        self.stopLng = stopLng
 
         requestPermissions()
         manager.startUpdatingLocation()
@@ -40,7 +40,19 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // MARK: - Stop Tracking
     func stopTracking() {
         manager.stopUpdatingLocation()
+        driverId = ""
+        stopLat = nil
+        stopLng = nil
         print("🛑 Location tracking stopped")
+    }
+
+    // MARK: - Arrival Detection Target
+    // Set/cleared independently of start/stop tracking so opening a
+    // specific stop doesn't restart the location manager - it just
+    // tells an already-running tracker what "arrived" means right now.
+    func setArrivalTarget(lat: Double?, lng: Double?) {
+        self.stopLat = lat
+        self.stopLng = lng
     }
 
     // MARK: - Location Permission Handler
@@ -63,14 +75,12 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
 
         currentLocation = location.coordinate
 
-        // Save to Firestore using correct fields for your Driver model
-        db.collection("drivers")
-            .document(driverId)
-            .updateData([
-                "latitude": location.coordinate.latitude,
-                "longitude": location.coordinate.longitude,
-                "lastUpdated": Timestamp(date: Date())
-            ])
+        guard !driverId.isEmpty else { return }
+        driverRepo.updateDriverLocation(
+            driverId: driverId,
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude
+        )
 
         detectArrival(at: location.coordinate)
     }

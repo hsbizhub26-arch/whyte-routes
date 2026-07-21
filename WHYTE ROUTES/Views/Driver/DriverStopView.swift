@@ -33,6 +33,8 @@ struct DriverStopView: View {
 
     @StateObject private var vm: DriverStopViewModel
     @ObservedObject private var session = DriverSession.shared
+    @State private var showPhotoCapture = false
+    @State private var proofPhotoURL: String?
 
     init(stop: Stop) {
         _vm = StateObject(wrappedValue: DriverStopViewModel(stop: stop))
@@ -49,6 +51,7 @@ struct DriverStopView: View {
                     mapSection
                     actionButtons
                     smsButton
+                    photoProofButton
                     completeButton
 
                     Spacer(minLength: 40)
@@ -56,15 +59,29 @@ struct DriverStopView: View {
                 .padding()
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            if let driverId = session.driver?.id {
-                LocationService.shared.startTracking(
+        .sheet(isPresented: $showPhotoCapture) {
+            if let companyId = CompanySession.shared.currentCompanyId,
+               let routeId = vm.route?.id,
+               let driverId = session.driver?.id {
+                PhotoProofView(
+                    companyId: companyId,
+                    routeId: routeId,
+                    stopId: vm.stop.id,
                     driverId: driverId,
-                    stopLat: vm.stop.latitude,
-                    stopLng: vm.stop.longitude
+                    type: "completion",
+                    onUploaded: { url in
+                        proofPhotoURL = url
+                        showPhotoCapture = false
+                    }
                 )
             }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // GPS tracking itself is tied to the shift lifecycle (see
+            // DriverSession.startShift/endShift) - this just tells the
+            // already-running tracker what "arrived" means for this stop.
+            LocationService.shared.setArrivalTarget(lat: vm.stop.latitude, lng: vm.stop.longitude)
         }
     }
 }
@@ -121,6 +138,29 @@ extension DriverStopView {
                           phone: phone,
                           link: "https://whyteroutes.app/tracking/\(vm.stop.id)")
             }
+        }
+    }
+
+    // MARK: PHOTO PROOF (optional - not required to complete, but
+    // encouraged for dispute resolution / proof of work)
+    private var photoProofButton: some View {
+        Button {
+            showPhotoCapture = true
+        } label: {
+            HStack {
+                Image(systemName: proofPhotoURL != nil ? "checkmark.circle.fill" : "camera.fill")
+                Text(proofPhotoURL != nil ? "Photo Added" : "Add Photo Proof")
+            }
+            .font(.headline)
+            .foregroundColor(proofPhotoURL != nil ? .green : .white)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.black.opacity(0.25))
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color("WRThemeGold"), lineWidth: 1)
+            )
         }
     }
 

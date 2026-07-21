@@ -214,15 +214,54 @@ final class AuthSession: ObservableObject {
                 print("⚠️ CompanySession: companyId \(companyId) is set on the user but the company document couldn't be read (missing, or Firestore rules blocked it)")
             }
 
+            if companyRole == "driver" {
+                await bridgeDriverSession(companyId: companyId)
+                return .driver
+            }
+
             switch companyRole {
             case "manager": return .manager
-            case "driver": return .driver
             default: return .owner // "owner" or unrecognized - safest default within a company context
             }
         }
 
         CompanySession.shared.clear()
         return platformAdmin ? .owner : fallbackRole
+    }
+
+    /// Populates DriverSession.shared.driver from this account's own
+    /// companies/{companyId}/drivers/{uid} record, creating it on
+    /// first sign-in if it doesn't exist yet. The doc ID is always
+    /// this account's own Firebase Auth uid (never an owner-chosen
+    /// ID) so the Firestore rule allowing a driver to write only
+    /// their own record has something stable to check against.
+    /// Without this bridge, DriverTabView/DriverDashboardView have no
+    /// way to know which driver just signed in.
+    private func bridgeDriverSession(companyId: String) async {
+        guard let uid = user?.uid else { return }
+        let repo = FirestoreDriverRepository()
+
+        if let existing = await repo.fetchDriver(uid: uid) {
+            DriverSession.shared.setDriver(existing)
+            return
+        }
+
+        let name = (user?.displayName?.isEmpty == false ? user?.displayName : nil)
+            ?? user?.email
+            ?? "New Driver"
+
+        let newDriver = Driver(
+            id: uid,
+            name: name,
+            phone: user?.phoneNumber,
+            vehicle: ""
+        )
+
+        if let created = await repo.createDriver(newDriver) {
+            DriverSession.shared.setDriver(created)
+        } else {
+            print("⚠️ Could not create driver record for uid \(uid) in company \(companyId) - likely rules not yet updated to allow driver self-create (see firestore.rules.v4)")
+        }
     }
 
     private func applySubscription(_ subscription: String) {

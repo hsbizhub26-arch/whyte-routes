@@ -1,9 +1,10 @@
 import SwiftUI
-import FirebaseFirestore
 
 struct ManagerDriversView: View {
 
     @State private var drivers: [Driver] = []
+
+    private let driverRepo = FirestoreDriverRepository()
 
     var body: some View {
         List(drivers) { driver in
@@ -21,13 +22,9 @@ struct ManagerDriversView: View {
     }
 
     func loadDrivers() {
-        Firestore.firestore()
-            .collection("drivers")
-            .whereField("fleetId", isEqualTo: "FLEET123")
-            .addSnapshotListener { snapshot, _ in
-                guard let docs = snapshot?.documents else { return }
-                drivers = docs.compactMap { Driver(from: $0.data(), id: $0.documentID) }
-            }
+        driverRepo.listenToDrivers { fetched in
+            drivers = fetched
+        }
     }
 }
 

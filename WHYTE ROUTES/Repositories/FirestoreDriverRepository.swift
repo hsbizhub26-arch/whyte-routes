@@ -25,6 +25,37 @@ final class FirestoreDriverRepository: DriverRepository {
         return db.collection("companies").document(companyId).collection("drivers")
     }
 
+    // MARK: - Fetch/Create the Signed-In Driver's Own Record
+    // Used once, right after a real Firebase Auth sign-in resolves to
+    // companyRole == "driver", to bridge into DriverSession. The
+    // driver's own Firestore doc ID IS their Firebase Auth UID (not an
+    // arbitrary ID an owner picks), matching the Firestore rule that
+    // lets a driver create/update only the one doc whose ID is their
+    // own uid.
+    func fetchDriver(uid: String) async -> Driver? {
+        guard let driversRef else { return nil }
+        do {
+            let snapshot = try await driversRef.document(uid).getDocument()
+            guard let data = snapshot.data() else { return nil }
+            return Driver(from: data, id: uid)
+        } catch {
+            print("⚠️ FirestoreDriverRepository.fetchDriver(\(uid)) failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    @discardableResult
+    func createDriver(_ driver: Driver) async -> Driver? {
+        guard let driversRef else { return nil }
+        do {
+            try await driversRef.document(driver.id).setData(driver.toDict())
+            return driver
+        } catch {
+            print("⚠️ FirestoreDriverRepository.createDriver(\(driver.id)) failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Fetch Drivers Once
     func fetchDrivers(_ completion: @escaping (Result<[Driver], Error>) -> Void) {
         guard let driversRef else { completion(.success([])); return }
@@ -84,6 +115,8 @@ final class FirestoreDriverRepository: DriverRepository {
     }
 
     // MARK: - Update Live GPS
+    // Field name must be "lastUpdated" - that's what Driver.init(from:)
+    // actually decodes (see Models/Driver.swift), not "updatedAt".
     func updateDriverLocation(driverId: String,
                               latitude: Double,
                               longitude: Double) {
@@ -93,16 +126,18 @@ final class FirestoreDriverRepository: DriverRepository {
             .updateData([
                 "latitude": latitude,
                 "longitude": longitude,
-                "updatedAt": FieldValue.serverTimestamp()
+                "lastUpdated": FieldValue.serverTimestamp()
             ])
     }
 
     // MARK: - Assign Driver to a Route
+    // Field name must match Driver.activeRoute (see Models/Driver.swift) -
+    // that's what DriverTabView/ManagerDriversView actually read.
     func assignRoute(driverId: String, routeId: String) {
         driversRef?
             .document(driverId)
             .updateData([
-                "assignedRouteId": routeId,
+                "activeRoute": routeId,
                 "updatedAt": FieldValue.serverTimestamp()
             ])
     }
