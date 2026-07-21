@@ -5,7 +5,17 @@ final class TrackingLinkRepository {
 
     private let db = Firestore.firestore()
 
-    // MARK: - Create Tracking Link
+    /// Tracking links for a specific company - explicit companyId
+    /// parameter (not read from CompanySession) because listenTo is
+    /// called from the unauthenticated customer tracking screen, which
+    /// has no signed-in session and therefore no CompanySession state.
+    /// Staff-only methods (create/deactivate) use the signed-in user's
+    /// current company instead.
+    private func trackingLinksRef(companyId: String) -> CollectionReference {
+        db.collection("companies").document(companyId).collection("trackingLinks")
+    }
+
+    // MARK: - Create Tracking Link (staff, authenticated)
     func create(
         customerName: String,
         address: String,
@@ -13,8 +23,13 @@ final class TrackingLinkRepository {
         stopId: String,
         completion: @escaping (TrackingLink?) -> Void
     ) {
+        guard let companyId = CompanySession.shared.currentCompanyId else {
+            print("⚠️ TrackingLinkRepository: no current company set - cannot create link")
+            completion(nil)
+            return
+        }
 
-        let doc = db.collection("trackingLinks").document()
+        let doc = trackingLinksRef(companyId: companyId).document()
 
         let data: [String: Any] = [
             "customerName": customerName,
@@ -36,7 +51,7 @@ final class TrackingLinkRepository {
             doc.getDocument { snap, _ in
                 guard let snap = snap,
                       let fullData = snap.data(),
-                      let link = TrackingLink(from: fullData, id: snap.documentID)
+                      let link = TrackingLink(from: fullData, id: snap.documentID, companyId: companyId)
                 else {
                     completion(nil)
                     return
@@ -47,9 +62,14 @@ final class TrackingLinkRepository {
         }
     }
 
-    // MARK: - Deactivate Link
+    // MARK: - Deactivate Link (staff, authenticated)
     func deactivate(id: String) {
-        db.collection("trackingLinks")
+        guard let companyId = CompanySession.shared.currentCompanyId else {
+            print("⚠️ TrackingLinkRepository: no current company set - cannot deactivate link")
+            return
+        }
+
+        trackingLinksRef(companyId: companyId)
             .document(id)
             .updateData([
                 "active": false,
@@ -58,9 +78,9 @@ final class TrackingLinkRepository {
             ])
     }
 
-    // MARK: - Listen to a Tracking Link (Customer Tracking View)
-    func listenTo(linkId: String, handler: @escaping (TrackingLink?) -> Void) {
-        db.collection("trackingLinks")
+    // MARK: - Listen to a Tracking Link (unauthenticated Customer Tracking View)
+    func listenTo(companyId: String, linkId: String, handler: @escaping (TrackingLink?) -> Void) {
+        trackingLinksRef(companyId: companyId)
             .document(linkId)
             .addSnapshotListener { snap, error in
 
@@ -75,7 +95,7 @@ final class TrackingLinkRepository {
                     return
                 }
 
-                handler(TrackingLink(from: data, id: snap.documentID))
+                handler(TrackingLink(from: data, id: snap.documentID, companyId: companyId))
             }
     }
 }

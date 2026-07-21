@@ -9,10 +9,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // The only two accounts allowed to ever hold role "owner".
-    // Enforced here (not just in app code) so nobody can grant
-    // themselves owner/admin by writing to Firestore directly.
-    function isOwnerUID(uid) {
+    // Platform Owners of WHYTE ROUTES itself. Enforced here (not just
+    // in app code) so nobody can grant themselves platform access by
+    // writing to Firestore directly. Deliberately a small, fixed list -
+    // company-level roles are all data-driven (see below), only this
+    // platform tier is hardcoded.
+    function isPlatformAdminUID(uid) {
       return uid in [
         'x5cxMZN5TKTXcIwrVMAPmQJOp3R2', // teamdwlandscaping@gmail.com
         'bMeTRuhikKVlCU6rE8QFBp0TXAz1'  // hopeseneoudom@icloud.com
@@ -23,139 +25,181 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    function isOwner() {
-      return isSignedIn() && myPermissions().role == 'owner';
+    // True if the *requesting* user's own permissions doc has
+    // platformAdmin == true (i.e. they're a real, provisioned platform
+    // admin - distinct from isPlatformAdminUID, which is only used to
+    // bootstrap that first document).
+    function isPlatformAdmin() {
+      return isSignedIn() && myPermissions().platformAdmin == true;
     }
 
-    function isManager() {
-      return isSignedIn() && myPermissions().role == 'manager';
+    function myCompanyId() {
+      return myPermissions().companyId;
     }
 
-    function isOwnerOrManager() {
-      return isOwner() || isManager();
+    function myCompanyRole() {
+      return myPermissions().companyRole;
     }
 
-    // ── users/{uid} — role + subscription permissions ──────────
+    // Signed in, belongs to companyId, and holds companyRole owner or manager.
+    function isCompanyStaff(companyId) {
+      return isSignedIn() && myCompanyId() == companyId
+        && (myCompanyRole() == 'owner' || myCompanyRole() == 'manager');
+    }
+
+    // Any signed-in member of this company at all (owner/manager/driver).
+    function isCompanyMember(companyId) {
+      return isSignedIn() && myCompanyId() == companyId;
+    }
+
+    function canAccessCompany(companyId) {
+      return isPlatformAdmin() || isCompanyMember(companyId);
+    }
+
+    // ── users/{uid} — role + company membership + subscription ─────
     // Every signed-in user may read/create only their own document.
-    // Creating with role "owner" is only allowed for the two
-    // whitelisted UIDs above; everyone else is blocked from ever
-    // setting role to "owner" or isAdmin to true.
+    // Creating with platformAdmin: true is only allowed for the two
+    // platform-owner UIDs; everyone else is blocked from ever setting
+    // platformAdmin, isAdmin, or role "owner" on themselves. Regular
+    // users may not set their own companyId/companyRole either -
+    // company membership is assigned by a platform admin or that
+    // company's owner (see update rule), never claimed by self-create,
+    // so nobody can invent membership in a company they don't belong to.
     //
-    // Updates: an Owner account may update ANY user's document
-    // (e.g. managing roles/subscriptions from a future admin
-    // screen). Everyone else may only update their own document,
-    // and may not touch role, isAdmin, or subscription themselves -
-    // those three fields can only ever be changed by an Owner.
+    // Updates: a platform admin may update any user's document. A
+    // company's owner may update company membership fields for users
+    // within their own company (adding/removing employees). Everyone
+    // else may only update their own document, and never role,
+    // isAdmin, platformAdmin, subscription, companyId, or companyRole.
 
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId;
 
       allow create: if isSignedIn() && request.auth.uid == userId
                     && (
-                         (isOwnerUID(userId)
+                         (isPlatformAdminUID(userId)
                            && request.resource.data.role == 'owner'
-                           && request.resource.data.isAdmin == true)
+                           && request.resource.data.isAdmin == true
+                           && request.resource.data.platformAdmin == true)
                          ||
-                         (!isOwnerUID(userId)
+                         (!isPlatformAdminUID(userId)
                            && request.resource.data.role != 'owner'
-                           && request.resource.data.isAdmin == false)
+                           && request.resource.data.isAdmin == false
+                           && (!('platformAdmin' in request.resource.data) || request.resource.data.platformAdmin == false)
+                           && !('companyId' in request.resource.data)
+                           && !('companyRole' in request.resource.data))
                        );
 
       allow update: if isSignedIn() && (
-                         isOwner()
+                         isPlatformAdmin()
                          ||
+                         // Company owner managing one of their own
+                         // employees' membership/role within the company.
+                         (resource.data.companyId is string
+                           && isCompanyStaff(resource.data.companyId)
+                           && myCompanyRole() == 'owner'
+                           && request.resource.data.role == resource.data.role
+                           && request.resource.data.isAdmin == resource.data.isAdmin
+                           && request.resource.data.platformAdmin == resource.data.platformAdmin
+                           && request.resource.data.subscription == resource.data.subscription)
+                         ||
+                         // Self-update: everything except the
+                         // privileged/membership fields, which are frozen.
                          (request.auth.uid == userId
                            && request.resource.data.role == resource.data.role
                            && request.resource.data.isAdmin == resource.data.isAdmin
-                           && request.resource.data.subscription == resource.data.subscription)
+                           && request.resource.data.platformAdmin == resource.data.platformAdmin
+                           && request.resource.data.subscription == resource.data.subscription
+                           && request.resource.data.companyId == resource.data.companyId
+                           && request.resource.data.companyRole == resource.data.companyRole)
                        );
     }
 
-    // ── drivers/{driverId} ───────────────────────────────────
-    // Contains PII (name, phone) alongside location, so this is
-    // NOT publicly readable - authenticated staff only, full stop.
-    // Public tracking data lives under trackingLinks/{linkId}/location
-    // instead (see below), which carries a position only, never a
-    // driver's name or phone number.
+    // ── companies/{companyId} ────────────────────────────────
+    // Any member of a company can read their own company's record
+    // (so the app can show plan/tier info); platform admins can read
+    // any company. Creating/editing companies (onboarding, changing
+    // subscription tier/status) is a platform-admin action for now -
+    // TODO(self-serve signup / Phase 6): allow a company's own owner
+    // to update their non-billing fields (e.g. name) once a self-serve
+    // onboarding flow exists.
 
-    match /drivers/{driverId} {
-      allow read: if isSignedIn();
-      allow create, delete: if isOwnerOrManager();
-      // Driver-self location updates aren't tied to a Firebase Auth
-      // UID yet (driver login is phone/code-based, not an account) -
-      // until that link exists, writes are Owner/Manager only. This
-      // is the one place to revisit once drivers get real accounts.
-      allow update: if isOwnerOrManager();
-    }
+    match /companies/{companyId} {
+      allow read: if canAccessCompany(companyId);
+      allow create, update, delete: if isPlatformAdmin();
 
-    // ── routes/{routeId} and stops subcollection ────────────
-    // Route documents (assignment, status, customer-adjacent data)
-    // are Owner/Manager only.
-    //
-    // TODO(driver accounts): stop writes are scoped to any signed-in
-    // user for now because driver login isn't tied to a Firebase Auth
-    // UID yet (it's phone/code-based). Once drivers have real Auth
-    // accounts, replace `allow write: if isSignedIn();` below with
-    // something like:
-    //   allow write: if isOwnerOrManager()
-    //     || (isSignedIn() && resource.data.driverId == request.auth.uid);
-    // so only the driver actually assigned to a stop (or staff) can
-    // update it.
-
-    match /routes/{routeId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isOwnerOrManager();
-
-      match /stops/{stopId} {
-        allow read: if isSignedIn();
-        allow write: if isSignedIn(); // TODO(driver accounts): see above
+      // ── companies/{companyId}/drivers/{driverId} ─────────
+      // Contains PII (name, phone) alongside location - authenticated
+      // company staff only, never public. (See CustomerTrackingView.swift
+      // for why customer tracking does NOT read this collection.)
+      match /drivers/{driverId} {
+        allow read: if isCompanyMember(companyId);
+        allow create, delete: if isCompanyStaff(companyId);
+        // TODO(driver accounts): once driver login is tied to a real
+        // Firebase Auth UID, scope self-location-updates to
+        // isSignedIn() && request.auth.uid == driverId as well.
+        allow update: if isCompanyStaff(companyId);
       }
-    }
 
-    // ── customers/{customerId} ───────────────────────────────
-    // Customer PII (name, address). Customers never sign in to this
-    // app themselves (they use tracking links) - so only staff need
-    // access at all.
+      // ── companies/{companyId}/customers/{customerId} ─────
+      // Customer PII - staff only. Customers never sign in themselves.
+      match /customers/{customerId} {
+        allow read, write: if isCompanyStaff(companyId);
+      }
 
-    match /customers/{customerId} {
-      allow read, write: if isOwnerOrManager();
-    }
+      // ── companies/{companyId}/routes/{routeId} + stops ───
+      match /routes/{routeId} {
+        allow read: if isCompanyMember(companyId);
+        allow create, update, delete: if isCompanyStaff(companyId);
 
-    // ── trackingLinks/{linkId} ────────────────────────────────
-    // The core of unauthenticated customer tracking: a customer who
-    // taps their texted link needs to read this one specific
-    // document with no login. `get` by known ID is public; `list`
-    // (enumerating every active link) is not. Writes (creating /
-    // deactivating a link) require sign-in.
+        // TODO(driver accounts): stop writes are scoped to any
+        // signed-in company member for now, because driver login isn't
+        // tied to a Firebase Auth UID yet. Once it is, replace with:
+        //   allow write: if isCompanyStaff(companyId)
+        //     || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
+        match /stops/{stopId} {
+          allow read: if isCompanyMember(companyId);
+          allow write: if isCompanyMember(companyId); // TODO(driver accounts): see above
+        }
+      }
 
-    match /trackingLinks/{linkId} {
-      allow get: if true;
-      allow list: if isSignedIn();
-      allow create, update: if isSignedIn();
-      allow delete: if isOwnerOrManager();
-
-      // Public-safe live position for the customer tracking view -
-      // a location only, never the driver's name/phone. Staff/system
-      // write it; anyone with the link can read it. (App-side: this
-      // path isn't populated yet - writing to it is a small follow-up
-      // change, not yet built.)
-      match /location/{locId} {
+      // ── companies/{companyId}/trackingLinks/{linkId} ─────
+      // The core of unauthenticated customer tracking: a customer who
+      // taps their texted link needs to read this one specific
+      // document with no login. `get` by known ID is public; `list`
+      // is not. Writes require company staff.
+      match /trackingLinks/{linkId} {
         allow get: if true;
-        allow write: if isSignedIn();
+        allow list: if isCompanyMember(companyId);
+        allow create, update: if isCompanyMember(companyId);
+        allow delete: if isCompanyStaff(companyId);
+
+        // Public-safe live position for the customer tracking view -
+        // a location only, never the driver's name/phone. Staff/system
+        // write it; anyone with the link can read it. (App-side: this
+        // path isn't populated yet - see the TODO in CustomerTrackingView.swift.)
+        match /location/{locId} {
+          allow get: if true;
+          allow write: if isCompanyMember(companyId);
+        }
+      }
+
+      // ── companies/{companyId}/driverReports/{driverId}/reports/{reportId} ─
+      // End-of-shift reports. Any signed-in company member can submit
+      // one (same driver-identity caveat as stops above); only staff
+      // can read the roll-up or edit/delete after submission.
+      match /driverReports/{driverId}/reports/{reportId} {
+        allow read: if isCompanyStaff(companyId);
+        allow create: if isCompanyMember(companyId);
+        allow update, delete: if isCompanyStaff(companyId);
       }
     }
 
-    // ── driverReports/{driverId}/reports/{reportId} ─────────
-    // End-of-shift reports. Any signed-in user can submit one (same
-    // driver-identity caveat as above); only Owner/Manager can read
-    // the roll-up or edit/delete after submission, so a report can't
-    // be quietly altered once turned in.
-
-    match /driverReports/{driverId}/reports/{reportId} {
-      allow read: if isOwnerOrManager();
-      allow create: if isSignedIn();
-      allow update, delete: if isOwnerOrManager();
-    }
+    // Explicitly block cross-company collectionGroup queries - without
+    // this, a query like db.collectionGroup("drivers") could return
+    // every company's drivers at once even though single-document
+    // reads are properly scoped above. Firestore requires an explicit
+    // rule for collection-group access; omitting it here means denied.
 
     // ── entitlements/{uid} — legacy subscription sync ───────
     // Standard user-owns-their-own-document pattern.

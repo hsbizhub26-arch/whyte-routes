@@ -2,10 +2,28 @@ import Foundation
 import FirebaseFirestore
 
 /// A user's permissions as stored in Firestore at users/{uid}.
+///
+/// platformAdmin, companyId, and companyRole were added after role/
+/// subscription/isAdmin were already live in production - all three
+/// default safely when absent so existing documents keep working
+/// unchanged. A user can be a platformAdmin AND belong to a company
+/// (e.g. dogfooding your own platform as that company's owner) -
+/// company-level permissions always come through companyRole/companyId,
+/// never through platformAdmin.
 struct UserPermissionsDocument {
     var role: UserRole
     var subscription: String
     var isAdmin: Bool
+
+    /// True only for WHYTE ROUTES platform owners - manages all
+    /// companies, subscriptions, and platform-wide settings.
+    var platformAdmin: Bool
+
+    /// Which company (tenant) this user belongs to, if any.
+    var companyId: String?
+
+    /// This user's role within companyId: "owner" | "manager" | "driver".
+    var companyRole: String?
 }
 
 /// Reads/writes the users/{uid} permissions document that is the
@@ -30,7 +48,10 @@ final class UserPermissionsService {
             return UserPermissionsDocument(
                 role: role,
                 subscription: data["subscription"] as? String ?? "free",
-                isAdmin: data["isAdmin"] as? Bool ?? false
+                isAdmin: data["isAdmin"] as? Bool ?? false,
+                platformAdmin: data["platformAdmin"] as? Bool ?? false,
+                companyId: data["companyId"] as? String,
+                companyRole: data["companyRole"] as? String
             )
         } catch {
             // Missing document and read errors (offline, permission-denied)
@@ -49,20 +70,32 @@ final class UserPermissionsService {
     /// in Firestore (already there, or just created) so the caller can
     /// surface a real warning instead of failing silently.
     @discardableResult
-    func createIfNeeded(uid: String, email: String, role: UserRole, subscription: String, isAdmin: Bool) async -> Bool {
+    func createIfNeeded(
+        uid: String,
+        email: String,
+        role: UserRole,
+        subscription: String,
+        isAdmin: Bool,
+        platformAdmin: Bool = false,
+        companyId: String? = nil,
+        companyRole: String? = nil
+    ) async -> Bool {
         let docRef = db.collection("users").document(uid)
 
         do {
             let existing = try await docRef.getDocument()
             if existing.exists { return true }
 
-            let data: [String: Any] = [
+            var data: [String: Any] = [
                 "uid": uid,
                 "email": email,
                 "role": role.rawValue,
                 "subscription": subscription,
-                "isAdmin": isAdmin
+                "isAdmin": isAdmin,
+                "platformAdmin": platformAdmin
             ]
+            if let companyId { data["companyId"] = companyId }
+            if let companyRole { data["companyRole"] = companyRole }
 
             try await docRef.setData(data)
             print("✅ Created users/\(uid) permissions document for \(email)")
@@ -70,6 +103,19 @@ final class UserPermissionsService {
         } catch {
             print("⚠️ Failed to create users/\(uid) permissions document: \(error.localizedDescription)")
             return false
+        }
+    }
+
+    /// Merges new field values into an existing document without
+    /// touching anything else already there - used to backfill
+    /// platformAdmin/companyId/companyRole onto documents that were
+    /// created before those fields existed.
+    func backfillIfMissing(uid: String, fields: [String: Any]) async {
+        let docRef = db.collection("users").document(uid)
+        do {
+            try await docRef.setData(fields, merge: true)
+        } catch {
+            print("⚠️ Failed to backfill users/\(uid): \(error.localizedDescription)")
         }
     }
 }

@@ -5,11 +5,21 @@ final class StopsRepository {
 
     private let db = Firestore.firestore()
 
+    /// A route's document reference within the current company. nil
+    /// (logged) if no company is set.
+    private func routeRef(_ routeId: String) -> DocumentReference? {
+        guard let companyId = CompanySession.shared.currentCompanyId else {
+            print("⚠️ StopsRepository: no current company set - cannot access stops")
+            return nil
+        }
+        return db.collection("companies").document(companyId).collection("routes").document(routeId)
+    }
+
     // MARK: - Load Stops (Subcollection)
     func loadStops(forRoute routeId: String, completion: @escaping ([Stop]) -> Void) {
+        guard let routeRef = routeRef(routeId) else { completion([]); return }
 
-        db.collection("routes")
-            .document(routeId)
+        routeRef
             .collection("stops")
             .order(by: "order")
             .addSnapshotListener { snapshot, error in
@@ -33,7 +43,7 @@ final class StopsRepository {
                    stops: [Stop],
                    completion: ((Bool) -> Void)? = nil) {
 
-        let routeRef = db.collection("routes").document(routeId)
+        guard let routeRef = routeRef(routeId) else { completion?(false); return }
         let batch = db.batch()
 
         for stop in stops {
@@ -57,10 +67,10 @@ final class StopsRepository {
                     stop: Stop,
                     completion: ((Bool) -> Void)? = nil) {
 
-        let stopRef = db.collection("routes")
-            .document(routeId)
-            .collection("stops")
-            .document(stop.id)
+        guard let stopRef = routeRef(routeId)?.collection("stops").document(stop.id) else {
+            completion?(false)
+            return
+        }
 
         stopRef.setData(stop.toDict()) { error in
             if let error = error {

@@ -4,6 +4,7 @@ import FirebaseFirestore
 struct TrackingLink: Identifiable {
 
     var id: String
+    var companyId: String
     var customerName: String
     var address: String
     var driverId: String
@@ -14,7 +15,7 @@ struct TrackingLink: Identifiable {
 
 extension TrackingLink {
 
-    init?(from dict: [String: Any], id: String) {
+    init?(from dict: [String: Any], id: String, companyId: String) {
         guard let customerName = dict["customerName"] as? String,
               let address = dict["address"] as? String,
               let driverId = dict["driverId"] as? String,
@@ -23,6 +24,7 @@ extension TrackingLink {
         }
 
         self.id = id
+        self.companyId = companyId
         self.customerName = customerName
         self.address = address
         self.driverId = driverId
@@ -52,8 +54,11 @@ extension TrackingLink {
         return d
     }
 
+    /// Encodes both the company and the link itself - a customer's
+    /// tracking view is unauthenticated, so the URL is the only thing
+    /// that tells it which company's subcollection to read from.
     var url: URL? {
-        URL(string: "https://whyteroutes.app/tracking/\(id)")
+        URL(string: "https://whyteroutes.app/tracking/\(companyId)/\(id)")
     }
 }
 

@@ -15,9 +15,21 @@ final class FirestoreDriverRepository: DriverRepository {
 
     private let db = Firestore.firestore()
 
+    /// Drivers always live under the signed-in user's current company.
+    /// nil (logged) if no company is set.
+    private var driversRef: CollectionReference? {
+        guard let companyId = CompanySession.shared.currentCompanyId else {
+            print("⚠️ FirestoreDriverRepository: no current company set - cannot access drivers")
+            return nil
+        }
+        return db.collection("companies").document(companyId).collection("drivers")
+    }
+
     // MARK: - Fetch Drivers Once
     func fetchDrivers(_ completion: @escaping (Result<[Driver], Error>) -> Void) {
-        db.collection("drivers")
+        guard let driversRef else { completion(.success([])); return }
+
+        driversRef
             .getDocuments { snapshot, error in
 
                 if let error = error {
@@ -33,9 +45,28 @@ final class FirestoreDriverRepository: DriverRepository {
             }
     }
 
+    // MARK: - Live-listen to a Single Driver by explicit company
+    // (unauthenticated customer tracking - there's no signed-in
+    // session/CompanySession here, the company comes from the
+    // tracking link's URL instead). A listener, not a one-time fetch,
+    // so the customer's map actually updates as the driver moves.
+    func listenToDriver(companyId: String, driverId: String, handler: @escaping (Driver?) -> Void) {
+        db.collection("companies").document(companyId).collection("drivers")
+            .document(driverId)
+            .addSnapshotListener { snapshot, error in
+                guard error == nil, let data = snapshot?.data() else {
+                    handler(nil)
+                    return
+                }
+                handler(Driver(from: data, id: driverId))
+            }
+    }
+
     // MARK: - Listen to All Drivers (real-time updates)
     func listenToDrivers(_ handler: @escaping ([Driver]) -> Void) {
-        db.collection("drivers")
+        guard let driversRef else { handler([]); return }
+
+        driversRef
             .addSnapshotListener { snapshot, error in
 
                 guard error == nil else {
@@ -57,7 +88,7 @@ final class FirestoreDriverRepository: DriverRepository {
                               latitude: Double,
                               longitude: Double) {
 
-        db.collection("drivers")
+        driversRef?
             .document(driverId)
             .updateData([
                 "latitude": latitude,
@@ -68,7 +99,7 @@ final class FirestoreDriverRepository: DriverRepository {
 
     // MARK: - Assign Driver to a Route
     func assignRoute(driverId: String, routeId: String) {
-        db.collection("drivers")
+        driversRef?
             .document(driverId)
             .updateData([
                 "assignedRouteId": routeId,

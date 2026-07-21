@@ -5,9 +5,22 @@ final class RouteRepository {
 
     private let db = Firestore.firestore()
 
+    /// Routes always live under the signed-in user's current company.
+    /// Returns nil (and logs) if no company is set - callers treat
+    /// that the same as "no results" rather than crashing.
+    private var routesRef: CollectionReference? {
+        guard let companyId = CompanySession.shared.currentCompanyId else {
+            print("⚠️ RouteRepository: no current company set - cannot access routes")
+            return nil
+        }
+        return db.collection("companies").document(companyId).collection("routes")
+    }
+
     // MARK: - Load All Routes (live updates)
     func listenToRoutes(_ handler: @escaping ([Route]) -> Void) {
-        db.collection("routes")
+        guard let routesRef else { handler([]); return }
+
+        routesRef
             .order(by: "createdAt", descending: false)
             .addSnapshotListener { snapshot, error in
 
@@ -27,7 +40,9 @@ final class RouteRepository {
 
     // MARK: - Load Once
     func fetchRoutes(completion: @escaping ([Route]) -> Void) {
-        db.collection("routes")
+        guard let routesRef else { completion([]); return }
+
+        routesRef
             .order(by: "createdAt", descending: false)
             .getDocuments { snapshot, error in
 
@@ -47,7 +62,9 @@ final class RouteRepository {
 
     // MARK: - Fetch Current Route for a Driver
     func fetchRouteForDriver(driverId: String, completion: @escaping (Route?) -> Void) {
-        db.collection("routes")
+        guard let routesRef else { completion(nil); return }
+
+        routesRef
             .whereField("driverId", isEqualTo: driverId)
             .whereField("status", isNotEqualTo: "completed")
             .limit(to: 1)
@@ -70,7 +87,7 @@ final class RouteRepository {
 
     // MARK: - Update Route Status
     func updateStatus(routeId: String, status: String) {
-        db.collection("routes")
+        routesRef?
             .document(routeId)
             .updateData([
                 "status": status,
@@ -80,7 +97,7 @@ final class RouteRepository {
 
     // MARK: - Assign Driver
     func assignDriver(routeId: String, driverId: String) {
-        db.collection("routes")
+        routesRef?
             .document(routeId)
             .updateData([
                 "driverId": driverId,
@@ -94,7 +111,7 @@ final class RouteRepository {
                      driverId: String? = nil,
                      completion: @escaping (String?) -> Void) {
 
-        let doc = db.collection("routes").document()
+        guard let doc = routesRef?.document() else { completion(nil); return }
 
         let data: [String: Any] = [
             "name": name,
