@@ -72,6 +72,9 @@ final class AuthSession: ObservableObject {
                                 uid: user.uid,
                                 fields: ["companyId": owned.id, "companyRole": "owner"]
                             )
+                            print("🏢 Backfilled company membership: \(owned.name) (\(owned.id)) as owner")
+                        } else {
+                            print("🏢 No owned company found for uid \(user.uid) - CompanySession stays empty")
                         }
                     }
 
@@ -119,19 +122,72 @@ final class AuthSession: ObservableObject {
                     self.permissionsSyncFailed = !persisted
 
                 } else {
-                    // No permissions document and not a platform admin -
-                    // no company assignment exists yet either. Safe,
-                    // low-privilege default until this account is added
-                    // to a company (see Phase 2/6 onboarding work).
+                    // No permissions document and not a platform admin.
+                    // Before defaulting to a company-less driver, check
+                    // whether this account's email or phone number
+                    // matches a pending invite - if so, this is their
+                    // first sign-in after being invited by a company
+                    // owner, and we attach them to that company now.
+                    // A driver can never grant themselves a company/role
+                    // this way: the invite had to already exist, created
+                    // by an owner, matched only by their own verified
+                    // sign-in identity (see the Firestore rule).
                     self.isPlatformAdmin = false
-                    self.role = .driver
-                    CompanySession.shared.clear()
+
+                    if let invite = await self.findUsableInvite(for: user) {
+                        await InviteRepository().consume(invite)
+
+                        self.role = await self.resolveRole(
+                            platformAdmin: false,
+                            companyId: invite.companyId,
+                            companyRole: invite.role,
+                            fallbackRole: .driver
+                        )
+
+                        let persisted = await UserPermissionsService.shared.createIfNeeded(
+                            uid: user.uid,
+                            email: user.email ?? "",
+                            role: .driver,
+                            subscription: "free",
+                            isAdmin: false,
+                            platformAdmin: false,
+                            companyId: invite.companyId,
+                            companyRole: invite.role
+                        )
+                        self.permissionsSyncFailed = !persisted
+                        self.applySubscription("free")
+
+                    } else {
+                        // Genuinely no invite waiting - safe,
+                        // low-privilege default until this account is
+                        // added to a company by an owner.
+                        self.role = .driver
+                        CompanySession.shared.clear()
+                    }
                 }
 
                 // 4. Restore saved entitlements
                 AppEntitlements.shared.restoreFromDefaults()
             }
         }
+    }
+
+    /// Checks for a pending, unexpired invite matching this user's
+    /// verified email or phone number. Tries email first (the only
+    /// method currently wired to a sign-in screen), then phone (ready
+    /// for when phone auth is added - no changes needed here then).
+    private func findUsableInvite(for user: User) async -> Invite? {
+        if let email = user.email, !email.isEmpty {
+            if let invite = await InviteRepository().lookupInvite(contactValue: email, method: "email") {
+                return invite
+            }
+        }
+        if let phone = user.phoneNumber, !phone.isEmpty {
+            if let invite = await InviteRepository().lookupInvite(contactValue: phone, method: "phone") {
+                return invite
+            }
+        }
+        return nil
     }
 
     /// Resolves the app's UserRole (which UI tree to show) from the
@@ -151,6 +207,12 @@ final class AuthSession: ObservableObject {
             let company = await CompanyRepository().fetch(companyId: companyId)
             CompanySession.shared.currentCompanyId = companyId
             CompanySession.shared.currentCompany = company
+
+            if let company {
+                print("🏢 CompanySession loaded: \(company.name) [\(company.subscriptionTier)/\(company.subscriptionStatus)] role=\(companyRole ?? "owner")")
+            } else {
+                print("⚠️ CompanySession: companyId \(companyId) is set on the user but the company document couldn't be read (missing, or Firestore rules blocked it)")
+            }
 
             switch companyRole {
             case "manager": return .manager

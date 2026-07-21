@@ -1,0 +1,278 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Platform Owners of WHYTE ROUTES itself. Enforced here (not just
+    // in app code) so nobody can grant themselves platform access by
+    // writing to Firestore directly. Deliberately a small, fixed list -
+    // company-level roles are all data-driven (see below), only this
+    // platform tier is hardcoded.
+    function isPlatformAdminUID(uid) {
+      return uid in [
+        'x5cxMZN5TKTXcIwrVMAPmQJOp3R2', // teamdwlandscaping@gmail.com
+        'bMeTRuhikKVlCU6rE8QFBp0TXAz1'  // hopeseneoudom@icloud.com
+      ];
+    }
+
+    function myPermissions() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // True if the *requesting* user's own permissions doc has
+    // platformAdmin == true (i.e. they're a real, provisioned platform
+    // admin - distinct from isPlatformAdminUID, which is only used to
+    // bootstrap that first document).
+    function isPlatformAdmin() {
+      return isSignedIn() && myPermissions().platformAdmin == true;
+    }
+
+    function myCompanyId() {
+      return myPermissions().companyId;
+    }
+
+    function myCompanyRole() {
+      return myPermissions().companyRole;
+    }
+
+    // Signed in, belongs to companyId, and holds companyRole owner or manager.
+    function isCompanyStaff(companyId) {
+      return isSignedIn() && myCompanyId() == companyId
+        && (myCompanyRole() == 'owner' || myCompanyRole() == 'manager');
+    }
+
+    // Any signed-in member of this company at all (owner/manager/driver).
+    function isCompanyMember(companyId) {
+      return isSignedIn() && myCompanyId() == companyId;
+    }
+
+    // Specifically the owner (not manager) of this company - used for
+    // owner-only actions like inviting/removing employees.
+    function isCompanyOwnerRole(companyId) {
+      return isCompanyMember(companyId) && myCompanyRole() == 'owner';
+    }
+
+    // True if the signed-in requester's own verified email or phone
+    // number (from their Firebase Auth token, not from Firestore data
+    // they could otherwise influence) matches this invite document's ID.
+    // Used so a person can only ever look up/accept the one invite that
+    // was actually sent to them - never anyone else's.
+    function isInviteRecipient(contactValue) {
+      return isSignedIn() && (
+        (('email' in request.auth.token) && request.auth.token.email.lower() == contactValue)
+        || (('phone_number' in request.auth.token) && request.auth.token.phone_number == contactValue)
+      );
+    }
+
+    function canAccessCompany(companyId) {
+      return isPlatformAdmin() || isCompanyMember(companyId);
+    }
+
+    // ── users/{uid} — role + company membership + subscription ─────
+    // Every signed-in user may read/create only their own document.
+    // Creating with platformAdmin: true is only allowed for the two
+    // platform-owner UIDs; everyone else is blocked from ever setting
+    // platformAdmin, isAdmin, or role "owner" on themselves. Regular
+    // users may not set their own companyId/companyRole either -
+    // company membership is assigned by a platform admin or that
+    // company's owner (see update rule), never claimed by self-create,
+    // so nobody can invent membership in a company they don't belong to.
+    //
+    // Updates: a platform admin may update any user's document. A
+    // company's owner may update company membership fields for users
+    // within their own company (adding/removing employees). Everyone
+    // else may only update their own document, and never role,
+    // isAdmin, platformAdmin, subscription, companyId, or companyRole.
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() && request.auth.uid == userId
+                    && (
+                         (isPlatformAdminUID(userId)
+                           && request.resource.data.role == 'owner'
+                           && request.resource.data.isAdmin == true
+                           && request.resource.data.platformAdmin == true)
+                         ||
+                         (!isPlatformAdminUID(userId)
+                           && request.resource.data.role != 'owner'
+                           && request.resource.data.isAdmin == false
+                           && (!('platformAdmin' in request.resource.data) || request.resource.data.platformAdmin == false)
+                           && !('companyId' in request.resource.data)
+                           && !('companyRole' in request.resource.data))
+                       );
+
+      allow update: if isSignedIn() && (
+                         isPlatformAdmin()
+                         ||
+                         // Company owner managing one of their own
+                         // employees' membership/role within the company.
+                         (resource.data.companyId is string
+                           && isCompanyStaff(resource.data.companyId)
+                           && myCompanyRole() == 'owner'
+                           && request.resource.data.role == resource.data.role
+                           && request.resource.data.isAdmin == resource.data.isAdmin
+                           && request.resource.data.platformAdmin == resource.data.platformAdmin
+                           && request.resource.data.subscription == resource.data.subscription)
+                         ||
+                         // Self-update: everything except the
+                         // privileged/membership fields, which are frozen.
+                         (request.auth.uid == userId
+                           && request.resource.data.role == resource.data.role
+                           && request.resource.data.isAdmin == resource.data.isAdmin
+                           && request.resource.data.platformAdmin == resource.data.platformAdmin
+                           && request.resource.data.subscription == resource.data.subscription
+                           && request.resource.data.companyId == resource.data.companyId
+                           && request.resource.data.companyRole == resource.data.companyRole)
+                       );
+    }
+
+    // ── companies/{companyId} ────────────────────────────────
+    // Any member of a company can read their own company's record
+    // (so the app can show plan/tier info); platform admins can read
+    // any company. Creating/editing companies (onboarding, changing
+    // subscription tier/status) is a platform-admin action for now -
+    // TODO(self-serve signup / Phase 6): allow a company's own owner
+    // to update their non-billing fields (e.g. name) once a self-serve
+    // onboarding flow exists.
+
+    match /companies/{companyId} {
+      allow read: if canAccessCompany(companyId);
+      allow create, update, delete: if isPlatformAdmin();
+
+      // ── companies/{companyId}/drivers/{driverId} ─────────
+      // Contains PII (name, phone) alongside location - authenticated
+      // company staff only, never public. (See CustomerTrackingView.swift
+      // for why customer tracking does NOT read this collection.)
+      match /drivers/{driverId} {
+        allow read: if isCompanyMember(companyId);
+        allow create, delete: if isCompanyStaff(companyId);
+        // TODO(driver accounts): once driver login is tied to a real
+        // Firebase Auth UID, scope self-location-updates to
+        // isSignedIn() && request.auth.uid == driverId as well.
+        allow update: if isCompanyStaff(companyId);
+      }
+
+      // ── companies/{companyId}/customers/{customerId} ─────
+      // Customer PII - staff only. Customers never sign in themselves.
+      match /customers/{customerId} {
+        allow read, write: if isCompanyStaff(companyId);
+      }
+
+      // ── companies/{companyId}/routes/{routeId} + stops ───
+      match /routes/{routeId} {
+        allow read: if isCompanyMember(companyId);
+        allow create, update, delete: if isCompanyStaff(companyId);
+
+        // TODO(driver accounts): stop writes are scoped to any
+        // signed-in company member for now, because driver login isn't
+        // tied to a Firebase Auth UID yet. Once it is, replace with:
+        //   allow write: if isCompanyStaff(companyId)
+        //     || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
+        match /stops/{stopId} {
+          allow read: if isCompanyMember(companyId);
+          allow write: if isCompanyMember(companyId); // TODO(driver accounts): see above
+        }
+      }
+
+      // ── companies/{companyId}/trackingLinks/{linkId} ─────
+      // The core of unauthenticated customer tracking: a customer who
+      // taps their texted link needs to read this one specific
+      // document with no login. `get` by known ID is public; `list`
+      // is not. Writes require company staff.
+      match /trackingLinks/{linkId} {
+        allow get: if true;
+        allow list: if isCompanyMember(companyId);
+        allow create, update: if isCompanyMember(companyId);
+        allow delete: if isCompanyStaff(companyId);
+
+        // Public-safe live position for the customer tracking view -
+        // a location only, never the driver's name/phone. Staff/system
+        // write it; anyone with the link can read it. (App-side: this
+        // path isn't populated yet - see the TODO in CustomerTrackingView.swift.)
+        match /location/{locId} {
+          allow get: if true;
+          allow write: if isCompanyMember(companyId);
+        }
+      }
+
+      // ── companies/{companyId}/driverReports/{driverId}/reports/{reportId} ─
+      // End-of-shift reports. Any signed-in company member can submit
+      // one (same driver-identity caveat as stops above); only staff
+      // can read the roll-up or edit/delete after submission.
+      match /driverReports/{driverId}/reports/{reportId} {
+        allow read: if isCompanyStaff(companyId);
+        allow create: if isCompanyMember(companyId);
+        allow update, delete: if isCompanyStaff(companyId);
+      }
+    }
+
+    // Explicitly block cross-company collectionGroup queries - without
+    // this, a query like db.collectionGroup("drivers") could return
+    // every company's drivers at once even though single-document
+    // reads are properly scoped above. Firestore requires an explicit
+    // rule for collection-group access; omitting it here means denied.
+
+    // ── invites/{contactValue} — company employee onboarding ─
+    // Top-level, not nested under a company, because a not-yet-signed-
+    // in person needs to look themselves up by phone/email alone,
+    // before they know any companyId. The document ID IS the
+    // normalized contact value, so lookup is always a direct get by
+    // the requester's own auth token identity - never a query - which
+    // is what keeps this safe: nobody can list or browse other
+    // people's invites, only ever fetch the one addressed to them.
+    //
+    // Create/cancel: the company's OWNER only (not manager) - matches
+    // "Company Owner can invite/cancel" exactly, nothing broader.
+    // Accept: the invited person themselves, matched by their own
+    // verified email/phone - they can never create an invite, only
+    // consume one already sent to them, and can only ever move it to
+    // "accepted", never assign themselves a company/role directly
+    // (that happens via the separate, owner-gated users/{uid} update
+    // rule above, triggered by the app after a successful accept).
+
+    match /invites/{contactValue} {
+      allow read: if isInviteRecipient(contactValue) || isCompanyOwnerRole(resource.data.companyId);
+
+      allow create: if isCompanyOwnerRole(request.resource.data.companyId)
+                    && request.resource.data.status == 'pending';
+
+      allow update: if isSignedIn() && (
+                         (isCompanyOwnerRole(resource.data.companyId)
+                           && request.resource.data.companyId == resource.data.companyId)
+                         ||
+                         (isInviteRecipient(contactValue)
+                           && request.resource.data.status == 'accepted'
+                           && request.resource.data.companyId == resource.data.companyId
+                           && request.resource.data.role == resource.data.role)
+                       );
+
+      allow delete: if isCompanyOwnerRole(resource.data.companyId);
+    }
+
+    // Listing an owner's pending invites is a query (whereField
+    // companyId/status), not a get-by-ID - Firestore evaluates list
+    // rules per matched document the same way as get, so the read
+    // rule above already covers it via isCompanyOwnerRole.
+
+    // ── entitlements/{uid} — legacy subscription sync ───────
+    // Standard user-owns-their-own-document pattern.
+
+    match /entitlements/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ── Everything else: locked ──────────────────────────────
+    // No implicit access to anything not explicitly listed above.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -52,6 +52,24 @@ service cloud.firestore {
       return isSignedIn() && myCompanyId() == companyId;
     }
 
+    // Specifically the owner (not manager) of this company - used for
+    // owner-only actions like inviting/removing employees.
+    function isCompanyOwnerRole(companyId) {
+      return isCompanyMember(companyId) && myCompanyRole() == 'owner';
+    }
+
+    // True if the signed-in requester's own verified email or phone
+    // number (from their Firebase Auth token, not from Firestore data
+    // they could otherwise influence) matches this invite document's ID.
+    // Used so a person can only ever look up/accept the one invite that
+    // was actually sent to them - never anyone else's.
+    function isInviteRecipient(contactValue) {
+      return isSignedIn() && (
+        (('email' in request.auth.token) && request.auth.token.email.lower() == contactValue)
+        || (('phone_number' in request.auth.token) && request.auth.token.phone_number == contactValue)
+      );
+    }
+
     function canAccessCompany(companyId) {
       return isPlatformAdmin() || isCompanyMember(companyId);
     }
@@ -200,6 +218,48 @@ service cloud.firestore {
     // every company's drivers at once even though single-document
     // reads are properly scoped above. Firestore requires an explicit
     // rule for collection-group access; omitting it here means denied.
+
+    // ── invites/{contactValue} — company employee onboarding ─
+    // Top-level, not nested under a company, because a not-yet-signed-
+    // in person needs to look themselves up by phone/email alone,
+    // before they know any companyId. The document ID IS the
+    // normalized contact value, so lookup is always a direct get by
+    // the requester's own auth token identity - never a query - which
+    // is what keeps this safe: nobody can list or browse other
+    // people's invites, only ever fetch the one addressed to them.
+    //
+    // Create/cancel: the company's OWNER only (not manager) - matches
+    // "Company Owner can invite/cancel" exactly, nothing broader.
+    // Accept: the invited person themselves, matched by their own
+    // verified email/phone - they can never create an invite, only
+    // consume one already sent to them, and can only ever move it to
+    // "accepted", never assign themselves a company/role directly
+    // (that happens via the separate, owner-gated users/{uid} update
+    // rule above, triggered by the app after a successful accept).
+
+    match /invites/{contactValue} {
+      allow read: if isInviteRecipient(contactValue) || isCompanyOwnerRole(resource.data.companyId);
+
+      allow create: if isCompanyOwnerRole(request.resource.data.companyId)
+                    && request.resource.data.status == 'pending';
+
+      allow update: if isSignedIn() && (
+                         (isCompanyOwnerRole(resource.data.companyId)
+                           && request.resource.data.companyId == resource.data.companyId)
+                         ||
+                         (isInviteRecipient(contactValue)
+                           && request.resource.data.status == 'accepted'
+                           && request.resource.data.companyId == resource.data.companyId
+                           && request.resource.data.role == resource.data.role)
+                       );
+
+      allow delete: if isCompanyOwnerRole(resource.data.companyId);
+    }
+
+    // Listing an owner's pending invites is a query (whereField
+    // companyId/status), not a get-by-ID - Firestore evaluates list
+    // rules per matched document the same way as get, so the read
+    // rule above already covers it via isCompanyOwnerRole.
 
     // ── entitlements/{uid} — legacy subscription sync ───────
     // Standard user-owns-their-own-document pattern.

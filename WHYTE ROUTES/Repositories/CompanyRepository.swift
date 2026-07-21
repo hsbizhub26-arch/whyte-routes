@@ -8,11 +8,14 @@ final class CompanyRepository {
     private let db = Firestore.firestore()
 
     func fetch(companyId: String) async -> Company? {
-        guard let snapshot = try? await db.collection("companies").document(companyId).getDocument(),
-              let data = snapshot.data() else {
+        do {
+            let snapshot = try await db.collection("companies").document(companyId).getDocument()
+            guard let data = snapshot.data() else { return nil }
+            return Company(from: data, id: snapshot.documentID)
+        } catch {
+            print("⚠️ CompanyRepository.fetch(\(companyId)) failed: \(error.localizedDescription)")
             return nil
         }
-        return Company(from: data, id: snapshot.documentID)
     }
 
     /// Finds the company a given user owns, if any. Used for the
@@ -20,15 +23,21 @@ final class CompanyRepository {
     /// created company can be found on subsequent logins without
     /// needing its ID stored anywhere else yet.
     func fetchOwnedCompany(ownerUID: String) async -> Company? {
-        guard let snapshot = try? await db.collection("companies")
-            .whereField("ownerUID", isEqualTo: ownerUID)
-            .limit(to: 1)
-            .getDocuments(),
-            let doc = snapshot.documents.first
-        else {
+        do {
+            let snapshot = try await db.collection("companies")
+                .whereField("ownerUID", isEqualTo: ownerUID)
+                .limit(to: 1)
+                .getDocuments()
+
+            guard let doc = snapshot.documents.first else {
+                print("🔍 CompanyRepository.fetchOwnedCompany(\(ownerUID)): query succeeded, 0 matching documents")
+                return nil
+            }
+            return Company(from: doc.data(), id: doc.documentID)
+        } catch {
+            print("⚠️ CompanyRepository.fetchOwnedCompany(\(ownerUID)) query FAILED (likely Firestore rules, not \"not found\"): \(error.localizedDescription)")
             return nil
         }
-        return Company(from: doc.data(), id: doc.documentID)
     }
 
     @discardableResult
