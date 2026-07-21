@@ -18,7 +18,7 @@ final class RouteRepository {
                 }
 
                 let routes: [Route] = snapshot?.documents.compactMap { doc in
-                    try? doc.data(as: Route.self)
+                    Route(from: doc.data(), id: doc.documentID)
                 } ?? []
 
                 handler(routes)
@@ -38,7 +38,7 @@ final class RouteRepository {
                 }
 
                 let routes: [Route] = snapshot?.documents.compactMap { doc in
-                    try? doc.data(as: Route.self)
+                    Route(from: doc.data(), id: doc.documentID)
                 } ?? []
 
                 completion(routes)

@@ -58,25 +58,4 @@ extension Route {
     }
 }
 
-// MARK: - Native Swift init
-extension Route {
-    init(
-        id: String = UUID().uuidString,
-        fleetId: String? = nil,
-        driverId: String? = nil,
-        status: String = "pending",
-        createdAt: Date = Date(),
-        lastUpdated: Date? = nil,
-        stops: [Stop] = []
-    ) {
-        self.id = id
-        self.fleetId = fleetId
-        self.driverId = driverId
-        self.status = status
-        self.createdAt = createdAt
-        self.lastUpdated = lastUpdated
-        self.stops = stops
-    }
-}
-
 typealias AppRoute = Route

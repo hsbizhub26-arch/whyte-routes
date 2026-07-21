@@ -21,12 +21,7 @@ final class StopsRepository {
                 }
 
                 let stops: [Stop] = snapshot?.documents.compactMap { doc in
-                    do {
-                        return try doc.data(as: Stop.self)
-                    } catch {
-                        print("❌ [StopsRepository] Decoding error for stop \(doc.documentID):", error.localizedDescription)
-                        return nil
-                    }
+                    Stop(from: doc.data(), id: doc.documentID)
                 } ?? []
 
                 completion(stops)
@@ -42,15 +37,8 @@ final class StopsRepository {
         let batch = db.batch()
 
         for stop in stops {
-            guard let id = stop.id else { continue }
-
-            let stopRef = routeRef.collection("stops").document(id)
-
-            do {
-                try batch.setData(from: stop, forDocument: stopRef)
-            } catch {
-                print("❌ [StopsRepository] Encoding error for stop \(stop.id ?? "nil"):", error.localizedDescription)
-            }
+            let stopRef = routeRef.collection("stops").document(stop.id)
+            batch.setData(stop.toDict(), forDocument: stopRef)
         }
 
         batch.commit { error in
@@ -69,28 +57,18 @@ final class StopsRepository {
                     stop: Stop,
                     completion: ((Bool) -> Void)? = nil) {
 
-        guard let id = stop.id else {
-            completion?(false)
-            return
-        }
-
         let stopRef = db.collection("routes")
             .document(routeId)
             .collection("stops")
-            .document(id)
+            .document(stop.id)
 
-        do {
-            try stopRef.setData(from: stop) { error in
-                if let error = error {
-                    print("❌ Failed updating stop:", error.localizedDescription)
-                    completion?(false)
-                } else {
-                    completion?(true)
-                }
+        stopRef.setData(stop.toDict()) { error in
+            if let error = error {
+                print("❌ Failed updating stop:", error.localizedDescription)
+                completion?(false)
+            } else {
+                completion?(true)
             }
-        } catch {
-            print("❌ [StopsRepository] Encoding error for stop \(stop.id ?? "nil"):", error.localizedDescription)
-            completion?(false)
         }
     }
 }

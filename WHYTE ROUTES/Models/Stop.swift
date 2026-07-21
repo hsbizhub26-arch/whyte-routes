@@ -3,13 +3,16 @@ import CoreLocation
 
 struct Stop: Identifiable {
 
-    var id: String
-    var customerPhone: String?
+    var id: String = UUID().uuidString
+    var customerName: String? = nil
+    var customerPhone: String? = nil
     var address: String
-    var latitude: Double?
-    var longitude: Double?
-    var sequence: Int
-    var isCompleted: Bool
+    var latitude: Double? = nil
+    var longitude: Double? = nil
+    var order: Int = 0
+    var isCompleted: Bool = false
+    var isSkipped: Bool = false
+    var driverId: String? = nil
 
     var coordinate: CLLocationCoordinate2D? {
         guard let lat = latitude,
@@ -21,41 +24,25 @@ struct Stop: Identifiable {
 extension Stop {
 
     // MARK: Firestore initializer (safe)
-    init?(from dict: [String: Any]) {
+    init?(from dict: [String: Any], id: String? = nil) {
 
         // Create an id if none is provided
-        let rawId = (dict["id"] as? String) ?? UUID().uuidString
+        let rawId = id ?? (dict["id"] as? String) ?? UUID().uuidString
 
         guard let address = dict["address"] as? String else {
             return nil
         }
 
         self.id = rawId
+        self.customerName = dict["customerName"] as? String
         self.customerPhone = dict["customerPhone"] as? String
         self.address = address
         self.latitude = dict["latitude"] as? Double
         self.longitude = dict["longitude"] as? Double
-        self.sequence = dict["sequence"] as? Int ?? 0
+        self.order = (dict["order"] as? Int) ?? (dict["sequence"] as? Int) ?? 0
         self.isCompleted = dict["isCompleted"] as? Bool ?? false
-    }
-
-    // MARK: Swift initializer (manual creation)
-    init(
-        id: String = UUID().uuidString,
-        customerPhone: String? = nil,
-        address: String,
-        latitude: Double? = nil,
-        longitude: Double? = nil,
-        sequence: Int = 0,
-        isCompleted: Bool = false
-    ) {
-        self.id = id
-        self.customerPhone = customerPhone
-        self.address = address
-        self.latitude = latitude
-        self.longitude = longitude
-        self.sequence = sequence
-        self.isCompleted = isCompleted
+        self.isSkipped = dict["isSkipped"] as? Bool ?? false
+        self.driverId = dict["driverId"] as? String
     }
 
     // MARK: Encode for Firestore
@@ -63,12 +50,15 @@ extension Stop {
         var d: [String: Any] = [
             "id": id,
             "address": address,
-            "sequence": sequence,
-            "isCompleted": isCompleted
+            "order": order,
+            "isCompleted": isCompleted,
+            "isSkipped": isSkipped
         ]
+        if let customerName { d["customerName"] = customerName }
         if let customerPhone { d["customerPhone"] = customerPhone }
         if let latitude { d["latitude"] = latitude }
         if let longitude { d["longitude"] = longitude }
+        if let driverId { d["driverId"] = driverId }
         return d
     }
 }

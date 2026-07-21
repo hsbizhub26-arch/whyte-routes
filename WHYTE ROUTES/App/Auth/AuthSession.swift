@@ -2,49 +2,6 @@ import Foundation
 import Combine
 import FirebaseAuth
 
-// MARK: - Supporting placeholders (replace with real implementations as needed)
-
-/// Represents the user's role in the app.
-enum UserRole {
-    case none
-    case standard
-    case admin
-}
-
-/// Access control utilities. Replace with your real logic.
-enum AccessControl {
-    static func role(for email: String?) -> UserRole {
-        // Example: make certain domains admins, otherwise standard
-        guard let email = email else { return .none }
-        if email.lowercased().hasSuffix("@example.com") {
-            return .admin
-        }
-        return .standard
-    }
-
-    static func isWhitelisted(_ email: String?) -> Bool {
-        // Example: trivial whitelist check
-        guard let email = email else { return false }
-        return ["test@example.com"].contains(email.lowercased())
-    }
-}
-
-/// Source of entitlement changes. Replace with your app's real enum.
-enum EntitlementSource: String {
-    case whitelist
-    case server
-    case local
-}
-
-/// Stub service to sync entitlements with your backend. Replace with real implementation.
-struct SubscriptionSyncService {
-    func syncEntitlements(uid: String) async {
-        // Simulate network sync delay
-        try? await Task.sleep(nanoseconds: 150_000_000)
-        // No-op: your real sync would update persisted entitlements
-    }
-}
-
 // MARK: - AuthSession
 
 final class AuthSession: ObservableObject {

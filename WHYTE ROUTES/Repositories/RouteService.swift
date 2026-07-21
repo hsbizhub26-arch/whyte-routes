@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import FirebaseFirestore
 
 @MainActor
@@ -92,15 +93,14 @@ final class RouteService: ObservableObject {
             customerName: stop.customerName ?? "",
             address: stop.address,
             driverId: driverId,
-            routeId: routeId,
-            stopId: stop.id ?? "",
+            stopId: stop.id,
             completion: completion
         )
     }
 
     // MARK: - Deactivate a Tracking Link
     func deactivateTrackingLink(_ linkId: String) {
-        trackingRepo.deactivate(linkId)
+        trackingRepo.deactivate(id: linkId)
     }
 
     // MARK: - Remove Listeners (important for performance)
