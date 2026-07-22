@@ -26,6 +26,7 @@ final class DriverStopViewModel: ObservableObject {
     func startDriving() async {
         guard let route else { return }
         stop.status = JobStatus.enRoute.rawValue
+        stop.enRouteAt = Date()
         routeService.updateStop(routeId: route.id, stop: stop)
         await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .enRoute)
     }
@@ -33,6 +34,7 @@ final class DriverStopViewModel: ObservableObject {
     func markArrived() async {
         guard let route else { return }
         stop.status = JobStatus.arrived.rawValue
+        stop.arrivedAt = Date()
         routeService.updateStop(routeId: route.id, stop: stop)
         await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .arrived)
     }
@@ -44,6 +46,7 @@ final class DriverStopViewModel: ObservableObject {
         isCompleting = true
         stop.isCompleted = true
         stop.status = JobStatus.completed.rawValue
+        stop.completedAt = Date()
 
         routeService.updateStop(routeId: route.id, stop: stop)
         await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .completed)

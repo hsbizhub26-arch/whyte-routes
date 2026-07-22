@@ -50,7 +50,10 @@ struct NotificationHistoryView: View {
                                 .font(.subheadline)
                             Text(statusLabel(event))
                                 .font(.caption)
-                                .foregroundColor(event.deliveryStatus == "no_contact_on_file" ? .orange : .secondary)
+                                .foregroundColor(
+                                    ["no_contact_on_file", "not_opted_in"].contains(event.deliveryStatus)
+                                        ? .orange : .secondary
+                                )
                         }
                         .padding(.vertical, 2)
                     }
@@ -68,6 +71,8 @@ struct NotificationHistoryView: View {
 
     private func statusLabel(_ event: NotificationEvent) -> String {
         switch event.deliveryStatus {
+        case "not_opted_in":
+            return "Not sent - customer hasn't opted in to notifications."
         case "no_contact_on_file":
             return "No phone/email on file - not actually sent."
         case "logged":

@@ -101,6 +101,7 @@
 				Views/Owner/AssignRoutesView.swift,
 				Views/Owner/CreateRouteView.swift,
 				Views/Owner/DriverReportsView.swift,
+				Views/Owner/DriverTimeReportView.swift,
 				Views/Owner/EditRouteView.swift,
 				Views/Owner/LiveFleetMapView.swift,
 				Views/Owner/ManageEmployeesView.swift,

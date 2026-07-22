@@ -6,26 +6,32 @@ struct DriverReportsView: View {
     @StateObject private var driverVM = DriverViewModel()
 
     var body: some View {
-        ZStack {
-            WRTheme.gradient.ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                WRTheme.gradient.ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 20) {
+                ScrollView {
+                    VStack(spacing: 20) {
 
-                    Text("Driver Reports")
-                        .foregroundColor(WRTheme.gold)
-                        .font(.largeTitle.bold())
+                        Text("Driver Reports")
+                            .foregroundColor(WRTheme.gold)
+                            .font(.largeTitle.bold())
 
-                    ForEach(driverVM.drivers) { driver in
-                        reportCard(driver)
+                        ForEach(driverVM.drivers) { driver in
+                            NavigationLink {
+                                DriverTimeReportView(driver: driver)
+                            } label: {
+                                reportCard(driver)
+                            }
+                        }
                     }
+                    .padding(.horizontal)
+                    .padding(.top, 20)
+                    .tint(WRTheme.gold)
                 }
-                .padding(.horizontal)
-                .padding(.top, 20)
-                .tint(WRTheme.gold)
             }
+            .onAppear { routeService.loadRoutesOnce() }
         }
-        .onAppear { routeService.loadRoutesOnce() }
     }
 }
 
@@ -34,19 +40,22 @@ extension DriverReportsView {
     func reportCard(_ driver: Driver) -> some View {
         let reports = routeService.reportFor(driver)
 
-        return VStack(alignment: .leading, spacing: 8) {
+        return HStack {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(driver.name)
+                    .foregroundColor(WRTheme.gold)
+                    .font(.headline)
 
-            Text(driver.name)
-                .foregroundColor(WRTheme.gold)
-                .font(.headline)
+                Text("Completed Stops: \(reports.completedStops)")
+                    .foregroundColor(.white)
+                Text("Total KM: \(reports.totalKM, specifier: "%.1f")")
+                    .foregroundColor(.white)
 
-            Text("Completed Stops: \(reports.completedStops)")
-                .foregroundColor(.white)
-            Text("Total KM: \(reports.totalKM, specifier: "%.1f")")
-                .foregroundColor(.white)
-            Text("Time Worked: \(reports.totalTimeMinutes) min")
-                .foregroundColor(.white)
-
+                Text("Tap for shift & travel/service time →")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            Spacer()
         }
         .padding()
         .background(WRTheme.softBlack)

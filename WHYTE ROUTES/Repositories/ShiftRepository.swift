@@ -58,4 +58,19 @@ final class ShiftRepository {
             "status": "completed"
         ])
     }
+
+    /// Most recent shifts for the time-accounting report, newest first.
+    func fetchRecentShifts(driverId: String, limit: Int = 10) async -> [Shift] {
+        guard let ref = try? shiftsRef(driverId: driverId) else { return [] }
+        do {
+            let snapshot = try await ref
+                .order(by: "startedAt", descending: true)
+                .limit(to: limit)
+                .getDocuments()
+            return snapshot.documents.compactMap { Shift(from: $0.data(), id: $0.documentID) }
+        } catch {
+            print("⚠️ ShiftRepository.fetchRecentShifts(\(driverId)) failed: \(error.localizedDescription)")
+            return []
+        }
+    }
 }

@@ -26,6 +26,7 @@ struct CreateRouteView: View {
         var customerName: String = ""
         var customerPhone: String = ""
         var customerEmail: String = ""
+        var customerOptedIn: Bool = false
         var address: String = ""
         var latitude: Double?
         var longitude: Double?
@@ -60,6 +61,8 @@ struct CreateRouteView: View {
                             TextField("Email (for notifications)", text: $stop.customerEmail)
                                 .keyboardType(.emailAddress)
                                 .textInputAutocapitalization(.never)
+                            Toggle("Opted in to notifications", isOn: $stop.customerOptedIn)
+                                .font(.footnote)
                         }
                     }
                     .onDelete { stops.remove(atOffsets: $0) }
@@ -126,6 +129,7 @@ struct CreateRouteView: View {
                             customerName: draft.customerName.isEmpty ? nil : draft.customerName,
                             customerPhone: draft.customerPhone.isEmpty ? nil : draft.customerPhone,
                             customerEmail: draft.customerEmail.isEmpty ? nil : draft.customerEmail,
+                            customerOptedIn: draft.customerOptedIn,
                             address: draft.address,
                             latitude: draft.latitude,
                             longitude: draft.longitude,

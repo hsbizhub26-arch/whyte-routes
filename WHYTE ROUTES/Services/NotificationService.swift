@@ -56,11 +56,18 @@ final class NotificationService {
             contact = nil
         }
 
-        var deliveryStatus = "no_contact_on_file"
-        if let contact {
+        // Consent is checked before any channel is touched - an
+        // opted-out customer never gets so much as a logged attempt,
+        // only a record that the system correctly declined to notify.
+        var deliveryStatus: String
+        if !stop.customerOptedIn {
+            deliveryStatus = "not_opted_in"
+        } else if let contact {
             let channel: NotificationChannel = LoggingChannel(method: method)
             let delivered = await channel.send(to: contact, message: message)
             deliveryStatus = delivered ? "logged" : "failed"
+        } else {
+            deliveryStatus = "no_contact_on_file"
         }
 
         let event = NotificationEvent(

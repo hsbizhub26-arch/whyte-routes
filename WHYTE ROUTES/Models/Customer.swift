@@ -6,6 +6,12 @@ struct Customer: Identifiable {
     var address: String
     var latitude: Double
     var longitude: Double
+    // Defaults false - nobody is notified without explicitly agreeing
+    // first. Not yet wired to NotificationService directly (Stop
+    // carries its own copy - see Stop.customerOptedIn - since routes
+    // don't pull from Customer records yet); this is the standing
+    // record of consent for whenever that link gets built.
+    var notificationsOptIn: Bool = false
 }
 
 // MARK: - Firestore Decode
@@ -23,6 +29,7 @@ extension Customer {
         self.address = address
         self.latitude = latitude
         self.longitude = longitude
+        self.notificationsOptIn = dict["notificationsOptIn"] as? Bool ?? false
     }
 
     // MARK: - Encode
@@ -31,7 +38,8 @@ extension Customer {
             "name": name,
             "address": address,
             "latitude": latitude,
-            "longitude": longitude
+            "longitude": longitude,
+            "notificationsOptIn": notificationsOptIn
         ]
     }
 }

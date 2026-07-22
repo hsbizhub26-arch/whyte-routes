@@ -73,6 +73,8 @@ struct EditRouteView: View {
                                     ))
                                     .keyboardType(.emailAddress)
                                     .textInputAutocapitalization(.never)
+                                    Toggle("Opted in to notifications", isOn: $stop.customerOptedIn)
+                                        .font(.footnote)
 
                                     if originalStopIds.contains(stop.id) {
                                         Button("View Notification Log") {

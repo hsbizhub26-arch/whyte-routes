@@ -13,6 +13,7 @@ struct AddCustomerView: View {
     @State private var address = ""
     @State private var latitude: Double = 0
     @State private var longitude: Double = 0
+    @State private var notificationsOptIn = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -27,6 +28,12 @@ struct AddCustomerView: View {
                         latitude = lat
                         longitude = lng
                     }
+                }
+
+                Section {
+                    Toggle("Customer agreed to receive service notifications", isOn: $notificationsOptIn)
+                } footer: {
+                    Text("Required before any arrival/completion notification can be sent to this customer.")
                 }
 
                 if let errorMessage {
@@ -65,7 +72,8 @@ struct AddCustomerView: View {
             name: name,
             address: address,
             latitude: latitude,
-            longitude: longitude
+            longitude: longitude,
+            notificationsOptIn: notificationsOptIn
         )
 
         repo.createCustomer(customer) { success in

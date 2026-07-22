@@ -1,5 +1,6 @@
 import Foundation
 import CoreLocation
+import FirebaseFirestore
 
 // Job status for this stop, distinct from isCompleted/isSkipped -
 // those two are left exactly as-is (existing screens already depend
@@ -21,6 +22,11 @@ struct Stop: Identifiable {
     var customerName: String? = nil
     var customerPhone: String? = nil
     var customerEmail: String? = nil
+    // Defaults false - matches Customer.notificationsOptIn. Carried
+    // separately here (not read from the Customer record) because
+    // stops aren't linked to customers by id yet; set per-stop until
+    // that link exists.
+    var customerOptedIn: Bool = false
     var address: String
     var latitude: Double? = nil
     var longitude: Double? = nil
@@ -29,6 +35,13 @@ struct Stop: Identifiable {
     var isSkipped: Bool = false
     var driverId: String? = nil
     var status: String = JobStatus.scheduled.rawValue
+
+    // Set the moment each status transition happens (DriverStopViewModel) -
+    // what the time-accounting report is built from: travel time is
+    // arrivedAt - enRouteAt, service time is completedAt - arrivedAt.
+    var enRouteAt: Date? = nil
+    var arrivedAt: Date? = nil
+    var completedAt: Date? = nil
 
     var coordinate: CLLocationCoordinate2D? {
         guard let lat = latitude,
@@ -53,6 +66,7 @@ extension Stop {
         self.customerName = dict["customerName"] as? String
         self.customerPhone = dict["customerPhone"] as? String
         self.customerEmail = dict["customerEmail"] as? String
+        self.customerOptedIn = dict["customerOptedIn"] as? Bool ?? false
         self.address = address
         self.latitude = dict["latitude"] as? Double
         self.longitude = dict["longitude"] as? Double
@@ -61,6 +75,9 @@ extension Stop {
         self.isSkipped = dict["isSkipped"] as? Bool ?? false
         self.driverId = dict["driverId"] as? String
         self.status = dict["status"] as? String ?? JobStatus.scheduled.rawValue
+        self.enRouteAt = (dict["enRouteAt"] as? Timestamp)?.dateValue()
+        self.arrivedAt = (dict["arrivedAt"] as? Timestamp)?.dateValue()
+        self.completedAt = (dict["completedAt"] as? Timestamp)?.dateValue()
     }
 
     // MARK: Encode for Firestore
@@ -71,7 +88,8 @@ extension Stop {
             "order": order,
             "isCompleted": isCompleted,
             "isSkipped": isSkipped,
-            "status": status
+            "status": status,
+            "customerOptedIn": customerOptedIn
         ]
         if let customerName { d["customerName"] = customerName }
         if let customerPhone { d["customerPhone"] = customerPhone }
@@ -79,6 +97,9 @@ extension Stop {
         if let latitude { d["latitude"] = latitude }
         if let longitude { d["longitude"] = longitude }
         if let driverId { d["driverId"] = driverId }
+        if let enRouteAt { d["enRouteAt"] = Timestamp(date: enRouteAt) }
+        if let arrivedAt { d["arrivedAt"] = Timestamp(date: arrivedAt) }
+        if let completedAt { d["completedAt"] = Timestamp(date: completedAt) }
         return d
     }
 }
