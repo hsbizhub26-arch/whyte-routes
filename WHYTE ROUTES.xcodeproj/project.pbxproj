@@ -28,9 +28,12 @@
 		8DB4DBFD2EE01ACB00DCC302 /* Exceptions for "WHYTE ROUTES" folder in "WHYTE ROUTES" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				App/AdminSession.swift,
 				App/Auth/AccessControl.swift,
 				App/Auth/AuthSession.swift,
 				App/Auth/UserRole.swift,
+				App/CompanySession.swift,
+				App/PermissionsHelpView.swift,
 				App/WHYTE_ROUTESApp.swift,
 				App/WRTheme.swift,
 				Entitlements/AppEntitlements.swift,
@@ -39,10 +42,8 @@
 				Entitlements/LocalEntitlementStore.swift,
 				Entitlements/SubscriptionSyncService.swift,
 				Entitlements/UserPermissionsService.swift,
-				App/AdminSession.swift,
-				App/CompanySession.swift,
-				Models/Customer.swift,
 				Models/Company.swift,
+				Models/Customer.swift,
 				Models/Driver.swift,
 				Models/Invite.swift,
 				Models/Route.swift,
@@ -50,16 +51,20 @@
 				Models/Stop.swift,
 				Models/TrackingLink.swift,
 				Repositories/CompanyRepository.swift,
-				Repositories/InviteRepository.swift,
 				Repositories/CustomerRepository.swift,
+				Repositories/FirestoreDriverRepository.swift,
+				Repositories/InviteRepository.swift,
+				Repositories/LocationService.swift,
 				Repositories/RouteRepository.swift,
 				Repositories/RouteService.swift,
 				Repositories/ShiftRepository.swift,
 				Repositories/StopsRepository.swift,
-				Repositories/FirestoreDriverRepository.swift,
-				Repositories/LocationService.swift,
 				Repositories/TimerService.swift,
 				Repositories/TrackingLinkRepository.swift,
+				Resources/Assets.xcassets,
+				"Resources/GoogleService-Info.plist",
+				Resources/LaunchScreen.storyboard,
+				Resources/WhyteRoutes.storekit,
 				Services/NavigationService.swift,
 				Services/RealtimeLocationManager.swift,
 				Services/SMSService.swift,
@@ -69,6 +74,7 @@
 				ViewModels/DriverViewModel.swift,
 				Views/Common/LoadingScreen.swift,
 				Views/Components/SMSButton.swift,
+				Views/Customer/CustomerListView.swift,
 				Views/Driver/DriverDashboardView.swift,
 				Views/Driver/DriverDetailView.swift,
 				Views/Driver/DriverMapView.swift,
@@ -88,27 +94,21 @@
 				Views/Manager/ManagerTabView.swift,
 				Views/Manager/RoutesViewModel.swift,
 				Views/Owner/AssignRoutesView.swift,
+				Views/Owner/CreateRouteView.swift,
 				Views/Owner/DriverReportsView.swift,
 				Views/Owner/LiveFleetMapView.swift,
 				Views/Owner/ManageEmployeesView.swift,
 				Views/Owner/OwnerDashboardView.swift,
+				Views/Owner/OwnerLoginView.swift,
 				Views/Owner/OwnerTabView.swift,
-				Views/Customer/CustomerListView.swift,
-				App/PermissionsHelpView.swift,
 				Views/Routing/RoleRouterView.swift,
 				Views/Shared/DeleteAccountManager.swift,
 				Views/Shared/DeleteAccountSection.swift,
-				Views/Shared/SettingsView.swift,
+				Views/Shared/GoldButton.swift,
 				Views/Shared/ImagePicker.swift,
 				Views/Shared/PhotoProofView.swift,
 				Views/Shared/PhotoUploader.swift,
-				Resources/Assets.xcassets,
-				WHYTE-ROUTES.entitlements,
-				"Resources/GoogleService-Info.plist",
-				Resources/LaunchScreen.storyboard,
-				Resources/WhyteRoutes.storekit,
-				Views/Owner/OwnerLoginView.swift,
-				Views/Shared/GoldButton.swift,
+				Views/Shared/SettingsView.swift,
 			);
 			target = 8D792BE82EDC236C00586CA8 /* WHYTE ROUTES */;
 		};
@@ -208,7 +208,7 @@
 					8D792BE82EDC236C00586CA8 = {
 						CreatedOnToolsVersion = 26.1.1;
 						SystemCapabilities = {
-							"com.apple.Keychain" = {
+							com.apple.Keychain = {
 								enabled = 1;
 							};
 						};
