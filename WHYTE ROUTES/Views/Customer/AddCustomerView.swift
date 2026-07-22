@@ -11,6 +11,8 @@ struct AddCustomerView: View {
 
     @State private var name = ""
     @State private var address = ""
+    @State private var latitude: Double = 0
+    @State private var longitude: Double = 0
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -21,7 +23,10 @@ struct AddCustomerView: View {
             Form {
                 Section("Customer") {
                     TextField("Name", text: $name)
-                    TextField("Address", text: $address)
+                    AddressAutocompleteField(address: $address) { _, lat, lng in
+                        latitude = lat
+                        longitude = lng
+                    }
                 }
 
                 if let errorMessage {
@@ -52,16 +57,15 @@ struct AddCustomerView: View {
         isSaving = true
         errorMessage = nil
 
-        // latitude/longitude default to 0 - not geocoded yet, same
-        // "address-only is safe" approach as route stops. Nothing
-        // reads Customer.latitude/longitude today, so this is inert
-        // until geocoding/autocomplete gets built.
+        // latitude/longitude come from AddressAutocompleteField's
+        // resolved suggestion; stay 0 only if the address was typed
+        // freehand without picking a suggestion.
         let customer = Customer(
             id: UUID().uuidString,
             name: name,
             address: address,
-            latitude: 0,
-            longitude: 0
+            latitude: latitude,
+            longitude: longitude
         )
 
         repo.createCustomer(customer) { success in

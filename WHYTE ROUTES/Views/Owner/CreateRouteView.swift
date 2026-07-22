@@ -25,6 +25,8 @@ struct CreateRouteView: View {
         let id = UUID()
         var customerName: String = ""
         var address: String = ""
+        var latitude: Double?
+        var longitude: Double?
     }
 
     var body: some View {
@@ -47,7 +49,10 @@ struct CreateRouteView: View {
                     ForEach($stops) { $stop in
                         VStack(alignment: .leading, spacing: 6) {
                             TextField("Customer name", text: $stop.customerName)
-                            TextField("Address", text: $stop.address)
+                            AddressAutocompleteField(address: $stop.address) { _, lat, lng in
+                                stop.latitude = lat
+                                stop.longitude = lng
+                            }
                         }
                     }
                     .onDelete { stops.remove(atOffsets: $0) }
@@ -113,6 +118,8 @@ struct CreateRouteView: View {
                         Stop(
                             customerName: draft.customerName.isEmpty ? nil : draft.customerName,
                             address: draft.address,
+                            latitude: draft.latitude,
+                            longitude: draft.longitude,
                             order: index,
                             driverId: selectedDriverId
                         )

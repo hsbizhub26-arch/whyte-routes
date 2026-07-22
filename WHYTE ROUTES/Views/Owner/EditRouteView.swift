@@ -57,7 +57,10 @@ struct EditRouteView: View {
                                         get: { stop.customerName ?? "" },
                                         set: { stop.customerName = $0.isEmpty ? nil : $0 }
                                     ))
-                                    TextField("Address", text: $stop.address)
+                                    AddressAutocompleteField(address: $stop.address) { _, lat, lng in
+                                        stop.latitude = lat
+                                        stop.longitude = lng
+                                    }
                                 }
                             }
                             .onDelete { stops.remove(atOffsets: $0) }
