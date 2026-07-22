@@ -176,9 +176,24 @@ struct EditRouteView: View {
         }
     }
 
+    // Row action buttons are given explicit vertical padding (not just
+    // their text glyphs) so each has a real tap target - the previous
+    // plain-text buttons packed a driver-hand-unfriendly, sub-44pt
+    // target into a Form row and were easy to mis-tap on a real phone.
+    private func rowActionButton(_ title: String, color: Color = .yellow, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundColor(color)
+                .padding(.vertical, 8)
+        }
+        .contentShape(Rectangle())
+        .buttonStyle(.borderless)
+    }
+
     @ViewBuilder
     private func stopRow(_ stop: Stop) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             if stop.customerId != nil {
                 Text(stop.customerName ?? "Customer")
                     .font(.headline)
@@ -190,10 +205,9 @@ struct EditRouteView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                Button("Change Customer") {
+                rowActionButton("Change Customer") {
                     pickerTargetId = stop.id
                 }
-                .font(.footnote)
             } else {
                 // Legacy stop, created before customer linking existed -
                 // still works via its own cached fields (see
@@ -202,17 +216,15 @@ struct EditRouteView: View {
                     Text(name).font(.headline)
                     Text(stop.address).font(.caption).foregroundColor(.secondary)
                 }
-                Button(stop.customerName?.isEmpty == false ? "Link to a Customer Record" : "Select Customer") {
+                rowActionButton(stop.customerName?.isEmpty == false ? "Link to a Customer Record" : "Select Customer") {
                     pickerTargetId = stop.id
                 }
-                .font(.footnote)
             }
 
             if originalStopIds.contains(stop.id) {
-                Button("View Notification Log") {
+                rowActionButton("View Notification Log") {
                     historyStop = stop
                 }
-                .font(.footnote)
 
                 // Live, immediate overrides - not staged into the Save
                 // button below, which batches a local snapshot taken
@@ -225,22 +237,22 @@ struct EditRouteView: View {
                 //   driving by (mark it done directly)
                 // - one driver finished early and can take over a stop
                 //   still sitting on someone else's route (move it)
-                HStack(spacing: 16) {
-                    Button(stop.isCompleted ? "Mark Incomplete" : "Mark Complete") {
+                HStack(spacing: 28) {
+                    rowActionButton(
+                        stop.isCompleted ? "Mark Incomplete" : "Mark Complete",
+                        color: stop.isCompleted ? .orange : .green
+                    ) {
                         toggleCompletion(stop)
                     }
-                    .font(.footnote)
-                    .foregroundColor(stop.isCompleted ? .orange : .green)
 
-                    Button("Move to Another Route") {
+                    rowActionButton("Move to Another Route") {
                         moveTargetStop = stop
                         loadOtherRoutes()
                     }
-                    .font(.footnote)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     private func toggleCompletion(_ stop: Stop) {
