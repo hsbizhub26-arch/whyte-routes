@@ -17,14 +17,36 @@ final class DriverStopViewModel: ObservableObject {
 
     var route: Route? { session.assignedRoute }
 
+    var jobStatus: JobStatus {
+        JobStatus(rawValue: stop.status) ?? .scheduled
+    }
+
+    // MARK: - Status transitions (explicit driver-triggered, not
+    // automatic GPS proximity - see NotificationService for why)
+    func startDriving() async {
+        guard let route else { return }
+        stop.status = JobStatus.enRoute.rawValue
+        routeService.updateStop(routeId: route.id, stop: stop)
+        await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .enRoute)
+    }
+
+    func markArrived() async {
+        guard let route else { return }
+        stop.status = JobStatus.arrived.rawValue
+        routeService.updateStop(routeId: route.id, stop: stop)
+        await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .arrived)
+    }
+
     // MARK: - MARK STOP COMPLETED
-    func markCompleted() {
+    func markCompleted() async {
         guard let route else { return }
 
         isCompleting = true
         stop.isCompleted = true
+        stop.status = JobStatus.completed.rawValue
 
         routeService.updateStop(routeId: route.id, stop: stop)
+        await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .completed)
         isCompleting = false
     }
 }
@@ -55,6 +77,7 @@ struct DriverStopView: View {
                     // handler, no tracking page built). Re-enable once
                     // customer tracking (Phase 3) is actually wired up -
                     // see smsButton below, left in place for that.
+                    statusControl
                     photoProofButton
                     completeButton
 
@@ -134,6 +157,43 @@ extension DriverStopView {
         }
     }
 
+    // MARK: STATUS CONTROL (En Route / Arrived - each notifies the
+    // customer via NotificationService; Completed is handled by the
+    // existing completeButton below)
+    @ViewBuilder
+    private var statusControl: some View {
+        switch vm.jobStatus {
+        case .scheduled:
+            Button {
+                Task { await vm.startDriving() }
+            } label: {
+                Label("Start Driving", systemImage: "car.fill")
+                    .font(.headline)
+                    .foregroundColor(.black)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color("WRThemeGold"))
+                    .cornerRadius(14)
+            }
+
+        case .enRoute:
+            Button {
+                Task { await vm.markArrived() }
+            } label: {
+                Label("I've Arrived", systemImage: "mappin.circle.fill")
+                    .font(.headline)
+                    .foregroundColor(.black)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color("WRThemeGold"))
+                    .cornerRadius(14)
+            }
+
+        case .arrived, .completed:
+            EmptyView()
+        }
+    }
+
     // MARK: SMS
     private var smsButton: some View {
         Group {
@@ -171,7 +231,7 @@ extension DriverStopView {
     // MARK: COMPLETE BUTTON
     private var completeButton: some View {
         Button {
-            vm.markCompleted()
+            Task { await vm.markCompleted() }
         } label: {
             HStack {
                 if vm.isCompleting {

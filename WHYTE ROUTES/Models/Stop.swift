@@ -1,11 +1,26 @@
 import Foundation
 import CoreLocation
 
+// Job status for this stop, distinct from isCompleted/isSkipped -
+// those two are left exactly as-is (existing screens already depend
+// on them) and stay in sync with status rather than being replaced.
+// "scheduled" has no separate "confirm the appointment" trigger yet -
+// nothing in the app tracks a service date/time to confirm, so that
+// notification type isn't wired up (would need a scheduling feature
+// first, not just a status field).
+enum JobStatus: String {
+    case scheduled
+    case enRoute
+    case arrived
+    case completed
+}
+
 struct Stop: Identifiable {
 
     var id: String = UUID().uuidString
     var customerName: String? = nil
     var customerPhone: String? = nil
+    var customerEmail: String? = nil
     var address: String
     var latitude: Double? = nil
     var longitude: Double? = nil
@@ -13,6 +28,7 @@ struct Stop: Identifiable {
     var isCompleted: Bool = false
     var isSkipped: Bool = false
     var driverId: String? = nil
+    var status: String = JobStatus.scheduled.rawValue
 
     var coordinate: CLLocationCoordinate2D? {
         guard let lat = latitude,
@@ -36,6 +52,7 @@ extension Stop {
         self.id = rawId
         self.customerName = dict["customerName"] as? String
         self.customerPhone = dict["customerPhone"] as? String
+        self.customerEmail = dict["customerEmail"] as? String
         self.address = address
         self.latitude = dict["latitude"] as? Double
         self.longitude = dict["longitude"] as? Double
@@ -43,6 +60,7 @@ extension Stop {
         self.isCompleted = dict["isCompleted"] as? Bool ?? false
         self.isSkipped = dict["isSkipped"] as? Bool ?? false
         self.driverId = dict["driverId"] as? String
+        self.status = dict["status"] as? String ?? JobStatus.scheduled.rawValue
     }
 
     // MARK: Encode for Firestore
@@ -52,10 +70,12 @@ extension Stop {
             "address": address,
             "order": order,
             "isCompleted": isCompleted,
-            "isSkipped": isSkipped
+            "isSkipped": isSkipped,
+            "status": status
         ]
         if let customerName { d["customerName"] = customerName }
         if let customerPhone { d["customerPhone"] = customerPhone }
+        if let customerEmail { d["customerEmail"] = customerEmail }
         if let latitude { d["latitude"] = latitude }
         if let longitude { d["longitude"] = longitude }
         if let driverId { d["driverId"] = driverId }

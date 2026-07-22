@@ -24,6 +24,8 @@ struct CreateRouteView: View {
     struct StopDraft: Identifiable {
         let id = UUID()
         var customerName: String = ""
+        var customerPhone: String = ""
+        var customerEmail: String = ""
         var address: String = ""
         var latitude: Double?
         var longitude: Double?
@@ -53,6 +55,11 @@ struct CreateRouteView: View {
                                 stop.latitude = lat
                                 stop.longitude = lng
                             }
+                            TextField("Phone (for notifications)", text: $stop.customerPhone)
+                                .keyboardType(.phonePad)
+                            TextField("Email (for notifications)", text: $stop.customerEmail)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
                         }
                     }
                     .onDelete { stops.remove(atOffsets: $0) }
@@ -117,6 +124,8 @@ struct CreateRouteView: View {
                     .map { index, draft in
                         Stop(
                             customerName: draft.customerName.isEmpty ? nil : draft.customerName,
+                            customerPhone: draft.customerPhone.isEmpty ? nil : draft.customerPhone,
+                            customerEmail: draft.customerEmail.isEmpty ? nil : draft.customerEmail,
                             address: draft.address,
                             latitude: draft.latitude,
                             longitude: draft.longitude,

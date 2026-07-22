@@ -243,6 +243,17 @@ service cloud.firestore {
             allow create: if isCompanyMember(companyId);
             allow update, delete: if isCompanyStaff(companyId);
           }
+
+          // ── .../stops/{stopId}/notifications/{notificationId} ──
+          // Timestamped log of customer notifications - the proof an
+          // owner points to in a "you never told me" dispute. Same
+          // access shape as photos: any company member (driver
+          // triggering it) can create, only staff edit/delete.
+          match /notifications/{notificationId} {
+            allow read: if isCompanyMember(companyId);
+            allow create: if isCompanyMember(companyId);
+            allow update, delete: if isCompanyStaff(companyId);
+          }
         }
       }
 

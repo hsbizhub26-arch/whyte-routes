@@ -24,6 +24,7 @@ struct EditRouteView: View {
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var historyStop: Stop?
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -60,6 +61,24 @@ struct EditRouteView: View {
                                     AddressAutocompleteField(address: $stop.address) { _, lat, lng in
                                         stop.latitude = lat
                                         stop.longitude = lng
+                                    }
+                                    TextField("Phone (for notifications)", text: Binding(
+                                        get: { stop.customerPhone ?? "" },
+                                        set: { stop.customerPhone = $0.isEmpty ? nil : $0 }
+                                    ))
+                                    .keyboardType(.phonePad)
+                                    TextField("Email (for notifications)", text: Binding(
+                                        get: { stop.customerEmail ?? "" },
+                                        set: { stop.customerEmail = $0.isEmpty ? nil : $0 }
+                                    ))
+                                    .keyboardType(.emailAddress)
+                                    .textInputAutocapitalization(.never)
+
+                                    if originalStopIds.contains(stop.id) {
+                                        Button("View Notification Log") {
+                                            historyStop = stop
+                                        }
+                                        .font(.footnote)
                                     }
                                 }
                             }
@@ -99,6 +118,9 @@ struct EditRouteView: View {
                 }
             }
             .onAppear(perform: loadEverything)
+            .sheet(item: $historyStop) { stop in
+                NotificationHistoryView(routeId: routeId, stop: stop)
+            }
         }
     }
 
