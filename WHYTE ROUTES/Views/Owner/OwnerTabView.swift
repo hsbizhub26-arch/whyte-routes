@@ -34,6 +34,11 @@ struct OwnerTabView: View {
                         Label("Fleet", systemImage: "map")
                     }
 
+                DriverReportsView()
+                    .tabItem {
+                        Label("Reports", systemImage: "doc.text")
+                    }
+
                 ManageEmployeesView()
                     .tabItem {
                         Label("Team", systemImage: "person.badge.plus")

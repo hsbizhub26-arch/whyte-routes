@@ -1,56 +1,43 @@
 import SwiftUI
 
 struct OwnerDashboardView: View {
-    
-    @StateObject private var admin = AdminSession.shared
+
+    @ObservedObject private var companySession = CompanySession.shared
     @StateObject private var driverVM = DriverViewModel()
     @StateObject private var routeService = RouteService.shared
-    
-    @State private var showCustomers = false
-    @State private var showAssign = false
-    @State private var showReports = false
-    @State private var showFleetMap = false
-    
+
     var body: some View {
         ZStack {
             WRTheme.gradient.ignoresSafeArea()
-            
+
             VStack(spacing: 20) {
-                
+
                 header
-                
+
                 HStack(spacing: 14) {
                     dashboardBox(title: "Drivers", value: "\(driverVM.drivers.count)")
                     dashboardBox(title: "Active Routes", value: "\(routeService.routes.count)")
                 }
                 .padding(.horizontal)
-                
-                VStack(spacing: 14) {
-                    GoldButton(title: "CUSTOMERS") { showCustomers = true }
-                    GoldButton(title: "ASSIGN ROUTES") { showAssign = true }
-                    GoldButton(title: "DRIVER REPORTS") { showReports = true }
-                    GoldButton(title: "LIVE FLEET MAP") { showFleetMap = true }
-                }
-                .padding(.horizontal)
-                
+
                 Spacer()
             }
         }
-        .fullScreenCover(isPresented: $showCustomers) { CustomerListView() }
-        .fullScreenCover(isPresented: $showAssign) { AssignRoutesView() }
-        .fullScreenCover(isPresented: $showReports) { DriverReportsView() }
-        .fullScreenCover(isPresented: $showFleetMap) { LiveFleetMapView() }
     }
 }
 
 extension OwnerDashboardView {
-    
+
+    // Customers/Assign/Fleet/Reports used to be repeated here as
+    // buttons AND as tabs below - identical destinations shown twice.
+    // Removed the buttons; the tab bar is the one place to navigate
+    // from now, this screen is just the at-a-glance overview.
     var header: some View {
         HStack {
             VStack(alignment: .leading) {
                 Text("Welcome")
                     .foregroundColor(.white.opacity(0.6))
-                Text(admin.adminName)
+                Text(companySession.currentCompany?.name ?? "your team")
                     .foregroundColor(WRTheme.gold)
                     .font(.title.bold())
             }
