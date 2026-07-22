@@ -140,13 +140,14 @@ final class AuthSession: ObservableObject {
                     if let invite = await self.findUsableInvite(for: user) {
                         await InviteRepository().consume(invite)
 
-                        self.role = await self.resolveRole(
-                            platformAdmin: false,
-                            companyId: invite.companyId,
-                            companyRole: invite.role,
-                            fallbackRole: .driver
-                        )
-
+                        // users/{uid} must be written BEFORE resolveRole()
+                        // runs - resolveRole() bridges the driver session,
+                        // which creates companies/{companyId}/drivers/{uid},
+                        // and that write's Firestore rule reads this
+                        // account's companyId straight from users/{uid}.
+                        // Bridging first (old order) meant that document
+                        // didn't exist yet, so the rule denied the create
+                        // every single time on a driver's first sign-in.
                         let persisted = await UserPermissionsService.shared.createIfNeeded(
                             uid: user.uid,
                             email: user.email ?? "",
@@ -158,6 +159,13 @@ final class AuthSession: ObservableObject {
                             companyRole: invite.role
                         )
                         self.permissionsSyncFailed = !persisted
+
+                        self.role = await self.resolveRole(
+                            platformAdmin: false,
+                            companyId: invite.companyId,
+                            companyRole: invite.role,
+                            fallbackRole: .driver
+                        )
                         self.applySubscription("free")
 
                     } else {

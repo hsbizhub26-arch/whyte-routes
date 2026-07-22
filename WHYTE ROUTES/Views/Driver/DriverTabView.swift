@@ -41,6 +41,8 @@ struct DriverTabView: View {
                 .tag(3)
         }
         .accentColor(Color("WRThemeGold"))
+        .toolbarBackground(Color("WRBlack"), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .onAppear { setupDriverOnLogin() }
     }
 }
