@@ -19,6 +19,13 @@ final class RouteService: ObservableObject {
     @Published private(set) var routes: [Route] = []
     @Published private(set) var stops: [Stop] = []
 
+    // Route documents never carry their own stops (those live in a
+    // subcollection - see StopsRepository), so Route.stops is always
+    // empty when loaded via fetchRoutes/listenToRoutes. reportFor()
+    // needs real stop data to count completions, so this cache is
+    // populated separately per route once its stops are fetched.
+    @Published private(set) var stopsByRoute: [String: [Stop]] = [:]
+
     // MARK: - Dependencies
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -41,6 +48,19 @@ final class RouteService: ObservableObject {
         routeRepo.fetchRoutes { [weak self] routes in
             Task { @MainActor in
                 self?.routes = routes
+                self?.loadStopsForReports(routes)
+            }
+        }
+    }
+
+    // MARK: - Populate stopsByRoute (see its declaration for why this
+    // is needed separately from Route.stops)
+    private func loadStopsForReports(_ routes: [Route]) {
+        for route in routes {
+            stopsRepo.loadStops(forRoute: route.id) { [weak self] stops in
+                Task { @MainActor in
+                    self?.stopsByRoute[route.id] = stops
+                }
             }
         }
     }
@@ -113,7 +133,7 @@ final class RouteService: ObservableObject {
     func reportFor(_ driver: Driver) -> DriverReportSummary {
         let driverStops = routes
             .filter { $0.driverId == driver.id }
-            .flatMap { $0.stops }
+            .flatMap { stopsByRoute[$0.id] ?? [] }
 
         let completed = driverStops.filter { $0.isCompleted }.count
 

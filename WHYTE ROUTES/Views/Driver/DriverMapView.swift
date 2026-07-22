@@ -141,7 +141,7 @@ struct DriverMapView: View {
     // MARK: - STOP DETAIL SHEET
     private var stopSheet: some View {
         Group {
-            if let stop = vm.selectedStop {
+            if vm.selectedStop != nil {
                 EmptyView()
                     .sheet(item: Binding<Stop?>(
                         get: { vm.selectedStop },

@@ -79,17 +79,6 @@ final class DeleteAccountManager: ObservableObject {
         self.errorMessage = Self.friendlyErrorMessage(from: error)
     }
 
-    func deleteCurrentUser(completion: @escaping (Result<Void, Error>) -> Void) {
-        Task {
-            do {
-                try await self.deleteCurrentUser()
-                await MainActor.run { completion(.success(())) }
-            } catch {
-                await MainActor.run { completion(.failure(error)) }
-            }
-        }
-    }
-
     private static func friendlyErrorMessage(from error: Error) -> String {
         let nsError = error as NSError
         if nsError.domain == AuthErrorDomain,
