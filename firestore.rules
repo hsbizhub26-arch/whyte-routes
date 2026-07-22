@@ -175,12 +175,18 @@ service cloud.firestore {
     // any company. Creating/editing companies (onboarding, changing
     // subscription tier/status) is a platform-admin action for now -
     // TODO(self-serve signup / Phase 6): allow a company's own owner
-    // to update their non-billing fields (e.g. name) once a self-serve
-    // onboarding flow exists.
+    // to update other non-billing fields (e.g. name) once a self-serve
+    // onboarding flow exists. navigationSettings is the first
+    // narrow exception: a company owner may update ONLY that field on
+    // their own company - checked via affectedKeys() so this can never
+    // be used to touch name/subscriptionTier/billingRequired/ownerUID.
 
     match /companies/{companyId} {
       allow read: if canAccessCompany(companyId);
-      allow create, update, delete: if isPlatformAdmin();
+      allow create, delete: if isPlatformAdmin();
+      allow update: if isPlatformAdmin()
+                    || (isCompanyOwnerRole(companyId)
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['navigationSettings']));
 
       // ── companies/{companyId}/drivers/{driverId} ─────────
       // Contains PII (name, phone) alongside location - authenticated

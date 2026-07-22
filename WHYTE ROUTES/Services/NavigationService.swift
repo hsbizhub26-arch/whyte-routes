@@ -37,7 +37,7 @@ final class NavigationService {
         // Mapping to Waze is implicit; Waze doesn't expose mode in URL, defaults to driving
     }
 
-    enum MapApp {
+    enum MapApp: String {
         case appleMaps
         case googleMaps
         case waze
@@ -65,11 +65,19 @@ final class NavigationService {
     ///   - mode: Directions mode.
     /// - Returns: `true` if the request was initiated, `false` otherwise.
     @discardableResult
-    static func openInGoogleMaps(_ coordinate: CLLocationCoordinate2D, name: String? = nil, mode: DirectionsMode = .driving) -> Bool {
+    static func openInGoogleMaps(_ coordinate: CLLocationCoordinate2D, name: String? = nil, mode: DirectionsMode = .driving, avoidTolls: Bool = false, avoidHighways: Bool = false) -> Bool {
         let lat = coordinate.latitude
         let lon = coordinate.longitude
+        // Google Maps' URL scheme is the one provider of the three
+        // that actually supports avoid params - "tolls"/"highways" are
+        // the only recognized values (no HOV option exists here either).
+        var avoid: [String] = []
+        if avoidTolls { avoid.append("tolls") }
+        if avoidHighways { avoid.append("highways") }
+        let avoidParam = avoid.isEmpty ? "" : "&avoid=\(avoid.joined(separator: ","))"
+
         // App URL scheme
-        let appURLString = "comgooglemaps://?daddr=\(lat),\(lon)&directionsmode=\(mode.googleMapsMode)"
+        let appURLString = "comgooglemaps://?daddr=\(lat),\(lon)&directionsmode=\(mode.googleMapsMode)\(avoidParam)"
         guard let appURL = URL(string: appURLString) else {
             print("[NavigationService] Failed to build Google Maps URL.")
             return false
@@ -93,6 +101,9 @@ final class NavigationService {
             // Append a query to include name in path when possible
             // Google Maps web supports destination by query string as well
             queryItems.append(URLQueryItem(name: "query", value: name))
+        }
+        if !avoid.isEmpty {
+            queryItems.append(URLQueryItem(name: "avoid", value: avoid.joined(separator: ",")))
         }
         components?.queryItems = queryItems
 
@@ -133,12 +144,22 @@ final class NavigationService {
     }
 
     /// Navigate to a coordinate using a preferred app with fallbacks.
-    static func navigate(to coordinate: CLLocationCoordinate2D, name: String = "Destination", preferred: MapApp = .appleMaps, mode: DirectionsMode = .driving) {
+    /// avoidTolls/avoidHighways are only actually honored for Google
+    /// Maps - see NavigationSettings for why (no such option exists in
+    /// Apple Maps' or Waze's external launch APIs).
+    static func navigate(
+        to coordinate: CLLocationCoordinate2D,
+        name: String = "Destination",
+        preferred: MapApp = .appleMaps,
+        mode: DirectionsMode = .driving,
+        avoidTolls: Bool = false,
+        avoidHighways: Bool = false
+    ) {
         switch preferred {
         case .appleMaps:
             openInAppleMaps(coordinate, name: name, mode: mode)
         case .googleMaps:
-            if !openInGoogleMaps(coordinate, name: name, mode: mode) {
+            if !openInGoogleMaps(coordinate, name: name, mode: mode, avoidTolls: avoidTolls, avoidHighways: avoidHighways) {
                 // Fallback to Apple Maps
                 openInAppleMaps(coordinate, name: name, mode: mode)
             }
@@ -150,13 +171,22 @@ final class NavigationService {
         }
     }
 
-    /// Navigate to a Stop model (requires `Stop.coordinate`).
-    static func navigate(to stop: Stop, preferred: MapApp = .appleMaps, mode: DirectionsMode = .driving) {
+    /// Navigate to a Stop model (requires `Stop.coordinate`), applying
+    /// the company's own NavigationSettings.
+    static func navigate(to stop: Stop, settings: NavigationSettings = NavigationSettings(), mode: DirectionsMode = .driving) {
         guard let coordinate = stop.coordinate else {
             print("[NavigationService] Stop has no coordinate.")
             return
         }
         let name = stop.customerName ?? "Destination"
-        navigate(to: coordinate, name: name, preferred: preferred, mode: mode)
+        let preferred = MapApp(rawValue: settings.preferredProvider) ?? .appleMaps
+        navigate(
+            to: coordinate,
+            name: name,
+            preferred: preferred,
+            mode: mode,
+            avoidTolls: settings.avoidTolls,
+            avoidHighways: settings.avoidHighways
+        )
     }
 }

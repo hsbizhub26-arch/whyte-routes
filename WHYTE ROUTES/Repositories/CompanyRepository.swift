@@ -40,6 +40,22 @@ final class CompanyRepository {
         }
     }
 
+    /// Targeted update (not a full setData) - only ever touches this
+    /// one field, which is what the Firestore rule for this specific
+    /// case checks (a company owner may update navigationSettings on
+    /// their own company; nothing else is opened up by this path -
+    /// name/subscriptionTier/billing stay platform-admin-only).
+    func updateNavigationSettings(companyId: String, settings: NavigationSettings) async -> Bool {
+        do {
+            try await db.collection("companies").document(companyId)
+                .updateData(["navigationSettings": settings.toDict()])
+            return true
+        } catch {
+            print("⚠️ CompanyRepository.updateNavigationSettings(\(companyId)) failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     @discardableResult
     func create(_ company: Company) async -> Company? {
         let docRef = db.collection("companies").document()

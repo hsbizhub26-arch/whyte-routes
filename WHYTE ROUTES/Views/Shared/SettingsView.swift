@@ -30,6 +30,17 @@ struct SettingsView: View {
                         .foregroundColor(.gray)
                 }
                 Section {
+                    NavigationLink(destination: NavigationSettingsView()) {
+                        Text("Navigation Settings")
+                    }
+                    .listRowBackground(Color.black.opacity(0.2))
+                } header: {
+                    Text("Driver Navigation")
+                } footer: {
+                    Text("Applied automatically whenever a driver taps Navigate on a stop.")
+                        .foregroundColor(.gray)
+                }
+                Section {
                     NavigationLink(destination: PermissionsHelpView()) {
                         Text("Permissions Help")
                     }

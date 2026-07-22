@@ -8,7 +8,14 @@ struct NavigationButton: View {
     var body: some View {
         Button {
             if let coordinate {
-                NavigationService.navigate(to: coordinate)
+                let settings = CompanySession.shared.currentCompany?.navigationSettings ?? NavigationSettings()
+                let preferred = NavigationService.MapApp(rawValue: settings.preferredProvider) ?? .appleMaps
+                NavigationService.navigate(
+                    to: coordinate,
+                    preferred: preferred,
+                    avoidTolls: settings.avoidTolls,
+                    avoidHighways: settings.avoidHighways
+                )
             }
         } label: {
             Text("Navigate")

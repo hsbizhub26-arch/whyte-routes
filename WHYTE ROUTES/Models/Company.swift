@@ -22,6 +22,8 @@ struct Company: Identifiable {
     var billingRequired: Bool
 
     var createdAt: Date
+
+    var navigationSettings: NavigationSettings = NavigationSettings()
 }
 
 extension Company {
@@ -38,6 +40,7 @@ extension Company {
         self.subscriptionTier = dict["subscriptionTier"] as? String ?? "free"
         self.subscriptionStatus = dict["subscriptionStatus"] as? String ?? "trialing"
         self.billingRequired = dict["billingRequired"] as? Bool ?? true
+        self.navigationSettings = NavigationSettings(from: dict["navigationSettings"] as? [String: Any])
 
         if let ts = dict["createdAt"] as? Timestamp {
             self.createdAt = ts.dateValue()
@@ -53,7 +56,8 @@ extension Company {
             "subscriptionTier": subscriptionTier,
             "subscriptionStatus": subscriptionStatus,
             "billingRequired": billingRequired,
-            "createdAt": Timestamp(date: createdAt)
+            "createdAt": Timestamp(date: createdAt),
+            "navigationSettings": navigationSettings.toDict()
         ]
     }
 
