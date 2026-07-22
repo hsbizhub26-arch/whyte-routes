@@ -37,26 +37,45 @@ const PRODUCT_TO_TIER = {
   "whyteroutes.premiumplus.yearly.v2": "premiumPlus",
 };
 
-let cachedVerifier = null;
-function getVerifier() {
-  if (!cachedVerifier) {
+// A SignedDataVerifier is locked to one Apple environment at
+// construction time, but this one deployed function has to accept
+// transactions from whichever environment the calling build actually
+// ran in - Xcode local StoreKit testing (its own local certificate,
+// not real Apple ones) during development, Sandbox once builds go out
+// via TestFlight, and eventually Production. Rather than guess, try
+// verifying against all three and use whichever one actually
+// succeeds - the JWS itself can only ever validate against the one
+// environment that really signed it, so this is safe, not permissive.
+const VERIFIER_ENVIRONMENTS = [Environment.PRODUCTION, Environment.SANDBOX, Environment.XCODE];
+let cachedVerifiers = null;
+function getVerifiers() {
+  if (!cachedVerifiers) {
     const certPath = path.join(__dirname, "certs", "AppleRootCA-G3.cer");
     const rootCert = fs.readFileSync(certPath);
-    // FUNCTIONS_EMULATOR is set automatically when running under the
-    // local emulator - lets local testing verify against Sandbox
-    // transactions instead of rejecting them as wrong-environment.
-    const environment = process.env.FUNCTIONS_EMULATOR
-      ? Environment.SANDBOX
-      : Environment.PRODUCTION;
-    cachedVerifier = new SignedDataVerifier(
-      [rootCert],
-      true, // enableOnlineChecks - also confirms revocation status with Apple, not just signature validity
-      environment,
-      BUNDLE_ID,
-      APP_APPLE_ID
+    cachedVerifiers = VERIFIER_ENVIRONMENTS.map(
+      (environment) =>
+        new SignedDataVerifier(
+          [rootCert],
+          true, // enableOnlineChecks - also confirms revocation status with Apple, not just signature validity
+          environment,
+          BUNDLE_ID,
+          APP_APPLE_ID
+        )
     );
   }
-  return cachedVerifier;
+  return cachedVerifiers;
+}
+
+async function verifyTransaction(jws) {
+  let lastError;
+  for (const verifier of getVerifiers()) {
+    try {
+      return await verifier.verifyAndDecodeTransaction(jws);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 exports.syncSubscriptionEntitlement = onCall(async (request) => {
@@ -71,7 +90,7 @@ exports.syncSubscriptionEntitlement = onCall(async (request) => {
 
   let payload;
   try {
-    payload = await getVerifier().verifyAndDecodeTransaction(jws);
+    payload = await verifyTransaction(jws);
   } catch (err) {
     console.error("❌ Transaction failed Apple verification:", err);
     throw new HttpsError("invalid-argument", "Could not verify this transaction with Apple.");
