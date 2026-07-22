@@ -176,16 +176,15 @@ struct EditRouteView: View {
         }
     }
 
-    // Row action buttons are given explicit vertical padding (not just
-    // their text glyphs) so each has a real tap target - the previous
-    // plain-text buttons packed a driver-hand-unfriendly, sub-44pt
-    // target into a Form row and were easy to mis-tap on a real phone.
+    // A plain iconless tap target, used only for the one action that
+    // stays visible inline (linking a legacy stop to a customer record)
+    // rather than living in the overflow menu below.
     private func rowActionButton(_ title: String, color: Color = .yellow, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.subheadline)
+                .font(.footnote)
                 .foregroundColor(color)
-                .padding(.vertical, 8)
+                .padding(.vertical, 4)
         }
         .contentShape(Rectangle())
         .buttonStyle(.borderless)
@@ -193,39 +192,39 @@ struct EditRouteView: View {
 
     @ViewBuilder
     private func stopRow(_ stop: Stop) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if stop.customerId != nil {
-                Text(stop.customerName ?? "Customer")
-                    .font(.headline)
-                Text(stop.address)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                if let phone = stop.customerPhone, !phone.isEmpty {
-                    Text(phone)
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                if stop.customerId != nil {
+                    Text(stop.customerName ?? "Customer")
+                        .font(.headline)
+                    Text(stop.address)
                         .font(.caption)
                         .foregroundColor(.secondary)
-                }
-                rowActionButton("Change Customer") {
-                    pickerTargetId = stop.id
-                }
-            } else {
-                // Legacy stop, created before customer linking existed -
-                // still works via its own cached fields (see
-                // NotificationService), but offer an easy upgrade path.
-                if let name = stop.customerName, !name.isEmpty {
-                    Text(name).font(.headline)
-                    Text(stop.address).font(.caption).foregroundColor(.secondary)
-                }
-                rowActionButton(stop.customerName?.isEmpty == false ? "Link to a Customer Record" : "Select Customer") {
-                    pickerTargetId = stop.id
+                    if let phone = stop.customerPhone, !phone.isEmpty {
+                        Text(phone)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    // Legacy stop, created before customer linking existed -
+                    // still works via its own cached fields (see
+                    // NotificationService), but offer an easy upgrade path.
+                    // Kept visible inline (not in the overflow menu) since
+                    // an unlinked stop is missing data, not just an
+                    // optional extra action.
+                    if let name = stop.customerName, !name.isEmpty {
+                        Text(name).font(.headline)
+                        Text(stop.address).font(.caption).foregroundColor(.secondary)
+                    }
+                    rowActionButton(stop.customerName?.isEmpty == false ? "Link to a Customer Record" : "Select Customer") {
+                        pickerTargetId = stop.id
+                    }
                 }
             }
 
-            if originalStopIds.contains(stop.id) {
-                rowActionButton("View Notification Log") {
-                    historyStop = stop
-                }
+            Spacer(minLength: 8)
 
+            if originalStopIds.contains(stop.id) {
                 // Live, immediate overrides - not staged into the Save
                 // button below, which batches a local snapshot taken
                 // when this screen opened and would risk overwriting
@@ -237,19 +236,42 @@ struct EditRouteView: View {
                 //   driving by (mark it done directly)
                 // - one driver finished early and can take over a stop
                 //   still sitting on someone else's route (move it)
-                HStack(spacing: 28) {
-                    rowActionButton(
-                        stop.isCompleted ? "Mark Incomplete" : "Mark Complete",
-                        color: stop.isCompleted ? .orange : .green
-                    ) {
-                        toggleCompletion(stop)
-                    }
+                //
+                // Mark Complete stays as its own tap target since it's
+                // the action used on nearly every stop; everything else
+                // is rarer per-stop and lives in the overflow menu so
+                // the row stays scannable instead of stacking five
+                // buttons under every single stop.
+                Button {
+                    toggleCompletion(stop)
+                } label: {
+                    Image(systemName: stop.isCompleted ? "checkmark.circle.fill" : "circle")
+                        .font(.title2)
+                        .foregroundColor(stop.isCompleted ? .green : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
 
-                    rowActionButton("Move to Another Route") {
+                Menu {
+                    if stop.customerId != nil {
+                        Button("Change Customer") {
+                            pickerTargetId = stop.id
+                        }
+                    }
+                    Button("View Notification Log") {
+                        historyStop = stop
+                    }
+                    Button("Move to Another Route") {
                         moveTargetStop = stop
                         loadOtherRoutes()
                     }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
                 }
+                .frame(width: 44, height: 44)
             }
         }
         .padding(.vertical, 4)
