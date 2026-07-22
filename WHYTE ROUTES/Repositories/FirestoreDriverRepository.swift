@@ -141,4 +141,16 @@ final class FirestoreDriverRepository: DriverRepository {
                 "updatedAt": FieldValue.serverTimestamp()
             ])
     }
+
+    /// Called on whichever driver a route is being taken AWAY from
+    /// during reassignment, so their own activeRoute pointer doesn't
+    /// keep referencing a route that's no longer theirs.
+    func clearActiveRoute(driverId: String) {
+        driversRef?
+            .document(driverId)
+            .updateData([
+                "activeRoute": FieldValue.delete(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ])
+    }
 }

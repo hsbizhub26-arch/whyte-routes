@@ -85,6 +85,38 @@ final class RouteRepository {
             }
     }
 
+    // MARK: - Fetch a Single Route
+    func fetchRoute(routeId: String, completion: @escaping (Route?) -> Void) {
+        guard let ref = routesRef?.document(routeId) else { completion(nil); return }
+        ref.getDocument { snapshot, error in
+            guard error == nil, let data = snapshot?.data() else {
+                completion(nil)
+                return
+            }
+            completion(Route(from: data, id: routeId))
+        }
+    }
+
+    // MARK: - Rename / Reassign an Existing Route
+    func updateRoute(routeId: String, name: String, driverId: String?, completion: ((Bool) -> Void)? = nil) {
+        guard let ref = routesRef?.document(routeId) else { completion?(false); return }
+
+        var data: [String: Any] = [
+            "name": name,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        data["driverId"] = driverId ?? ""
+
+        ref.updateData(data) { error in
+            if let error = error {
+                print("❌ Failed updating route:", error.localizedDescription)
+                completion?(false)
+            } else {
+                completion?(true)
+            }
+        }
+    }
+
     // MARK: - Update Route Status
     func updateStatus(routeId: String, status: String) {
         routesRef?

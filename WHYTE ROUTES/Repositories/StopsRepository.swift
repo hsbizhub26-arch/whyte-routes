@@ -81,4 +81,24 @@ final class StopsRepository {
             }
         }
     }
+
+    // MARK: - Delete Single Stop (removed while editing a route)
+    func deleteStop(routeId: String,
+                    stopId: String,
+                    completion: ((Bool) -> Void)? = nil) {
+
+        guard let stopRef = routeRef(routeId)?.collection("stops").document(stopId) else {
+            completion?(false)
+            return
+        }
+
+        stopRef.delete { error in
+            if let error = error {
+                print("❌ Failed deleting stop:", error.localizedDescription)
+                completion?(false)
+            } else {
+                completion?(true)
+            }
+        }
+    }
 }
