@@ -39,6 +39,7 @@
 				Entitlements/AppEntitlements.swift,
 				Entitlements/EntitlementEvents.swift,
 				Entitlements/EntitlementKeys.swift,
+				Entitlements/FeatureAccessManager.swift,
 				Entitlements/LocalEntitlementStore.swift,
 				Entitlements/SubscriptionSyncService.swift,
 				Entitlements/UserPermissionsService.swift,
@@ -119,6 +120,7 @@
 				Views/Shared/PhotoProofView.swift,
 				Views/Shared/PhotoUploader.swift,
 				Views/Shared/SettingsView.swift,
+				Views/Shared/UpgradeRequiredView.swift,
 			);
 			target = 8D792BE82EDC236C00586CA8 /* WHYTE ROUTES */;
 		};

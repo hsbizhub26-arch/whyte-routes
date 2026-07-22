@@ -4,6 +4,7 @@ import MapKit
 struct LiveFleetMapView: View {
 
     @StateObject private var driverVM = DriverViewModel()
+    @ObservedObject private var access = FeatureAccessManager.shared
 
     @State private var region = MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 43.7, longitude: -79.4),
@@ -11,6 +12,14 @@ struct LiveFleetMapView: View {
     )
 
     var body: some View {
+        if access.canAccessLiveFleetMap() {
+            map
+        } else {
+            UpgradeRequiredView(featureName: "Live Fleet Map", requiredTier: access.requiredTierForLiveFleetMap)
+        }
+    }
+
+    private var map: some View {
         Map(coordinateRegion: $region,
             annotationItems: driverVM.drivers.filter { $0.coordinate != nil }) { driver in
 

@@ -58,6 +58,7 @@ struct DriverStopView: View {
 
     @StateObject private var vm: DriverStopViewModel
     @ObservedObject private var session = DriverSession.shared
+    @ObservedObject private var access = FeatureAccessManager.shared
     @State private var showPhotoCapture = false
     @State private var proofPhotoURL: String?
 
@@ -81,7 +82,9 @@ struct DriverStopView: View {
                     // customer tracking (Phase 3) is actually wired up -
                     // see smsButton below, left in place for that.
                     statusControl
-                    photoProofButton
+                    if access.canAccessProofOfWork() {
+                        photoProofButton
+                    }
                     completeButton
 
                     Spacer(minLength: 40)

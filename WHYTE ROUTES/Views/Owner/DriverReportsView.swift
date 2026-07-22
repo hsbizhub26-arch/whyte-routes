@@ -4,6 +4,7 @@ struct DriverReportsView: View {
 
     @StateObject private var routeService = RouteService.shared
     @StateObject private var driverVM = DriverViewModel()
+    @ObservedObject private var access = FeatureAccessManager.shared
 
     var body: some View {
         NavigationStack {
@@ -19,7 +20,19 @@ struct DriverReportsView: View {
 
                         ForEach(driverVM.drivers) { driver in
                             NavigationLink {
-                                DriverTimeReportView(driver: driver)
+                                // Basic completed-stops/KM summary above
+                                // is available to every tier; the
+                                // travel/service-time breakdown behind
+                                // this tap is the "Driver performance
+                                // reports" feature named as Premium Plus.
+                                if access.canAccessDriverPerformanceReports() {
+                                    DriverTimeReportView(driver: driver)
+                                } else {
+                                    UpgradeRequiredView(
+                                        featureName: "Driver Performance Reports",
+                                        requiredTier: access.requiredTierForDriverPerformanceReports
+                                    )
+                                }
                             } label: {
                                 reportCard(driver)
                             }

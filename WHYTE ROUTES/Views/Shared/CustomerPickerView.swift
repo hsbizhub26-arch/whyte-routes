@@ -11,9 +11,11 @@ struct CustomerPickerView: View {
     var onSelect: (Customer) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var access = FeatureAccessManager.shared
     @State private var customers: [Customer] = []
     @State private var isLoading = true
     @State private var showCreateNew = false
+    @State private var showUpgradePrompt = false
 
     private let repo = CustomerRepository()
 
@@ -27,7 +29,15 @@ struct CustomerPickerView: View {
                     List {
                         Section {
                             Button {
-                                showCreateNew = true
+                                // Same limit enforced here as on the
+                                // Customers tab - this is a second,
+                                // separate entry point into customer
+                                // creation and must not bypass it.
+                                if access.canAddCustomer(currentCount: customers.count) {
+                                    showCreateNew = true
+                                } else {
+                                    showUpgradePrompt = true
+                                }
                             } label: {
                                 Label("Create New Customer", systemImage: "person.badge.plus")
                             }
@@ -66,6 +76,12 @@ struct CustomerPickerView: View {
                     onSelect(newCustomer)
                     dismiss()
                 }
+            }
+            .sheet(isPresented: $showUpgradePrompt) {
+                UpgradeRequiredView(
+                    featureName: "More Customers",
+                    requiredTier: SubscriptionTier(rawValue: access.tier.rawValue + 1) ?? .enterprise
+                )
             }
         }
     }

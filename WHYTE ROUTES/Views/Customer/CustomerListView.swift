@@ -37,7 +37,9 @@ final class CustomerListViewModel: ObservableObject {
 struct CustomerListView: View {
 
     @StateObject private var vm = CustomerListViewModel()
+    @ObservedObject private var access = FeatureAccessManager.shared
     @State private var showAddCustomer = false
+    @State private var showUpgradePrompt = false
 
     var body: some View {
         NavigationStack {
@@ -45,6 +47,13 @@ struct CustomerListView: View {
                 TextField("Search customers…", text: $vm.search)
                     .textFieldStyle(.roundedBorder)
                     .padding()
+
+                if let limit = access.customerLimit {
+                    Text("\(vm.customers.count) of \(limit) customers used (\(access.tier.displayName) plan)")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                }
 
                 if vm.isLoading {
                     ProgressView("Loading customers…")
@@ -74,7 +83,14 @@ struct CustomerListView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        showAddCustomer = true
+                        // Checked here, not just at save time, so a
+                        // company at its limit never even sees the
+                        // form - no path exists to create past it.
+                        if access.canAddCustomer(currentCount: vm.customers.count) {
+                            showAddCustomer = true
+                        } else {
+                            showUpgradePrompt = true
+                        }
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
@@ -82,6 +98,12 @@ struct CustomerListView: View {
             }
             .sheet(isPresented: $showAddCustomer) {
                 AddCustomerView { _ in vm.load() }
+            }
+            .sheet(isPresented: $showUpgradePrompt) {
+                UpgradeRequiredView(
+                    featureName: "More Customers",
+                    requiredTier: SubscriptionTier(rawValue: access.tier.rawValue + 1) ?? .enterprise
+                )
             }
         }
     }
