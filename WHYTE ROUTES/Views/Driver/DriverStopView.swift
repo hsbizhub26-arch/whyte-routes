@@ -100,9 +100,17 @@ struct DriverStopView: View {
                     // customer tracking (Phase 3) is actually wired up -
                     // see smsButton below, left in place for that.
                     statusControl
-                    if access.canAccessProofOfWork() {
-                        photoProofButton
-                    }
+                    // photoProofButton intentionally hidden for the snow
+                    // beta - a photo step adds real friction to exactly
+                    // what overnight snow ops needs to be fast: gloves,
+                    // darkness, snow falling, dozens of properties to
+                    // clear before people wake up. Not tier-gating this
+                    // away (access.canAccessProofOfWork() still governs
+                    // whether it WOULD show), just not calling it -
+                    // PhotoProofView/PhotoUploader/the Storage rules all
+                    // stay intact for landscaping jobs, where before/after
+                    // photos are genuinely useful and driver pace isn't
+                    // the same constraint.
                     completeButton
 
                     Spacer(minLength: 40)
