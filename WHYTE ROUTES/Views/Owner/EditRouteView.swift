@@ -26,10 +26,16 @@ struct EditRouteView: View {
     @State private var errorMessage: String?
     @State private var historyStop: Stop?
     @State private var pickerTargetId: String?
+    @State private var showUpgradePrompt = false
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
     private let driverRepo = FirestoreDriverRepository()
+    private let access = FeatureAccessManager.shared
+
+    private var approximateDistanceKM: Double {
+        RouteOptimizationService.totalDistanceKM(stops)
+    }
 
     var body: some View {
         NavigationStack {
@@ -66,10 +72,26 @@ struct EditRouteView: View {
                             } label: {
                                 Label("Add Stop", systemImage: "plus.circle")
                             }
+
+                            if stops.count > 2 {
+                                Button {
+                                    if access.canAccessAdvancedDispatch() {
+                                        stops = RouteOptimizationService.optimize(stops)
+                                    } else {
+                                        showUpgradePrompt = true
+                                    }
+                                } label: {
+                                    Label("Optimize Route", systemImage: "wand.and.stars")
+                                }
+                            }
                         } header: {
                             Text("Stops")
                         } footer: {
-                            Text("Drag to reorder - the driver sees stops in this order.")
+                            if approximateDistanceKM > 0 {
+                                Text("Drag to reorder - the driver sees stops in this order. Approx. \(approximateDistanceKM, specifier: "%.1f") km straight-line (not actual driving distance).")
+                            } else {
+                                Text("Drag to reorder - the driver sees stops in this order.")
+                            }
                         }
 
                         if let errorMessage {
@@ -104,6 +126,9 @@ struct EditRouteView: View {
                 CustomerPickerView { customer in
                     apply(customer, toStopId: pickerTargetId)
                 }
+            }
+            .sheet(isPresented: $showUpgradePrompt) {
+                UpgradeRequiredView(featureName: "Route Optimization", requiredTier: .premiumPlus)
             }
         }
     }

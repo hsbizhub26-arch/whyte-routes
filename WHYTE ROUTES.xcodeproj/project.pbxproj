@@ -72,6 +72,7 @@
 				Services/NavigationService.swift,
 				Services/NotificationService.swift,
 				Services/RealtimeLocationManager.swift,
+				Services/RouteOptimizationService.swift,
 				Services/SMSService.swift,
 				Utilities/TimestampFormatter.swift,
 				ViewModels/Driver/DriverNextStopController.swift,
