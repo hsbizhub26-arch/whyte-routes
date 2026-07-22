@@ -74,6 +74,7 @@
 				ViewModels/DriverViewModel.swift,
 				Views/Common/LoadingScreen.swift,
 				Views/Components/SMSButton.swift,
+				Views/Customer/AddCustomerView.swift,
 				Views/Customer/CustomerListView.swift,
 				Views/Driver/DriverDashboardView.swift,
 				Views/Driver/DriverDetailView.swift,

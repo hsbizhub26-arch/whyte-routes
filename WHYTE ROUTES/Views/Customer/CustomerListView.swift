@@ -37,25 +37,52 @@ final class CustomerListViewModel: ObservableObject {
 struct CustomerListView: View {
 
     @StateObject private var vm = CustomerListViewModel()
+    @State private var showAddCustomer = false
 
     var body: some View {
-        VStack {
-            TextField("Search customers…", text: $vm.search)
-                .textFieldStyle(.roundedBorder)
-                .padding()
+        NavigationStack {
+            VStack {
+                TextField("Search customers…", text: $vm.search)
+                    .textFieldStyle(.roundedBorder)
+                    .padding()
 
-            if vm.isLoading {
-                ProgressView("Loading customers…")
-                Spacer()
-            } else {
-                List(vm.filtered) { customer in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(customer.name).font(.headline)
-                        Text(customer.address).font(.subheadline).foregroundColor(.secondary)
+                if vm.isLoading {
+                    ProgressView("Loading customers…")
+                    Spacer()
+                } else if vm.customers.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("No customers yet")
+                            .font(.headline)
+                        Text("Tap + to add your first customer.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(vm.filtered) { customer in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(customer.name).font(.headline)
+                            Text(customer.address).font(.subheadline).foregroundColor(.secondary)
+                        }
                     }
                 }
             }
+            .navigationTitle("Customers")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showAddCustomer = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                    }
+                }
+            }
+            .sheet(isPresented: $showAddCustomer) {
+                AddCustomerView { vm.load() }
+            }
         }
-        .navigationTitle("Customers")
     }
 }
