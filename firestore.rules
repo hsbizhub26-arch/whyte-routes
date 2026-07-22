@@ -74,6 +74,30 @@ service cloud.firestore {
       return isPlatformAdmin() || isCompanyMember(companyId);
     }
 
+    // True if a still-PENDING invite exists, addressed to this
+    // requester's own verified email or phone, for exactly this
+    // companyId/role. Lets a self-created users/{uid} document set
+    // companyId/companyRole at creation time without that being a
+    // self-granted privilege - the invite is proof someone's company
+    // owner already granted it. Checked against 'pending' (not
+    // 'accepted') specifically because the app writes users/{uid}
+    // BEFORE marking the invite consumed, so this can never be
+    // satisfied twice by the same invite.
+    function usableInviteMatches(companyId, role) {
+      return
+        (('email' in request.auth.token)
+          && exists(/databases/$(database)/documents/invites/$(request.auth.token.email.lower()))
+          && get(/databases/$(database)/documents/invites/$(request.auth.token.email.lower())).data.companyId == companyId
+          && get(/databases/$(database)/documents/invites/$(request.auth.token.email.lower())).data.role == role
+          && get(/databases/$(database)/documents/invites/$(request.auth.token.email.lower())).data.status == 'pending')
+        ||
+        (('phone_number' in request.auth.token)
+          && exists(/databases/$(database)/documents/invites/$(request.auth.token.phone_number))
+          && get(/databases/$(database)/documents/invites/$(request.auth.token.phone_number)).data.companyId == companyId
+          && get(/databases/$(database)/documents/invites/$(request.auth.token.phone_number)).data.role == role
+          && get(/databases/$(database)/documents/invites/$(request.auth.token.phone_number)).data.status == 'pending');
+    }
+
     // ── users/{uid} — role + company membership + subscription ─────
     // Every signed-in user may read/create only their own document.
     // Creating with platformAdmin: true is only allowed for the two
@@ -106,6 +130,18 @@ service cloud.firestore {
                            && (!('platformAdmin' in request.resource.data) || request.resource.data.platformAdmin == false)
                            && !('companyId' in request.resource.data)
                            && !('companyRole' in request.resource.data))
+                         ||
+                         // Accepting a real invite: companyId/companyRole
+                         // ARE present, but only allowed when they match
+                         // a pending invite addressed to this account's
+                         // own verified identity - not self-granted.
+                         (!isPlatformAdminUID(userId)
+                           && request.resource.data.role != 'owner'
+                           && request.resource.data.isAdmin == false
+                           && (!('platformAdmin' in request.resource.data) || request.resource.data.platformAdmin == false)
+                           && request.resource.data.companyId is string
+                           && request.resource.data.companyRole is string
+                           && usableInviteMatches(request.resource.data.companyId, request.resource.data.companyRole))
                        );
 
       allow update: if isSignedIn() && (

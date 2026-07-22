@@ -54,6 +54,15 @@ struct DriverMapView: View {
     var body: some View {
         ZStack {
             mapLayer
+                .ignoresSafeArea()
+
+            // topButtons/stopSheet/waitingForGPSBanner deliberately do
+            // NOT ignore the safe area - the map filling the whole
+            // screen is correct, but UI overlays need the safe-area
+            // padding to stay clear of the tab bar. Applying
+            // ignoresSafeArea() to this entire ZStack (old code) made
+            // the banner lose that padding and render on top of the
+            // tab bar instead of above it.
             topButtons
             stopSheet
 
@@ -61,7 +70,6 @@ struct DriverMapView: View {
                 waitingForGPSBanner
             }
         }
-        .ignoresSafeArea()
     }
 
     // Shown until the first GPS fix arrives - true before a shift has

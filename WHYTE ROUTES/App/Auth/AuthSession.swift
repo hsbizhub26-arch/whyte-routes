@@ -138,16 +138,25 @@ final class AuthSession: ObservableObject {
                     self.isPlatformAdmin = false
 
                     if let invite = await self.findUsableInvite(for: user) {
-                        await InviteRepository().consume(invite)
-
-                        // users/{uid} must be written BEFORE resolveRole()
-                        // runs - resolveRole() bridges the driver session,
-                        // which creates companies/{companyId}/drivers/{uid},
-                        // and that write's Firestore rule reads this
-                        // account's companyId straight from users/{uid}.
-                        // Bridging first (old order) meant that document
-                        // didn't exist yet, so the rule denied the create
-                        // every single time on a driver's first sign-in.
+                        // Order matters, and is enforced by the Firestore
+                        // rules, not just convention:
+                        // 1. createIfNeeded() writes users/{uid} WHILE the
+                        //    invite is still "pending" - the rule for
+                        //    self-creating with companyId/companyRole set
+                        //    only allows it when it matches a pending
+                        //    invite addressed to this account's own
+                        //    verified identity (see usableInviteMatches
+                        //    in firestore.rules). This is what proves the
+                        //    membership was actually granted by an owner,
+                        //    not self-claimed.
+                        // 2. consume() marks the invite "accepted" only
+                        //    AFTER users/{uid} exists - so a failed create
+                        //    never burns the invite.
+                        // 3. resolveRole() bridges the driver session,
+                        //    which creates companies/{companyId}/drivers/{uid};
+                        //    that write's rule reads this account's
+                        //    companyId from users/{uid}, so it must exist
+                        //    by now too.
                         let persisted = await UserPermissionsService.shared.createIfNeeded(
                             uid: user.uid,
                             email: user.email ?? "",
@@ -159,6 +168,10 @@ final class AuthSession: ObservableObject {
                             companyRole: invite.role
                         )
                         self.permissionsSyncFailed = !persisted
+
+                        if persisted {
+                            await InviteRepository().consume(invite)
+                        }
 
                         self.role = await self.resolveRole(
                             platformAdmin: false,
