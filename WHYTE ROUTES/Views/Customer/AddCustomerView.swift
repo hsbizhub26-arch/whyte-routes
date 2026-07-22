@@ -30,6 +30,11 @@ struct AddCustomerView: View {
                         latitude = lat
                         longitude = lng
                     }
+                    if !address.isEmpty && latitude == 0 && longitude == 0 {
+                        Text("Select an address suggestion from the list - typing without picking one leaves this customer with no real location on the map.")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
                     TextField("Phone", text: $phone)
                         .keyboardType(.phonePad)
                     TextField("Email", text: $email)
@@ -65,6 +70,7 @@ struct AddCustomerView: View {
     private var isFormValid: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
             && !address.trimmingCharacters(in: .whitespaces).isEmpty
+            && (latitude != 0 || longitude != 0)
     }
 
     private func save() {

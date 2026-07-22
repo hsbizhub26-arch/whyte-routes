@@ -50,6 +50,24 @@ final class DriverStopViewModel: ObservableObject {
 
         routeService.updateStop(routeId: route.id, stop: stop)
         await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .completed)
+
+        // Real bug found during a full-workday audit: nothing anywhere
+        // ever marked a Route itself "completed" once every stop on it
+        // was done - RouteRepository.updateStatus existed but had zero
+        // callers. Without this, a driver's "fetch my current route"
+        // query (which explicitly excludes status == "completed")
+        // could keep matching yesterday's finished route instead of a
+        // new one assigned today, since nothing ever took it out of
+        // contention. Checked using this stop's own just-set value
+        // plus the rest of the session's last-known stop state, not a
+        // re-fetch - the snapshot listener updating activeStops with
+        // THIS stop's change is async and not guaranteed to have
+        // landed yet.
+        let others = session.activeStops.filter { $0.id != stop.id }
+        if others.allSatisfy({ $0.isCompleted }) {
+            routeService.updateStatus(for: route.id, status: "completed")
+        }
+
         isCompleting = false
     }
 }
