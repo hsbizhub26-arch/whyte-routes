@@ -32,23 +32,21 @@ struct Driver: Identifiable {
     // anyone having to manually assign colors first. The same driver
     // always gets the same fallback color across app launches, since
     // it's derived from their id, not randomized per session.
+    //
+    // Generated from the full hue wheel rather than a small fixed list -
+    // a fixed palette of N colors starts repeating past N drivers (a
+    // real problem: a bigger contractor could easily run more crews
+    // than that in one day). Hashing into ~360 hue steps instead scales
+    // to any company size without hard-repeating; the name label next
+    // to each dot (see LiveFleetMapView) is what actually disambiguates
+    // once a fleet is large enough that two hues land close together.
     var color: Color {
         if let colorHex, !colorHex.isEmpty {
             return Color(hex: colorHex)
         }
-        return Driver.fallbackPalette[abs(id.hashValue) % Driver.fallbackPalette.count]
+        let hue = Double(abs(id.hashValue) % 360) / 360.0
+        return Color(hue: hue, saturation: 0.65, brightness: 0.9)
     }
-
-    private static let fallbackPalette: [Color] = [
-        Color(hex: "F5C451"), // gold
-        Color(hex: "4FAE6E"), // green
-        Color(hex: "6C9BD1"), // blue
-        Color(hex: "D2685A"), // red-orange
-        Color(hex: "A66CD1"), // purple
-        Color(hex: "4BC4C4"), // teal
-        Color(hex: "E08E45"), // orange
-        Color(hex: "D16CA6")  // pink
-    ]
 }
 
 // MARK: - Decode (Firestore → Driver)
