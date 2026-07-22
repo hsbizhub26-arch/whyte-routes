@@ -34,6 +34,10 @@ struct Stop: Identifiable {
     var customerPhone: String? = nil
     var customerEmail: String? = nil
     var customerOptedIn: Bool = false
+    // Cached from Customer.notes the same way the fields above are -
+    // gate codes, "no scrape", dog in the yard. Shown prominently on
+    // DriverStopView so a driver sees it without hunting for it.
+    var driverNotes: String? = nil
     var address: String
     var latitude: Double? = nil
     var longitude: Double? = nil
@@ -75,6 +79,7 @@ extension Stop {
         self.customerPhone = dict["customerPhone"] as? String
         self.customerEmail = dict["customerEmail"] as? String
         self.customerOptedIn = dict["customerOptedIn"] as? Bool ?? false
+        self.driverNotes = dict["driverNotes"] as? String
         self.address = address
         self.latitude = dict["latitude"] as? Double
         self.longitude = dict["longitude"] as? Double
@@ -103,6 +108,7 @@ extension Stop {
         if let customerName { d["customerName"] = customerName }
         if let customerPhone { d["customerPhone"] = customerPhone }
         if let customerEmail { d["customerEmail"] = customerEmail }
+        if let driverNotes { d["driverNotes"] = driverNotes }
         if let latitude { d["latitude"] = latitude }
         if let longitude { d["longitude"] = longitude }
         if let driverId { d["driverId"] = driverId }

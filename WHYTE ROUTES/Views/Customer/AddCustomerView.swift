@@ -7,12 +7,14 @@ import SwiftUI
 struct AddCustomerView: View {
 
     @Environment(\.dismiss) private var dismiss
+    var existingCustomer: Customer? = nil
     var onSaved: (Customer) -> Void
 
     @State private var name = ""
     @State private var address = ""
     @State private var phone = ""
     @State private var email = ""
+    @State private var notes = ""
     @State private var latitude: Double = 0
     @State private var longitude: Double = 0
     @State private var notificationsOptIn = false
@@ -20,6 +22,8 @@ struct AddCustomerView: View {
     @State private var errorMessage: String?
 
     private let repo = CustomerRepository()
+
+    private var isEditing: Bool { existingCustomer != nil }
 
     var body: some View {
         NavigationStack {
@@ -43,6 +47,15 @@ struct AddCustomerView: View {
                 }
 
                 Section {
+                    TextField("e.g. gate code 1234, no scrape driveway, dog in yard", text: $notes, axis: .vertical)
+                        .lineLimit(3...6)
+                } header: {
+                    Text("Notes for Drivers")
+                } footer: {
+                    Text("Shown right on the stop screen every time a driver works this property.")
+                }
+
+                Section {
                     Toggle("Customer agreed to receive service notifications", isOn: $notificationsOptIn)
                 } footer: {
                     Text("Required before any arrival/completion notification can be sent to this customer.")
@@ -54,7 +67,7 @@ struct AddCustomerView: View {
                         .font(.footnote)
                 }
             }
-            .navigationTitle("Add Customer")
+            .navigationTitle(isEditing ? "Edit Customer" : "Add Customer")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -63,6 +76,17 @@ struct AddCustomerView: View {
                     Button(isSaving ? "Saving…" : "Save") { save() }
                         .disabled(!isFormValid || isSaving)
                 }
+            }
+            .onAppear {
+                guard let existingCustomer else { return }
+                name = existingCustomer.name
+                address = existingCustomer.address
+                phone = existingCustomer.phone ?? ""
+                email = existingCustomer.email ?? ""
+                notes = existingCustomer.notes ?? ""
+                latitude = existingCustomer.latitude
+                longitude = existingCustomer.longitude
+                notificationsOptIn = existingCustomer.notificationsOptIn
             }
         }
     }
@@ -81,17 +105,18 @@ struct AddCustomerView: View {
         // resolved suggestion; stay 0 only if the address was typed
         // freehand without picking a suggestion.
         let customer = Customer(
-            id: UUID().uuidString,
+            id: existingCustomer?.id ?? UUID().uuidString,
             name: name,
             address: address,
             latitude: latitude,
             longitude: longitude,
             phone: phone.isEmpty ? nil : phone,
             email: email.isEmpty ? nil : email,
+            notes: notes.isEmpty ? nil : notes,
             notificationsOptIn: notificationsOptIn
         )
 
-        repo.createCustomer(customer) { success in
+        let onComplete: (Bool) -> Void = { success in
             Task { @MainActor in
                 isSaving = false
                 if success {
@@ -101,6 +126,12 @@ struct AddCustomerView: View {
                     errorMessage = "Couldn't save the customer - check your connection and try again."
                 }
             }
+        }
+
+        if isEditing {
+            repo.updateCustomer(customer, completion: onComplete)
+        } else {
+            repo.createCustomer(customer, completion: onComplete)
         }
     }
 }

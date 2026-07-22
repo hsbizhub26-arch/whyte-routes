@@ -246,8 +246,33 @@ extension DriverStopView {
                     .font(.subheadline.bold())
                     .foregroundColor(.white.opacity(0.7))
             }
+
+            if let notes = vm.stop.driverNotes, !notes.isEmpty {
+                driverNotesCallout(notes)
+            }
         }
         .padding(.top, 10)
+    }
+
+    // Uber-Eats-style standing instructions - gate code, "no scrape",
+    // dog in the yard. Deliberately loud (not a quiet caption line)
+    // since this is the kind of thing that matters most exactly when
+    // a driver is rushing and not reading closely.
+    private func driverNotesCallout(_ notes: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.bubble.fill")
+                .foregroundColor(.black)
+            Text(notes)
+                .font(.subheadline.bold())
+                .foregroundColor(.black)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color("WRThemeGold"))
+        .cornerRadius(12)
+        .padding(.horizontal, 20)
+        .padding(.top, 4)
     }
 
     // MARK: MAP

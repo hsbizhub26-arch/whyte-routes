@@ -59,4 +59,17 @@ final class CustomerRepository {
                 completion?(error == nil)
             }
     }
+
+    // MARK: - Update Customer (editing an existing record, e.g. adding
+    // driver notes after the fact - same full-document write as
+    // create, just against an existing id instead of a new one)
+    func updateCustomer(_ customer: Customer, completion: ((Bool) -> Void)? = nil) {
+        guard let customersRef else { completion?(false); return }
+
+        customersRef
+            .document(customer.id)
+            .setData(customer.toDict()) { error in
+                completion?(error == nil)
+            }
+    }
 }

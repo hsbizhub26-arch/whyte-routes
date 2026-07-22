@@ -177,8 +177,8 @@ struct EditRouteView: View {
     }
 
     // A plain iconless tap target, used only for the one action that
-    // stays visible inline (linking a legacy stop to a customer record)
-    // rather than living in the overflow menu below.
+    // stays visible inline (viewing notification history) rather than
+    // living in the overflow menu below.
     private func rowActionButton(_ title: String, color: Color = .yellow, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
@@ -205,43 +205,52 @@ struct EditRouteView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                    if let notes = stop.driverNotes, !notes.isEmpty {
+                        Label(notes, systemImage: "note.text")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                            .lineLimit(1)
+                    }
                 } else {
                     // Legacy stop, created before customer linking existed -
                     // still works via its own cached fields (see
-                    // NotificationService), but offer an easy upgrade path.
-                    // Kept visible inline (not in the overflow menu) since
-                    // an unlinked stop is missing data, not just an
-                    // optional extra action.
+                    // NotificationService). Linking it to a real customer
+                    // record now lives in the overflow menu, not inline.
                     if let name = stop.customerName, !name.isEmpty {
                         Text(name).font(.headline)
                         Text(stop.address).font(.caption).foregroundColor(.secondary)
+                    } else {
+                        Text(stop.address).font(.caption).foregroundColor(.secondary)
                     }
-                    rowActionButton(stop.customerName?.isEmpty == false ? "Link to a Customer Record" : "Select Customer") {
-                        pickerTargetId = stop.id
+                }
+
+                if originalStopIds.contains(stop.id) {
+                    rowActionButton("View Notification Log") {
+                        historyStop = stop
                     }
                 }
             }
 
             Spacer(minLength: 8)
 
+            // Live, immediate overrides - not staged into the Save
+            // button below, which batches a local snapshot taken when
+            // this screen opened and would risk overwriting whatever a
+            // driver has done since. These write straight to Firestore
+            // the moment they're tapped:
+            // - a driver marked something complete that wasn't theirs
+            //   to finish (undo it)
+            // - the owner/manager did a stop themselves while driving
+            //   by (mark it done directly)
+            // - one driver finished early and can take over a stop
+            //   still sitting on someone else's route (move it)
+            //
+            // Mark Complete only applies to a stop that's actually
+            // saved to Firestore, so it's gated on originalStopIds; the
+            // overflow menu stays available for every stop (including
+            // ones just added and not yet saved) since selecting a
+            // customer has to work before that first save too.
             if originalStopIds.contains(stop.id) {
-                // Live, immediate overrides - not staged into the Save
-                // button below, which batches a local snapshot taken
-                // when this screen opened and would risk overwriting
-                // whatever a driver has done since. These write
-                // straight to Firestore the moment they're tapped:
-                // - a driver marked something complete that wasn't
-                //   theirs to finish (undo it)
-                // - the owner/manager did a stop themselves while
-                //   driving by (mark it done directly)
-                // - one driver finished early and can take over a stop
-                //   still sitting on someone else's route (move it)
-                //
-                // Mark Complete stays as its own tap target since it's
-                // the action used on nearly every stop; everything else
-                // is rarer per-stop and lives in the overflow menu so
-                // the row stays scannable instead of stacking five
-                // buttons under every single stop.
                 Button {
                     toggleCompletion(stop)
                 } label: {
@@ -252,27 +261,30 @@ struct EditRouteView: View {
                 .buttonStyle(.borderless)
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
+            }
 
-                Menu {
-                    if stop.customerId != nil {
-                        Button("Change Customer") {
-                            pickerTargetId = stop.id
-                        }
+            Menu {
+                if stop.customerId != nil {
+                    Button("Change Customer") {
+                        pickerTargetId = stop.id
                     }
-                    Button("View Notification Log") {
-                        historyStop = stop
+                } else {
+                    Button(stop.customerName?.isEmpty == false ? "Link to a Customer Record" : "Select Customer") {
+                        pickerTargetId = stop.id
                     }
+                }
+                if originalStopIds.contains(stop.id) {
                     Button("Move to Another Route") {
                         moveTargetStop = stop
                         loadOtherRoutes()
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
                 }
-                .frame(width: 44, height: 44)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.title2)
+                    .foregroundColor(.secondary)
             }
+            .frame(width: 44, height: 44)
         }
         .padding(.vertical, 4)
     }
@@ -344,6 +356,7 @@ struct EditRouteView: View {
         stops[index].customerPhone = customer.phone
         stops[index].customerEmail = customer.email
         stops[index].customerOptedIn = customer.notificationsOptIn
+        stops[index].driverNotes = customer.notes
         stops[index].address = customer.address
         stops[index].latitude = customer.latitude
         stops[index].longitude = customer.longitude

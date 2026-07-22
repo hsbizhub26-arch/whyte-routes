@@ -8,6 +8,11 @@ struct Customer: Identifiable {
     var longitude: Double
     var phone: String? = nil
     var email: String? = nil
+    // Standing instructions for whoever's servicing this property -
+    // gate codes, "no scrape the driveway", dog in the yard, where to
+    // park. Shown to the driver on the stop itself (see
+    // DriverStopView), not just filed away on the customer record.
+    var notes: String? = nil
     // Defaults false - nobody is notified without explicitly agreeing
     // first. This is now the SOURCE OF TRUTH once a stop is linked to
     // this record via Stop.customerId (see NotificationService) - the
@@ -33,6 +38,7 @@ extension Customer {
         self.longitude = longitude
         self.phone = dict["phone"] as? String
         self.email = dict["email"] as? String
+        self.notes = dict["notes"] as? String
         self.notificationsOptIn = dict["notificationsOptIn"] as? Bool ?? false
     }
 
@@ -47,6 +53,7 @@ extension Customer {
         ]
         if let phone { d["phone"] = phone }
         if let email { d["email"] = email }
+        if let notes { d["notes"] = notes }
         return d
     }
 }

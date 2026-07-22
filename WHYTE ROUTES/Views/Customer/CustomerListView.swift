@@ -40,6 +40,7 @@ struct CustomerListView: View {
     @ObservedObject private var access = FeatureAccessManager.shared
     @State private var showAddCustomer = false
     @State private var showUpgradePrompt = false
+    @State private var editingCustomer: Customer?
 
     var body: some View {
         NavigationStack {
@@ -72,9 +73,20 @@ struct CustomerListView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(vm.filtered) { customer in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(customer.name).font(.headline)
-                            Text(customer.address).font(.subheadline).foregroundColor(.secondary)
+                        Button {
+                            editingCustomer = customer
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(customer.name).font(.headline)
+                                Text(customer.address).font(.subheadline).foregroundColor(.secondary)
+                                if let notes = customer.notes, !notes.isEmpty {
+                                    Label(notes, systemImage: "note.text")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .foregroundColor(.primary)
                         }
                     }
                 }
@@ -98,6 +110,9 @@ struct CustomerListView: View {
             }
             .sheet(isPresented: $showAddCustomer) {
                 AddCustomerView { _ in vm.load() }
+            }
+            .sheet(item: $editingCustomer) { customer in
+                AddCustomerView(existingCustomer: customer) { _ in vm.load() }
             }
             .sheet(isPresented: $showUpgradePrompt) {
                 UpgradeRequiredView(

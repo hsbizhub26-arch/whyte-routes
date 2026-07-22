@@ -33,6 +33,7 @@ struct CreateRouteView: View {
         var customerPhone: String = ""
         var customerEmail: String = ""
         var customerOptedIn: Bool = false
+        var driverNotes: String = ""
         var address: String = ""
         var latitude: Double?
         var longitude: Double?
@@ -133,6 +134,7 @@ struct CreateRouteView: View {
         stops[index].customerPhone = customer.phone ?? ""
         stops[index].customerEmail = customer.email ?? ""
         stops[index].customerOptedIn = customer.notificationsOptIn
+        stops[index].driverNotes = customer.notes ?? ""
         stops[index].address = customer.address
         stops[index].latitude = customer.latitude
         stops[index].longitude = customer.longitude
@@ -175,6 +177,7 @@ struct CreateRouteView: View {
                             customerPhone: draft.customerPhone.isEmpty ? nil : draft.customerPhone,
                             customerEmail: draft.customerEmail.isEmpty ? nil : draft.customerEmail,
                             customerOptedIn: draft.customerOptedIn,
+                            driverNotes: draft.driverNotes.isEmpty ? nil : draft.driverNotes,
                             address: draft.address,
                             latitude: draft.latitude,
                             longitude: draft.longitude,
