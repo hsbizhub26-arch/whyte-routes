@@ -6,6 +6,7 @@ import FirebaseAuth
 final class ManageEmployeesViewModel: ObservableObject {
 
     @Published var pendingInvites: [Invite] = []
+    @Published var activeDrivers: [Driver] = []
     @Published var contactMethod: String = "email" // "email" | "phone"
     @Published var contactValue: String = ""
     @Published var role: String = "driver" // "driver" | "manager"
@@ -14,12 +15,22 @@ final class ManageEmployeesViewModel: ObservableObject {
     @Published var successMessage: String?
 
     private let repo = InviteRepository()
+    private let driverRepo: DriverRepository = FirestoreDriverRepository()
 
     func startListening() {
         guard let companyId = CompanySession.shared.currentCompanyId else { return }
         repo.listenToPendingInvites(companyId: companyId) { [weak self] invites in
             self?.pendingInvites = invites.sorted { $0.createdAt > $1.createdAt }
         }
+        driverRepo.listenToDrivers { [weak self] drivers in
+            self?.activeDrivers = drivers.sorted { $0.name < $1.name }
+        }
+    }
+
+    func renameDriver(_ driver: Driver, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        driverRepo.updateDriverName(driverId: driver.id, name: trimmed, completion: nil)
     }
 
     func sendInvite() {
@@ -70,6 +81,8 @@ final class ManageEmployeesViewModel: ObservableObject {
 struct ManageEmployeesView: View {
 
     @StateObject private var vm = ManageEmployeesViewModel()
+    @State private var renamingDriver: Driver?
+    @State private var renameText = ""
 
     var body: some View {
         NavigationStack {
@@ -79,6 +92,7 @@ struct ManageEmployeesView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         inviteForm
+                        activeTeamSection
                         pendingInvitesSection
                     }
                     .padding()
@@ -86,6 +100,57 @@ struct ManageEmployeesView: View {
             }
             .navigationTitle("Team")
             .onAppear { vm.startListening() }
+            .alert("Driver Name", isPresented: Binding(
+                get: { renamingDriver != nil },
+                set: { if !$0 { renamingDriver = nil } }
+            )) {
+                TextField("Name", text: $renameText)
+                Button("Cancel", role: .cancel) { renamingDriver = nil }
+                Button("Save") {
+                    if let driver = renamingDriver {
+                        vm.renameDriver(driver, to: renameText)
+                    }
+                    renamingDriver = nil
+                }
+            } message: {
+                Text("Shown on the live fleet map and everywhere else this driver appears.")
+            }
+        }
+    }
+
+    private var activeTeamSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Active Team")
+                .font(.headline)
+                .foregroundColor(WRTheme.gold)
+
+            if vm.activeDrivers.isEmpty {
+                Text("No drivers yet - send an invite below.")
+                    .foregroundColor(.white.opacity(0.6))
+                    .font(.subheadline)
+            } else {
+                ForEach(vm.activeDrivers) { driver in
+                    Button {
+                        renameText = driver.name
+                        renamingDriver = driver
+                    } label: {
+                        HStack {
+                            Circle()
+                                .fill(driver.color)
+                                .frame(width: 10, height: 10)
+                            Text(driver.name)
+                                .foregroundColor(.white)
+                            Spacer()
+                            Image(systemName: "pencil")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                        .padding()
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(10)
+                    }
+                }
+            }
         }
     }
 

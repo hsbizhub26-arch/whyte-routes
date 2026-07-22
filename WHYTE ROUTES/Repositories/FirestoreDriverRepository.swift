@@ -7,6 +7,7 @@ protocol DriverRepository {
     func fetchDrivers(_ completion: @escaping (Result<[Driver], Error>) -> Void)
     func listenToDrivers(_ handler: @escaping ([Driver]) -> Void)
     func updateDriverLocation(driverId: String, latitude: Double, longitude: Double)
+    func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)?)
     func assignRoute(driverId: String, routeId: String)
 }
 
@@ -128,6 +129,20 @@ final class FirestoreDriverRepository: DriverRepository {
                 "longitude": longitude,
                 "lastUpdated": FieldValue.serverTimestamp()
             ])
+    }
+
+    // MARK: - Update Display Name
+    // A driver's initial name defaults to their Firebase Auth
+    // displayName, falling back to their email when that's empty (see
+    // AuthSession.bridgeDriverSession) - a real, common case for
+    // email/Apple ID sign-in, and exactly why this exists: without it
+    // there was no way for an owner to fix a driver showing up as
+    // their raw email address on the live fleet map.
+    func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)? = nil) {
+        guard let ref = driversRef?.document(driverId) else { completion?(false); return }
+        ref.updateData(["name": name]) { error in
+            completion?(error == nil)
+        }
     }
 
     // MARK: - Assign Driver to a Route

@@ -46,6 +46,8 @@ struct LiveFleetMapView: View {
     private var map: some View {
         ZStack(alignment: .top) {
             Map(position: $cameraPosition) {
+                UserAnnotation()
+
                 ForEach(visibleDrivers) { driver in
                     if selectedDriverId == nil || selectedDriverId == driver.id {
                         Annotation(driver.name, coordinate: driver.coordinate!) {
@@ -72,6 +74,7 @@ struct LiveFleetMapView: View {
             .mapControls {
                 MapCompass()
                 MapScaleView()
+                MapUserLocationButton()
             }
             .ignoresSafeArea()
 
