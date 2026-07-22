@@ -6,8 +6,15 @@ struct SettingsView: View {
     @State private var showReportIssue = false
     @State private var showSubscription = false
 
+    // No NavigationStack here on purpose - every place this view is
+    // shown (ManagerTabView's explicit per-tab NavigationStack, and
+    // the system "More" screen the owner's 7-tab layout collapses
+    // into) already provides one. Wrapping another one around this
+    // body nested a NavigationStack inside a NavigationStack, which
+    // is what produced two stacked back buttons when pushing to
+    // NavigationSettingsView.
     var body: some View {
-        NavigationStack {
+        Group {
             List {
                 Section("Account") {
                     Button("Sign Out") {
@@ -105,5 +112,7 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView()
+    NavigationStack {
+        SettingsView()
+    }
 }
