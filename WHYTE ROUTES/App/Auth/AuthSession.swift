@@ -45,10 +45,6 @@ final class AuthSession: ObservableObject {
                     return
                 }
 
-                // 1. Sync legacy entitlements from server first, so the
-                //    permission checks below always have the final say.
-                await SubscriptionSyncService().syncEntitlements(uid: user.uid)
-
                 // 2. Firestore users/{uid} document is the real source of
                 //    truth for role + company membership + subscription.
                 if var permissions = await UserPermissionsService.shared.fetch(uid: user.uid) {
@@ -89,8 +85,6 @@ final class AuthSession: ObservableObject {
                         companyRole: permissions.companyRole,
                         fallbackRole: permissions.role
                     )
-                    self.applySubscription(permissions.subscription)
-
                 } else if AccessControl.isPlatformAdmin(uid: user.uid, email: user.email) {
                     // 3. Fallback for platform-owner accounts that haven't
                     //    been migrated to a Firestore permissions document
@@ -110,8 +104,6 @@ final class AuthSession: ObservableObject {
                         companyRole: ownedCompany != nil ? "owner" : nil,
                         fallbackRole: .owner
                     )
-                    self.applySubscription("premiumPlus")
-
                     let persisted = await UserPermissionsService.shared.createIfNeeded(
                         uid: user.uid,
                         email: user.email ?? "",
@@ -179,8 +171,6 @@ final class AuthSession: ObservableObject {
                             companyRole: invite.role,
                             fallbackRole: .driver
                         )
-                        self.applySubscription("free")
-
                     } else {
                         // Genuinely no invite waiting - safe,
                         // low-privilege default until this account is
@@ -189,9 +179,6 @@ final class AuthSession: ObservableObject {
                         CompanySession.shared.clear()
                     }
                 }
-
-                // 4. Restore saved entitlements
-                AppEntitlements.shared.restoreFromDefaults()
             }
         }
     }
@@ -285,24 +272,6 @@ final class AuthSession: ObservableObject {
             DriverSession.shared.setDriver(created)
         } else {
             print("⚠️ Could not create driver record for uid \(uid) in company \(companyId) - likely rules not yet updated to allow driver self-create (see firestore.rules.v4)")
-        }
-    }
-
-    private func applySubscription(_ subscription: String) {
-        let company = CompanySession.shared.currentCompany
-
-        // A company's own tier takes priority when it's set to something
-        // premium-equivalent (covers members of a comped/beta company,
-        // not just the individual whitelist).
-        if let company, company.subscriptionTier == "premiumPlus" || company.subscriptionTier == "enterprise" {
-            AppEntitlements.shared.setPremiumPlus(unlocked: true, source: EntitlementSource.whitelist.rawValue)
-            return
-        }
-
-        if subscription == "premiumPlus" {
-            AppEntitlements.shared.setPremiumPlus(unlocked: true, source: EntitlementSource.whitelist.rawValue)
-        } else if subscription == "premium" {
-            AppEntitlements.shared.setPremium(unlocked: true, source: EntitlementSource.whitelist.rawValue)
         }
     }
 

@@ -4,6 +4,7 @@ import FirebaseAuth
 struct SettingsView: View {
     @EnvironmentObject var auth: AuthSession
     @State private var showReportIssue = false
+    @State private var showSubscription = false
 
     var body: some View {
         NavigationStack {
@@ -38,6 +39,19 @@ struct SettingsView: View {
                     Text("Driver Navigation")
                 } footer: {
                     Text("Applied automatically whenever a driver taps Navigate on a stop.")
+                        .foregroundColor(.gray)
+                }
+                Section {
+                    Button {
+                        showSubscription = true
+                    } label: {
+                        Label("Manage Subscription", systemImage: "star.fill")
+                    }
+                    .listRowBackground(Color.black.opacity(0.2))
+                } header: {
+                    Text("Billing")
+                } footer: {
+                    Text("View plan details, upgrade, or restore a previous purchase.")
                         .foregroundColor(.gray)
                 }
                 Section {
@@ -83,6 +97,9 @@ struct SettingsView: View {
                 reporterName: Auth.auth().currentUser?.email ?? "Unknown",
                 reporterRole: auth.role.rawValue
             )
+        }
+        .sheet(isPresented: $showSubscription) {
+            SubscriptionTierView()
         }
     }
 }

@@ -1,15 +1,13 @@
 import SwiftUI
 
 // The "professional upgrade screen" a gated feature shows instead of
-// silently doing nothing or crashing. No purchase flow here - that's
-// still out of scope (no StoreKit wiring yet, matches the standing
-// "don't move into billing yet" instruction) - this explains the
-// limit and stops here; upgrading itself is a conversation, not a
-// button, until real billing exists.
+// silently doing nothing or crashing.
 struct UpgradeRequiredView: View {
 
     let featureName: String
     let requiredTier: SubscriptionTier
+
+    @State private var showPaywall = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -29,16 +27,26 @@ struct UpgradeRequiredView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
-            Text("Contact WHYTE ROUTES to upgrade your plan and unlock this for your team.")
-                .font(.footnote)
-                .foregroundColor(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+            Button {
+                showPaywall = true
+            } label: {
+                Text("Upgrade Plan")
+                    .font(.headline)
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 12)
+                    .background(WRTheme.gold)
+                    .cornerRadius(12)
+            }
+            .padding(.top, 8)
 
             Spacer()
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(WRTheme.gradient.ignoresSafeArea())
+        .sheet(isPresented: $showPaywall) {
+            SubscriptionTierView()
+        }
     }
 }

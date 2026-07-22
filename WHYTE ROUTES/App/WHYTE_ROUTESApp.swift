@@ -5,11 +5,10 @@ import Firebase
 struct WHYTE_ROUTESApp: App {
 
     @StateObject private var auth = AuthSession.shared
-    @StateObject private var entitlements = AppEntitlements.shared
+    @StateObject private var purchaseManager = PurchaseManager()
 
     init() {
         FirebaseApp.configure()
-        AppEntitlements.shared.restoreFromDefaults()
         AuthSession.shared.listenForAuthChanges()
     }
 
@@ -17,7 +16,7 @@ struct WHYTE_ROUTESApp: App {
         WindowGroup {
             RoleRouterView()
                 .environmentObject(auth)
-                .environmentObject(entitlements)
+                .environmentObject(purchaseManager)
                 .preferredColorScheme(.dark)
         }
     }

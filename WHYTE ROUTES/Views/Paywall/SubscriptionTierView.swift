@@ -1,99 +1,240 @@
 import SwiftUI
+import StoreKit
 
+// The real paywall - replaces the old hardcoded mockup (static "$149/
+// month" text, dead Subscribe button). Prices come live from StoreKit
+// (purchaseManager.products), never hardcoded here, so they always
+// match whatever's actually configured in App Store Connect. A
+// purchase itself doesn't unlock anything client-side - it goes
+// through PurchaseManager -> the syncSubscriptionEntitlement Cloud
+// Function -> companies/{id}.subscriptionTier, which
+// FeatureAccessManager (the real gate everywhere else in the app)
+// reads. "Already active" here is judged against that same real tier,
+// not against local purchase state, so it can't drift from what the
+// rest of the app believes.
 struct SubscriptionTierView: View {
 
+    enum Tier: String, CaseIterable, Identifiable {
+        case premium = "Premium"
+        case premiumPlus = "Premium Plus"
+        var id: String { rawValue }
+
+        var monthlyProductID: String {
+            self == .premium ? "whyteroutes.premium.monthly.v2" : "whyteroutes.premiumplus.monthly.v2"
+        }
+        var yearlyProductID: String {
+            self == .premium ? "whyteroutes.premium.yearly.v2" : "whyteroutes.premiumplus.yearly.v2"
+        }
+
+        var features: [String] {
+            switch self {
+            case .premium:
+                return [
+                    "Live fleet map",
+                    "Before/after proof of work",
+                    "Route optimization",
+                    "Up to 30 customers"
+                ]
+            case .premiumPlus:
+                return [
+                    "Everything in Premium",
+                    "Driver performance & time reports",
+                    "Advanced multi-driver dispatch",
+                    "Unlimited customers"
+                ]
+            }
+        }
+
+        var requiredTier: SubscriptionTier {
+            self == .premium ? .premium : .premiumPlus
+        }
+    }
+
+    @EnvironmentObject var purchaseManager: PurchaseManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedTier: Tier = .premium
+
+    private var currentTier: SubscriptionTier {
+        FeatureAccessManager.shared.tier
+    }
+
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.black, Color("WRBlack")],
-                startPoint: .top, endPoint: .bottom
-            ).ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                WRTheme.gradient.ignoresSafeArea()
 
-            ScrollView(spacing: 30) {
-                VStack(spacing: 20) {
+                ScrollView {
+                    VStack(spacing: 24) {
+                        header
+                        tierToggle
+                        featureList
 
-                    Text("Unlock Whyte Routes Premium")
-                        .font(.largeTitle.bold())
-                        .foregroundColor(Color("WRThemeGold"))
-                        .padding(.top, 40)
+                        if currentTier >= selectedTier.requiredTier {
+                            alreadyActiveBadge
+                        } else {
+                            pricingButtons
+                        }
 
-                    tierCard(
-                        title: "PREMIUM",
-                        price: "$149 / month",
-                        yearly: "$1499 / year",
-                        features: [
-                            "✓ Route Optimization",
-                            "✓ Analytics Dashboard",
-                            "✓ Customer Tracking Links"
-                        ],
-                        gold: false
-                    )
+                        if let error = purchaseManager.errorMessage {
+                            Text(error)
+                                .font(.footnote)
+                                .foregroundColor(.red)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
 
-                    tierCard(
-                        title: "PREMIUM PLUS",
-                        price: "$229 / month",
-                        yearly: "$1999 / year",
-                        features: [
-                            "✓ ALL Premium Features",
-                            "✓ Live Driver Tracking",
-                            "✓ Multi-Driver Routes",
-                            "✓ Manager Tools",
-                            "✓ Dispatch Alerts"
-                        ],
-                        gold: true
-                    )
-
-                    Spacer()
+                        restoreButton
+                        legalFooter
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 24)
                 }
-                .padding(.horizontal)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .foregroundColor(.white)
+                    }
+                }
+            }
+        }
+        .task {
+            if purchaseManager.products.isEmpty {
+                await purchaseManager.fetchProducts()
             }
         }
     }
 
-    // MARK: - Card Builder
-    func tierCard(title: String, price: String, yearly: String, features: [String], gold: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-
-            Text(title)
-                .font(.title.bold())
-                .foregroundColor(gold ? Color("WRThemeGold") : .white)
-
-            Text(price)
+    private var header: some View {
+        VStack(spacing: 8) {
+            Text("WHYTE ROUTES")
                 .font(.title3.bold())
+                .foregroundColor(WRTheme.gold)
+            Text("Unlock full dispatch tools")
+                .font(.largeTitle.bold())
                 .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.top, 12)
+    }
 
-            Text("or \(yearly) billed yearly")
-                .font(.caption)
-                .foregroundColor(.gray)
+    private var tierToggle: some View {
+        Picker("Tier", selection: $selectedTier) {
+            ForEach(Tier.allCases) { tier in
+                Text(tier.rawValue).tag(tier)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
 
-            Divider().background(Color.gray)
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(features, id: \.self) { feature in
+    private var featureList: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(selectedTier.features, id: \.self) { feature in
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(WRTheme.gold)
                     Text(feature)
                         .foregroundColor(.white)
-                        .font(.subheadline)
                 }
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.black.opacity(0.35))
+        .cornerRadius(16)
+    }
 
-            Button(action: {}) {
-                Text("Subscribe")
-                    .font(.headline.bold())
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(gold ? Color("WRThemeGold") : .white.opacity(0.15))
-                    .foregroundColor(gold ? .black : .white)
-                    .cornerRadius(14)
+    private var monthlyProduct: Product? {
+        purchaseManager.products.first { $0.id == selectedTier.monthlyProductID }
+    }
+    private var yearlyProduct: Product? {
+        purchaseManager.products.first { $0.id == selectedTier.yearlyProductID }
+    }
+
+    private var pricingButtons: some View {
+        VStack(spacing: 12) {
+            if purchaseManager.products.isEmpty {
+                ProgressView().tint(.white).padding()
+            } else {
+                if let yearly = yearlyProduct {
+                    priceButton(product: yearly, badge: "Best value")
+                }
+                if let monthly = monthlyProduct {
+                    priceButton(product: monthly, badge: nil)
+                }
             }
-            .padding(.top, 10)
+        }
+    }
 
+    private func priceButton(product: Product, badge: String?) -> some View {
+        Button {
+            Task { await purchaseManager.purchase(product) }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(product.displayName.isEmpty ? product.description : product.displayName)
+                        .font(.headline)
+                    if let badge {
+                        Text(badge)
+                            .font(.caption2.bold())
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.85))
+                            .cornerRadius(6)
+                    }
+                }
+                Spacer()
+                Text(product.displayPrice)
+                    .font(.title3.bold())
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(WRTheme.gold)
+            .foregroundColor(.black)
+            .cornerRadius(14)
+        }
+        .disabled(purchaseManager.isPurchasing)
+    }
+
+    private var alreadyActiveBadge: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.largeTitle)
+                .foregroundColor(.green)
+            Text("Your company is on the \(currentTier.displayName) plan.")
+                .foregroundColor(.white)
+                .font(.headline)
+                .multilineTextAlignment(.center)
         }
         .padding()
-        .background(Color.white.opacity(0.05))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20)
-                .stroke(gold ? Color("WRThemeGold") : Color.white.opacity(0.2), lineWidth: gold ? 2 : 1)
-        )
-        .cornerRadius(20)
+    }
+
+    private var restoreButton: some View {
+        Button("Restore Purchases") {
+            Task { await purchaseManager.restorePurchases() }
+        }
+        .foregroundColor(WRTheme.gold)
+        .disabled(purchaseManager.isPurchasing)
+    }
+
+    private var legalFooter: some View {
+        VStack(spacing: 6) {
+            Text("Subscriptions are billed to your Apple ID and auto-renew unless canceled at least 24 hours before the end of the current period. Manage or cancel anytime in your Apple ID account settings.")
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 16) {
+                Link("Privacy Policy", destination: URL(string: "https://teamdwlandscaping.com/privacy")!)
+                Link("Terms of Use", destination: URL(string: "https://teamdwlandscaping.com/terms")!)
+            }
+            .font(.caption2.bold())
+            .foregroundColor(WRTheme.gold)
+        }
+        .padding(.top, 8)
     }
 }

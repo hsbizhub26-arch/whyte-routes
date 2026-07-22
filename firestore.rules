@@ -354,12 +354,14 @@ service cloud.firestore {
     // rules per matched document the same way as get, so the read
     // rule above already covers it via isCompanyOwnerRole.
 
-    // ── entitlements/{uid} — legacy subscription sync ───────
-    // Standard user-owns-their-own-document pattern.
-
-    match /entitlements/{uid} {
-      allow read, write: if isSignedIn() && request.auth.uid == uid;
-    }
+    // entitlements/{uid} (legacy, individual-user, self-writable
+    // subscription sync) has been removed - AppEntitlements and
+    // SubscriptionSyncService, the only code that ever read or wrote
+    // it, were deleted. The real, company-level subscription tier
+    // lives on companies/{companyId}.subscriptionTier, writable only
+    // by a platform admin or the syncSubscriptionEntitlement Cloud
+    // Function's Admin SDK access - never by a client write to its
+    // own document, which is exactly the hole this collection was.
 
     // ── Everything else: locked ──────────────────────────────
     // No implicit access to anything not explicitly listed above.

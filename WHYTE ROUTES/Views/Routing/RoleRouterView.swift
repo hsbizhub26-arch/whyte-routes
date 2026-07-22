@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Routes the user to the correct part of the app based on auth + role + entitlements.
+/// Routes the user to the correct part of the app based on auth + role.
 struct RoleRouterView: View {
 
     @EnvironmentObject var auth: AuthSession
-    @EnvironmentObject var entitlements: AppEntitlements
 
     var body: some View {
         Group {
