@@ -1,10 +1,17 @@
 import SwiftUI
+import FirebaseAuth
 
 struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
                 Section("Account") {
+                    Button("Sign Out") {
+                        try? Auth.auth().signOut()
+                    }
+                    .foregroundColor(WRTheme.gold)
+                    .listRowBackground(Color.black.opacity(0.2))
+
                     DeleteAccountSection()
                         .listRowBackground(Color.black.opacity(0.2))
                 }
