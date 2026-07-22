@@ -12,6 +12,7 @@ final class DriverSession: ObservableObject {
     @Published var assignedRoute: Route?
     @Published var activeStops: [Stop] = []
     @Published var activeShift: Shift?
+    @Published var shiftError: String?
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -52,24 +53,37 @@ final class DriverSession: ObservableObject {
 
     @discardableResult
     func startShift() async -> Bool {
-        guard let driverId = driver?.id, activeShift == nil else { return false }
-        if let shift = await shiftRepo.startShift(driverId: driverId) {
-            activeShift = shift
+        shiftError = nil
+        guard let driverId = driver?.id else {
+            shiftError = "No driver profile loaded yet - try signing out and back in."
+            return false
+        }
+        guard activeShift == nil else { return false }
+        do {
+            activeShift = try await shiftRepo.startShift(driverId: driverId)
             LocationService.shared.startTracking(driverId: driverId)
             return true
+        } catch {
+            shiftError = error.localizedDescription
+            print("⚠️ DriverSession.startShift failed: \(error)")
+            return false
         }
-        return false
     }
 
     @discardableResult
     func endShift() async -> Bool {
+        shiftError = nil
         guard let driverId = driver?.id, let shift = activeShift else { return false }
-        let success = await shiftRepo.endShift(driverId: driverId, shiftId: shift.id)
-        if success {
+        do {
+            try await shiftRepo.endShift(driverId: driverId, shiftId: shift.id)
             activeShift = nil
             LocationService.shared.stopTracking()
+            return true
+        } catch {
+            shiftError = error.localizedDescription
+            print("⚠️ DriverSession.endShift failed: \(error)")
+            return false
         }
-        return success
     }
 
     // MARK: Load assigned route

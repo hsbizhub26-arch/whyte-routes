@@ -38,7 +38,10 @@ final class AuthSession: ObservableObject {
                 guard let self = self, let user = user else {
                     self?.role = .none
                     self?.isPlatformAdmin = false
+                    self?.permissionsSyncFailed = false
                     CompanySession.shared.clear()
+                    DriverSession.shared.logout()
+                    LocationService.shared.stopTracking()
                     return
                 }
 

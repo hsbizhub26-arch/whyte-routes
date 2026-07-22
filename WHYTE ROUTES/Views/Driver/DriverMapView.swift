@@ -56,8 +56,32 @@ struct DriverMapView: View {
             mapLayer
             topButtons
             stopSheet
+
+            if vm.driverCoordinate == nil {
+                waitingForGPSBanner
+            }
         }
         .ignoresSafeArea()
+    }
+
+    // Shown until the first GPS fix arrives - true before a shift has
+    // started (tracking is tied to the shift lifecycle, not this
+    // screen) and briefly after, until CoreLocation reports a location.
+    private var waitingForGPSBanner: some View {
+        VStack {
+            Spacer()
+            Text(DriverSession.shared.activeShift == nil
+                 ? "Start your shift to begin live tracking."
+                 : "Waiting for GPS…")
+                .font(.footnote.bold())
+                .foregroundColor(.black)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color("WRThemeGold"))
+                .clipShape(Capsule())
+                .shadow(radius: 6)
+                .padding(.bottom, 40)
+        }
     }
 
     // MARK: - MAP LAYER

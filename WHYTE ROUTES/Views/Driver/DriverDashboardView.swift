@@ -86,11 +86,20 @@ struct DriverDashboardView: View {
                     .padding(.horizontal)
 
                 } else {
-                    VStack(spacing: 12) {
-                        Text("No route assigned")
+                    VStack(spacing: 6) {
+                        Image(systemName: "map")
+                            .font(.title2)
+                            .foregroundColor(.white.opacity(0.4))
+
+                        Text("No route assigned for today")
                             .font(.headline)
-                            .foregroundColor(.white.opacity(0.6))
+                            .foregroundColor(.white.opacity(0.7))
+
+                        Text("Contact your manager if you were expecting one.")
+                            .font(.footnote)
+                            .foregroundColor(.white.opacity(0.5))
                     }
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal)
                 }
 
@@ -195,6 +204,13 @@ struct DriverDashboardView: View {
                         .cornerRadius(14)
                 }
                 .disabled(isTogglingShift)
+            }
+
+            if let shiftError = session.shiftError {
+                Text(shiftError)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
             }
         }
         .padding(.horizontal)
