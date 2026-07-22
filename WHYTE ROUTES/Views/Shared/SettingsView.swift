@@ -2,6 +2,9 @@ import SwiftUI
 import FirebaseAuth
 
 struct SettingsView: View {
+    @EnvironmentObject var auth: AuthSession
+    @State private var showReportIssue = false
+
     var body: some View {
         NavigationStack {
             List {
@@ -14,6 +17,17 @@ struct SettingsView: View {
 
                     DeleteAccountSection()
                         .listRowBackground(Color.black.opacity(0.2))
+                }
+                Section {
+                    Button {
+                        showReportIssue = true
+                    } label: {
+                        Label("Report Issue", systemImage: "exclamationmark.bubble")
+                    }
+                    .listRowBackground(Color.black.opacity(0.2))
+                } footer: {
+                    Text("Found a bug or something confusing while testing? Tell us right away, not after the fact.")
+                        .foregroundColor(.gray)
                 }
                 Section {
                     NavigationLink(destination: PermissionsHelpView()) {
@@ -52,6 +66,12 @@ struct SettingsView: View {
             .background(Color.black.ignoresSafeArea())
             .scrollContentBackground(.hidden)
             .navigationTitle("Settings")
+        }
+        .sheet(isPresented: $showReportIssue) {
+            ReportIssueView(
+                reporterName: Auth.auth().currentUser?.email ?? "Unknown",
+                reporterRole: auth.role.rawValue
+            )
         }
     }
 }

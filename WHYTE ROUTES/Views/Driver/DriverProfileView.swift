@@ -4,6 +4,7 @@ import FirebaseAuth
 struct DriverProfileView: View {
 
     @ObservedObject private var session = DriverSession.shared
+    @State private var showReportIssue = false
 
     var body: some View {
         ZStack {
@@ -47,6 +48,25 @@ struct DriverProfileView: View {
 
                 Spacer()
 
+                // MARK: - Report Issue (the actual point of a beta day -
+                // capture "where is that button?" the moment it happens)
+                Button {
+                    showReportIssue = true
+                } label: {
+                    Label("Report Issue", systemImage: "exclamationmark.bubble")
+                        .foregroundColor(Color("WRThemeGold"))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.black.opacity(0.25))
+                        .cornerRadius(16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color("WRThemeGold"), lineWidth: 1)
+                        )
+                }
+                .padding(.horizontal)
+
                 // MARK: - Logout
                 Button(role: .destructive) {
                     // Signing out of Firebase is what actually matters -
@@ -72,6 +92,13 @@ struct DriverProfileView: View {
                 Spacer(minLength: 30)
             }
             .padding()
+        }
+        .sheet(isPresented: $showReportIssue) {
+            ReportIssueView(
+                reporterName: session.driver?.name ?? "Driver",
+                reporterRole: "driver",
+                routeId: session.assignedRoute?.id
+            )
         }
     }
 

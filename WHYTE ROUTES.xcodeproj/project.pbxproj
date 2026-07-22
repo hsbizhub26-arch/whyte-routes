@@ -46,6 +46,7 @@
 				Models/Company.swift,
 				Models/Customer.swift,
 				Models/Driver.swift,
+				Models/FeedbackReport.swift,
 				Models/Invite.swift,
 				Models/NotificationEvent.swift,
 				Models/Route.swift,
@@ -54,6 +55,7 @@
 				Models/TrackingLink.swift,
 				Repositories/CompanyRepository.swift,
 				Repositories/CustomerRepository.swift,
+				Repositories/FeedbackRepository.swift,
 				Repositories/FirestoreDriverRepository.swift,
 				Repositories/InviteRepository.swift,
 				Repositories/LocationService.swift,
@@ -120,6 +122,7 @@
 				Views/Shared/ImagePicker.swift,
 				Views/Shared/PhotoProofView.swift,
 				Views/Shared/PhotoUploader.swift,
+				Views/Shared/ReportIssueView.swift,
 				Views/Shared/SettingsView.swift,
 				Views/Shared/UpgradeRequiredView.swift,
 			);

@@ -287,6 +287,17 @@ service cloud.firestore {
         allow create: if isCompanyMember(companyId);
         allow update, delete: if isCompanyStaff(companyId);
       }
+
+      // ── companies/{companyId}/feedback/{id} ──────────────
+      // Beta "Report Issue" submissions. Any company member can
+      // submit (owner, manager, or driver reporting what they hit
+      // during testing); read is platform-admin only for now - this
+      // is the developer's own triage list, not something a company
+      // owner needs a dashboard for yet.
+      match /feedback/{feedbackId} {
+        allow create: if isCompanyMember(companyId);
+        allow read: if isPlatformAdmin();
+      }
     }
 
     // Explicitly block cross-company collectionGroup queries - without
