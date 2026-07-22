@@ -101,4 +101,51 @@ final class StopsRepository {
             }
         }
     }
+
+    // MARK: - Move a Stop Between Routes (live reassignment - e.g. a
+    // driver finished early and can pick up work from someone still
+    // behind, or a stop needs pulling off a route it doesn't belong
+    // on). Atomic: removal from the source route and the add to the
+    // target route happen in one batch, so the stop is never briefly
+    // missing from both if the write is interrupted. Appended to the
+    // end of the target route's order, not kept at its old position,
+    // since that position belongs to a different route's numbering.
+    func moveStop(_ stop: Stop,
+                  fromRouteId: String,
+                  toRouteId: String,
+                  newDriverId: String?,
+                  completion: ((Bool) -> Void)? = nil) {
+
+        guard let sourceRef = routeRef(fromRouteId)?.collection("stops").document(stop.id),
+              let targetCollection = routeRef(toRouteId)?.collection("stops") else {
+            completion?(false)
+            return
+        }
+
+        targetCollection.getDocuments { snapshot, error in
+            if let error {
+                print("❌ Failed moving stop (couldn't read target route): \(error.localizedDescription)")
+                completion?(false)
+                return
+            }
+
+            var movedStop = stop
+            movedStop.driverId = newDriverId
+            movedStop.order = snapshot?.documents.count ?? 0
+
+            let targetRef = targetCollection.document(stop.id)
+            let batch = self.db.batch()
+            batch.deleteDocument(sourceRef)
+            batch.setData(movedStop.toDict(), forDocument: targetRef)
+
+            batch.commit { error in
+                if let error {
+                    print("❌ Failed moving stop: \(error.localizedDescription)")
+                    completion?(false)
+                } else {
+                    completion?(true)
+                }
+            }
+        }
+    }
 }

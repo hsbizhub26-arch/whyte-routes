@@ -27,6 +27,8 @@ struct EditRouteView: View {
     @State private var historyStop: Stop?
     @State private var pickerTargetId: String?
     @State private var showUpgradePrompt = false
+    @State private var moveTargetStop: Stop?
+    @State private var otherRoutes: [Route] = []
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -130,6 +132,47 @@ struct EditRouteView: View {
             .sheet(isPresented: $showUpgradePrompt) {
                 UpgradeRequiredView(featureName: "Route Optimization", requiredTier: .premiumPlus)
             }
+            .sheet(item: $moveTargetStop) { stop in
+                moveStopSheet(stop)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func moveStopSheet(_ stop: Stop) -> some View {
+        NavigationStack {
+            Group {
+                if otherRoutes.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.swap")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("No other active routes to move this to.")
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(otherRoutes) { route in
+                        Button {
+                            moveStop(stop, to: route)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(route.name)
+                                    .foregroundColor(.primary)
+                                Text(drivers.first { $0.id == route.driverId }?.name ?? "Unassigned")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Move \(stop.customerName ?? "Stop")")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { moveTargetStop = nil }
+                }
+            }
         }
     }
 
@@ -170,9 +213,94 @@ struct EditRouteView: View {
                     historyStop = stop
                 }
                 .font(.footnote)
+
+                // Live, immediate overrides - not staged into the Save
+                // button below, which batches a local snapshot taken
+                // when this screen opened and would risk overwriting
+                // whatever a driver has done since. These write
+                // straight to Firestore the moment they're tapped:
+                // - a driver marked something complete that wasn't
+                //   theirs to finish (undo it)
+                // - the owner/manager did a stop themselves while
+                //   driving by (mark it done directly)
+                // - one driver finished early and can take over a stop
+                //   still sitting on someone else's route (move it)
+                HStack(spacing: 16) {
+                    Button(stop.isCompleted ? "Mark Incomplete" : "Mark Complete") {
+                        toggleCompletion(stop)
+                    }
+                    .font(.footnote)
+                    .foregroundColor(stop.isCompleted ? .orange : .green)
+
+                    Button("Move to Another Route") {
+                        moveTargetStop = stop
+                        loadOtherRoutes()
+                    }
+                    .font(.footnote)
+                }
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private func toggleCompletion(_ stop: Stop) {
+        var updated = stop
+        if updated.isCompleted {
+            // Full reset back to untouched - not just flipping the
+            // flag, since a half-reset (isCompleted false but status
+            // still "completed") would be an inconsistent state for
+            // everything else that reads Stop.status.
+            updated.isCompleted = false
+            updated.status = JobStatus.scheduled.rawValue
+            updated.enRouteAt = nil
+            updated.arrivedAt = nil
+            updated.completedAt = nil
+        } else {
+            updated.isCompleted = true
+            updated.status = JobStatus.completed.rawValue
+            updated.completedAt = Date()
+        }
+
+        stopsRepo.updateStop(routeId: routeId, stop: updated) { success in
+            Task { @MainActor in
+                guard success else {
+                    errorMessage = "Couldn't update that stop - check your connection."
+                    return
+                }
+                if let index = stops.firstIndex(where: { $0.id == stop.id }) {
+                    stops[index] = updated
+                }
+                // Keep the route's own completed status honest - same
+                // reasoning as the full-workday audit fix in
+                // DriverStopViewModel: a stale "completed" route can
+                // shadow a real one on a driver's next fetch.
+                let others = stops.filter { $0.id != stop.id }
+                let allDone = updated.isCompleted && others.allSatisfy { $0.isCompleted }
+                routeRepo.updateStatus(routeId: routeId, status: allDone ? "completed" : "assigned")
+            }
+        }
+    }
+
+    private func loadOtherRoutes() {
+        routeRepo.fetchRoutes { fetched in
+            Task { @MainActor in
+                otherRoutes = fetched.filter { $0.id != routeId && $0.status != "completed" }
+            }
+        }
+    }
+
+    private func moveStop(_ stop: Stop, to targetRoute: Route) {
+        stopsRepo.moveStop(stop, fromRouteId: routeId, toRouteId: targetRoute.id, newDriverId: targetRoute.driverId) { success in
+            Task { @MainActor in
+                if success {
+                    stops.removeAll { $0.id == stop.id }
+                    originalStopIds.remove(stop.id)
+                    moveTargetStop = nil
+                } else {
+                    errorMessage = "Couldn't move that stop - check your connection."
+                }
+            }
+        }
     }
 
     private func apply(_ customer: Customer, toStopId id: String?) {
