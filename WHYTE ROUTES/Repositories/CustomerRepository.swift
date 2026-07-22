@@ -35,6 +35,20 @@ final class CustomerRepository {
             }
     }
 
+    // MARK: - Fetch One Customer (live source-of-truth lookup, used by
+    // NotificationService when a stop is linked via customerId)
+    func fetchCustomer(id: String) async -> Customer? {
+        guard let customersRef else { return nil }
+        do {
+            let doc = try await customersRef.document(id).getDocument()
+            guard let data = doc.data() else { return nil }
+            return Customer(from: data, id: id)
+        } catch {
+            print("⚠️ CustomerRepository.fetchCustomer(\(id)) failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Create Customer
     func createCustomer(_ customer: Customer, completion: ((Bool) -> Void)? = nil) {
         guard let customersRef else { completion?(false); return }

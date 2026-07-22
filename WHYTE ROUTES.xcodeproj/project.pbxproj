@@ -111,6 +111,7 @@
 				Views/Owner/OwnerTabView.swift,
 				Views/Routing/RoleRouterView.swift,
 				Views/Shared/AddressAutocompleteField.swift,
+				Views/Shared/CustomerPickerView.swift,
 				Views/Shared/DeleteAccountManager.swift,
 				Views/Shared/DeleteAccountSection.swift,
 				Views/Shared/GoldButton.swift,

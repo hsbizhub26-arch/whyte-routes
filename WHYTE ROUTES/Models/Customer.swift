@@ -6,11 +6,13 @@ struct Customer: Identifiable {
     var address: String
     var latitude: Double
     var longitude: Double
+    var phone: String? = nil
+    var email: String? = nil
     // Defaults false - nobody is notified without explicitly agreeing
-    // first. Not yet wired to NotificationService directly (Stop
-    // carries its own copy - see Stop.customerOptedIn - since routes
-    // don't pull from Customer records yet); this is the standing
-    // record of consent for whenever that link gets built.
+    // first. This is now the SOURCE OF TRUTH once a stop is linked to
+    // this record via Stop.customerId (see NotificationService) - the
+    // copy still carried on Stop itself is only a fallback for stops
+    // created before this record existed or that were never linked.
     var notificationsOptIn: Bool = false
 }
 
@@ -29,17 +31,22 @@ extension Customer {
         self.address = address
         self.latitude = latitude
         self.longitude = longitude
+        self.phone = dict["phone"] as? String
+        self.email = dict["email"] as? String
         self.notificationsOptIn = dict["notificationsOptIn"] as? Bool ?? false
     }
 
     // MARK: - Encode
     func toDict() -> [String: Any] {
-        [
+        var d: [String: Any] = [
             "name": name,
             "address": address,
             "latitude": latitude,
             "longitude": longitude,
             "notificationsOptIn": notificationsOptIn
         ]
+        if let phone { d["phone"] = phone }
+        if let email { d["email"] = email }
+        return d
     }
 }

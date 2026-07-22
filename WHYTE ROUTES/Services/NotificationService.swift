@@ -33,6 +33,7 @@ final class NotificationService {
     private init() {}
 
     private let repo = NotificationRepository()
+    private let customerRepo = CustomerRepository()
 
     /// Fires a customer notification for a stop's status change and
     /// records it to that stop's history regardless of whether a real
@@ -43,12 +44,30 @@ final class NotificationService {
         let companyName = CompanySession.shared.currentCompany?.name ?? "Your service crew"
         let message = Self.message(for: status, companyName: companyName)
 
+        // The linked Customer record is the source of truth when one
+        // exists (freshest phone/email/consent - the owner may have
+        // updated it since this stop was created); the stop's own
+        // cached fields are only the fallback for legacy/unlinked
+        // stops that predate customer linking.
+        var name = stop.customerName ?? "Customer"
+        var phone = stop.customerPhone
+        var email = stop.customerEmail
+        var optedIn = stop.customerOptedIn
+
+        if let customerId = stop.customerId,
+           let customer = await customerRepo.fetchCustomer(id: customerId) {
+            name = customer.name
+            phone = customer.phone
+            email = customer.email
+            optedIn = customer.notificationsOptIn
+        }
+
         let method: String
         let contact: String?
-        if let phone = stop.customerPhone, !phone.trimmingCharacters(in: .whitespaces).isEmpty {
+        if let phone, !phone.trimmingCharacters(in: .whitespaces).isEmpty {
             method = "sms"
             contact = phone
-        } else if let email = stop.customerEmail, !email.trimmingCharacters(in: .whitespaces).isEmpty {
+        } else if let email, !email.trimmingCharacters(in: .whitespaces).isEmpty {
             method = "email"
             contact = email
         } else {
@@ -60,7 +79,7 @@ final class NotificationService {
         // opted-out customer never gets so much as a logged attempt,
         // only a record that the system correctly declined to notify.
         var deliveryStatus: String
-        if !stop.customerOptedIn {
+        if !optedIn {
             deliveryStatus = "not_opted_in"
         } else if let contact {
             let channel: NotificationChannel = LoggingChannel(method: method)
@@ -74,7 +93,7 @@ final class NotificationService {
             id: UUID().uuidString,
             stopId: stop.id,
             routeId: routeId,
-            customerName: stop.customerName ?? "Customer",
+            customerName: name,
             type: status.rawValue,
             message: message,
             contactMethod: method,

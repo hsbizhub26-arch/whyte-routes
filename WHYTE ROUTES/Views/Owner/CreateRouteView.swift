@@ -4,25 +4,31 @@ import SwiftUI
 // in the app to create a route at all - AssignRoutesView could only
 // assign a driver to a route that already existed. This is the
 // smallest form that fills that gap: name a route, list its stops,
-// optionally assign a driver up front, save. Geocoding (lat/lng) isn't
-// wired here - DriverMapView already skips stops with no coordinate
-// rather than crashing, so an address-only stop is safe, just won't
-// show a map pin yet.
+// optionally assign a driver up front, save.
+//
+// Stops are built by picking a real Customer record (or creating one
+// inline) rather than retyping name/address/phone/email by hand -
+// see CustomerPickerView. Geocoding (lat/lng) comes along with the
+// customer's own address; DriverMapView already skips stops with no
+// coordinate rather than crashing, so a customer without coordinates
+// on file is still safe, just won't show a map pin yet.
 struct CreateRouteView: View {
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var routeName = ""
-    @State private var stops: [StopDraft] = [StopDraft()]
+    @State private var stops: [StopDraft] = []
     @State private var drivers: [Driver] = []
     @State private var selectedDriverId: String?
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var pickerTargetId: UUID?
 
     private let driverRepo = FirestoreDriverRepository()
 
     struct StopDraft: Identifiable {
         let id = UUID()
+        var customerId: String?
         var customerName: String = ""
         var customerPhone: String = ""
         var customerEmail: String = ""
@@ -49,26 +55,15 @@ struct CreateRouteView: View {
                 }
 
                 Section("Stops") {
-                    ForEach($stops) { $stop in
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField("Customer name", text: $stop.customerName)
-                            AddressAutocompleteField(address: $stop.address) { _, lat, lng in
-                                stop.latitude = lat
-                                stop.longitude = lng
-                            }
-                            TextField("Phone (for notifications)", text: $stop.customerPhone)
-                                .keyboardType(.phonePad)
-                            TextField("Email (for notifications)", text: $stop.customerEmail)
-                                .keyboardType(.emailAddress)
-                                .textInputAutocapitalization(.never)
-                            Toggle("Opted in to notifications", isOn: $stop.customerOptedIn)
-                                .font(.footnote)
-                        }
+                    ForEach(stops) { stop in
+                        stopRow(stop)
                     }
                     .onDelete { stops.remove(atOffsets: $0) }
 
                     Button {
-                        stops.append(StopDraft())
+                        let draft = StopDraft()
+                        stops.append(draft)
+                        pickerTargetId = draft.id
                     } label: {
                         Label("Add Stop", systemImage: "plus.circle")
                     }
@@ -91,12 +86,61 @@ struct CreateRouteView: View {
                 }
             }
             .onAppear(perform: loadDrivers)
+            .sheet(isPresented: Binding(
+                get: { pickerTargetId != nil },
+                set: { if !$0 { pickerTargetId = nil } }
+            )) {
+                CustomerPickerView { customer in
+                    apply(customer, toStopId: pickerTargetId)
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func stopRow(_ stop: StopDraft) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if stop.customerId != nil {
+                Text(stop.customerName)
+                    .font(.headline)
+                Text(stop.address)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if !stop.customerPhone.isEmpty {
+                    Text(stop.customerPhone)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Button("Change Customer") {
+                    pickerTargetId = stop.id
+                }
+                .font(.footnote)
+            } else {
+                Button {
+                    pickerTargetId = stop.id
+                } label: {
+                    Label("Select Customer", systemImage: "person.crop.circle.badge.plus")
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func apply(_ customer: Customer, toStopId id: UUID?) {
+        guard let id, let index = stops.firstIndex(where: { $0.id == id }) else { return }
+        stops[index].customerId = customer.id
+        stops[index].customerName = customer.name
+        stops[index].customerPhone = customer.phone ?? ""
+        stops[index].customerEmail = customer.email ?? ""
+        stops[index].customerOptedIn = customer.notificationsOptIn
+        stops[index].address = customer.address
+        stops[index].latitude = customer.latitude
+        stops[index].longitude = customer.longitude
     }
 
     private var isFormValid: Bool {
         !routeName.trimmingCharacters(in: .whitespaces).isEmpty
-            && stops.contains { !$0.address.trimmingCharacters(in: .whitespaces).isEmpty }
+            && stops.contains { $0.customerId != nil }
     }
 
     private func loadDrivers() {
@@ -122,10 +166,11 @@ struct CreateRouteView: View {
                 }
 
                 let validStops = stops
-                    .filter { !$0.address.trimmingCharacters(in: .whitespaces).isEmpty }
+                    .filter { $0.customerId != nil }
                     .enumerated()
                     .map { index, draft in
                         Stop(
+                            customerId: draft.customerId,
                             customerName: draft.customerName.isEmpty ? nil : draft.customerName,
                             customerPhone: draft.customerPhone.isEmpty ? nil : draft.customerPhone,
                             customerEmail: draft.customerEmail.isEmpty ? nil : draft.customerEmail,

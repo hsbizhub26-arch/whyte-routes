@@ -81,7 +81,7 @@ struct CustomerListView: View {
                 }
             }
             .sheet(isPresented: $showAddCustomer) {
-                AddCustomerView { vm.load() }
+                AddCustomerView { _ in vm.load() }
             }
         }
     }

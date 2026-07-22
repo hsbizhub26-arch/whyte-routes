@@ -25,6 +25,7 @@ struct EditRouteView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var historyStop: Stop?
+    @State private var pickerTargetId: String?
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -52,43 +53,16 @@ struct EditRouteView: View {
                         }
 
                         Section {
-                            ForEach($stops) { $stop in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    TextField("Customer name", text: Binding(
-                                        get: { stop.customerName ?? "" },
-                                        set: { stop.customerName = $0.isEmpty ? nil : $0 }
-                                    ))
-                                    AddressAutocompleteField(address: $stop.address) { _, lat, lng in
-                                        stop.latitude = lat
-                                        stop.longitude = lng
-                                    }
-                                    TextField("Phone (for notifications)", text: Binding(
-                                        get: { stop.customerPhone ?? "" },
-                                        set: { stop.customerPhone = $0.isEmpty ? nil : $0 }
-                                    ))
-                                    .keyboardType(.phonePad)
-                                    TextField("Email (for notifications)", text: Binding(
-                                        get: { stop.customerEmail ?? "" },
-                                        set: { stop.customerEmail = $0.isEmpty ? nil : $0 }
-                                    ))
-                                    .keyboardType(.emailAddress)
-                                    .textInputAutocapitalization(.never)
-                                    Toggle("Opted in to notifications", isOn: $stop.customerOptedIn)
-                                        .font(.footnote)
-
-                                    if originalStopIds.contains(stop.id) {
-                                        Button("View Notification Log") {
-                                            historyStop = stop
-                                        }
-                                        .font(.footnote)
-                                    }
-                                }
+                            ForEach(stops) { stop in
+                                stopRow(stop)
                             }
                             .onDelete { stops.remove(atOffsets: $0) }
                             .onMove { stops.move(fromOffsets: $0, toOffset: $1) }
 
                             Button {
-                                stops.append(Stop(address: ""))
+                                let newStop = Stop(address: "")
+                                stops.append(newStop)
+                                pickerTargetId = newStop.id
                             } label: {
                                 Label("Add Stop", systemImage: "plus.circle")
                             }
@@ -123,7 +97,69 @@ struct EditRouteView: View {
             .sheet(item: $historyStop) { stop in
                 NotificationHistoryView(routeId: routeId, stop: stop)
             }
+            .sheet(isPresented: Binding(
+                get: { pickerTargetId != nil },
+                set: { if !$0 { pickerTargetId = nil } }
+            )) {
+                CustomerPickerView { customer in
+                    apply(customer, toStopId: pickerTargetId)
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func stopRow(_ stop: Stop) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if stop.customerId != nil {
+                Text(stop.customerName ?? "Customer")
+                    .font(.headline)
+                Text(stop.address)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if let phone = stop.customerPhone, !phone.isEmpty {
+                    Text(phone)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Button("Change Customer") {
+                    pickerTargetId = stop.id
+                }
+                .font(.footnote)
+            } else {
+                // Legacy stop, created before customer linking existed -
+                // still works via its own cached fields (see
+                // NotificationService), but offer an easy upgrade path.
+                if let name = stop.customerName, !name.isEmpty {
+                    Text(name).font(.headline)
+                    Text(stop.address).font(.caption).foregroundColor(.secondary)
+                }
+                Button(stop.customerName?.isEmpty == false ? "Link to a Customer Record" : "Select Customer") {
+                    pickerTargetId = stop.id
+                }
+                .font(.footnote)
+            }
+
+            if originalStopIds.contains(stop.id) {
+                Button("View Notification Log") {
+                    historyStop = stop
+                }
+                .font(.footnote)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func apply(_ customer: Customer, toStopId id: String?) {
+        guard let id, let index = stops.firstIndex(where: { $0.id == id }) else { return }
+        stops[index].customerId = customer.id
+        stops[index].customerName = customer.name
+        stops[index].customerPhone = customer.phone
+        stops[index].customerEmail = customer.email
+        stops[index].customerOptedIn = customer.notificationsOptIn
+        stops[index].address = customer.address
+        stops[index].latitude = customer.latitude
+        stops[index].longitude = customer.longitude
     }
 
     private func loadEverything() {

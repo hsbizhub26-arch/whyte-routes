@@ -7,10 +7,12 @@ import SwiftUI
 struct AddCustomerView: View {
 
     @Environment(\.dismiss) private var dismiss
-    var onSaved: () -> Void
+    var onSaved: (Customer) -> Void
 
     @State private var name = ""
     @State private var address = ""
+    @State private var phone = ""
+    @State private var email = ""
     @State private var latitude: Double = 0
     @State private var longitude: Double = 0
     @State private var notificationsOptIn = false
@@ -28,6 +30,11 @@ struct AddCustomerView: View {
                         latitude = lat
                         longitude = lng
                     }
+                    TextField("Phone", text: $phone)
+                        .keyboardType(.phonePad)
+                    TextField("Email", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
                 }
 
                 Section {
@@ -73,6 +80,8 @@ struct AddCustomerView: View {
             address: address,
             latitude: latitude,
             longitude: longitude,
+            phone: phone.isEmpty ? nil : phone,
+            email: email.isEmpty ? nil : email,
             notificationsOptIn: notificationsOptIn
         )
 
@@ -80,7 +89,7 @@ struct AddCustomerView: View {
             Task { @MainActor in
                 isSaving = false
                 if success {
-                    onSaved()
+                    onSaved(customer)
                     dismiss()
                 } else {
                     errorMessage = "Couldn't save the customer - check your connection and try again."

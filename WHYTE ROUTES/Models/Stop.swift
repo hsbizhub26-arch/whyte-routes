@@ -19,13 +19,20 @@ enum JobStatus: String {
 struct Stop: Identifiable {
 
     var id: String = UUID().uuidString
+    // nil for stops created before this field existed, or ones never
+    // linked to a standing Customer record. When set, this is the
+    // real source of truth for contact info/consent - see
+    // NotificationService, which looks up the Customer record first
+    // and only falls back to this stop's own cached fields below when
+    // customerId is nil.
+    var customerId: String? = nil
+    // Cached copy, filled in automatically when a customer is picked
+    // (see CustomerPickerView) - keeps the stop self-contained for
+    // display without a join on every read. Still the primary source
+    // for legacy stops that predate customer linking.
     var customerName: String? = nil
     var customerPhone: String? = nil
     var customerEmail: String? = nil
-    // Defaults false - matches Customer.notificationsOptIn. Carried
-    // separately here (not read from the Customer record) because
-    // stops aren't linked to customers by id yet; set per-stop until
-    // that link exists.
     var customerOptedIn: Bool = false
     var address: String
     var latitude: Double? = nil
@@ -63,6 +70,7 @@ extension Stop {
         }
 
         self.id = rawId
+        self.customerId = dict["customerId"] as? String
         self.customerName = dict["customerName"] as? String
         self.customerPhone = dict["customerPhone"] as? String
         self.customerEmail = dict["customerEmail"] as? String
@@ -91,6 +99,7 @@ extension Stop {
             "status": status,
             "customerOptedIn": customerOptedIn
         ]
+        if let customerId { d["customerId"] = customerId }
         if let customerName { d["customerName"] = customerName }
         if let customerPhone { d["customerPhone"] = customerPhone }
         if let customerEmail { d["customerEmail"] = customerEmail }
