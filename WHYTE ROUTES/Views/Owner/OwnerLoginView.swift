@@ -11,6 +11,7 @@ struct OwnerLoginView: View {
 
     @State private var isSecure = true
     @State private var isLoading = false
+    @State private var isSignUp = false
 
     @State private var rememberMe = false
     @State private var showingResetAlert = false
@@ -43,18 +44,29 @@ struct OwnerLoginView: View {
                                 .padding(.horizontal)
                         }
 
-                        forgotPassword
+                        if !isSignUp { forgotPassword }
 
                         Button {
-                            login()
+                            isSignUp ? createAccount() : login()
                         } label: {
-                            Text(isLoading ? "SIGNING IN…" : "LOGIN")
+                            Text(buttonTitle)
                                 .fontWeight(.bold)
                         }
                         .buttonStyle(GoldButtonStyle())
                         .padding(.horizontal)
                         .disabled(!isFormValid || isLoading)
                         .opacity(!isFormValid || isLoading ? 0.6 : 1)
+
+                        Button {
+                            isSignUp.toggle()
+                            error = ""
+                        } label: {
+                            Text(isSignUp ?
+                                 "Already have an account? Sign in" :
+                                 "Don't have an account? Create one")
+                                .font(.footnote)
+                                .foregroundColor(WRTheme.gold)
+                        }
 
                         divider
                         ssoButtons
@@ -90,11 +102,13 @@ extension OwnerLoginView {
                 .frame(width: 72, height: 72)
                 .foregroundColor(WRTheme.gold)
 
-            Text("ADMIN LOGIN")
+            Text(isSignUp ? "CREATE ACCOUNT" : "SIGN IN")
                 .foregroundColor(WRTheme.gold)
                 .font(.largeTitle.bold())
 
-            Text("Sign in to manage Whyte Routes")
+            Text(isSignUp
+                 ? "Use the email your invite was sent to"
+                 : "Sign in to Whyte Routes")
                 .foregroundColor(.white.opacity(0.7))
                 .font(.subheadline)
         }
@@ -264,6 +278,11 @@ extension OwnerLoginView {
         isValidEmail(email) && !password.isEmpty
     }
 
+    var buttonTitle: String {
+        if isSignUp { return isLoading ? "CREATING ACCOUNT…" : "CREATE ACCOUNT" }
+        return isLoading ? "SIGNING IN…" : "LOGIN"
+    }
+
     func isValidEmail(_ value: String) -> Bool {
         value.contains("@") && value.contains(".") && value.count > 5
     }
@@ -290,6 +309,36 @@ extension OwnerLoginView {
                 if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
                     print("⛔️ underlying: domain=\(underlying.domain) code=\(underlying.code) userInfo=\(underlying.userInfo)")
                 }
+                self.error = authError.localizedDescription
+            }
+        }
+    }
+
+    // Account creation is intentionally generic - not "sign up as a
+    // driver" or "as an owner". What happens next is decided entirely
+    // by AuthSession.listenForAuthChanges() once this succeeds: a
+    // pending invite for this email attaches them to that company/role,
+    // a platform-admin UID bootstraps as owner, otherwise they land as
+    // a company-less driver until an owner invites them. Nothing here
+    // needs to know which case applies.
+    func createAccount() {
+        guard isFormValid else {
+            error = "Please enter a valid email and password."
+            return
+        }
+
+        error = ""
+        isLoading = true
+
+        Task {
+            defer { isLoading = false }
+
+            do {
+                _ = try await Auth.auth().createUser(withEmail: email, password: password)
+                saveRememberedEmail(rememberMe ? email : nil)
+            } catch let authError {
+                let nsError = authError as NSError
+                print("⛔️ Account creation failed: domain=\(nsError.domain) code=\(nsError.code)")
                 self.error = authError.localizedDescription
             }
         }
