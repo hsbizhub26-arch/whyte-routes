@@ -50,7 +50,11 @@ struct DriverStopView: View {
                     header
                     mapSection
                     actionButtons
-                    smsButton
+                    // smsButton intentionally hidden - the tracking link it
+                    // sends has no real destination yet (no onOpenURL
+                    // handler, no tracking page built). Re-enable once
+                    // customer tracking (Phase 3) is actually wired up -
+                    // see smsButton below, left in place for that.
                     photoProofButton
                     completeButton
 
