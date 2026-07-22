@@ -7,6 +7,8 @@ final class DriverStopViewModel: ObservableObject {
 
     @Published var stop: Stop
     @Published var isCompleting = false
+    @Published var routeCompleted = false
+    @Published var etaMinutes: Int?
 
     private let routeService = RouteService.shared
     private let session = DriverSession.shared
@@ -19,6 +21,21 @@ final class DriverStopViewModel: ObservableObject {
 
     var jobStatus: JobStatus {
         JobStatus(rawValue: stop.status) ?? .scheduled
+    }
+
+    /// "Stop 12 of 47" - position within the route's stops in their
+    /// assigned order, not just however many are left.
+    var stopPosition: (current: Int, total: Int)? {
+        let ordered = session.activeStops.sorted { $0.order < $1.order }
+        guard let index = ordered.firstIndex(where: { $0.id == stop.id }) else { return nil }
+        return (index + 1, ordered.count)
+    }
+
+    var nextStopPreview: Stop? {
+        session.activeStops
+            .filter { !$0.isCompleted && $0.id != stop.id }
+            .sorted { $0.order < $1.order }
+            .first
     }
 
     // MARK: - Status transitions (explicit driver-triggered, not
@@ -64,11 +81,53 @@ final class DriverStopViewModel: ObservableObject {
         // THIS stop's change is async and not guaranteed to have
         // landed yet.
         let others = session.activeStops.filter { $0.id != stop.id }
-        if others.allSatisfy({ $0.isCompleted }) {
+        let allDone = others.allSatisfy { $0.isCompleted }
+        if allDone {
             routeService.updateStatus(for: route.id, status: "completed")
         }
 
+        // Auto-advance: load the next stop into this same screen so
+        // the driver can tap Navigate immediately - no back-and-forth
+        // to Dashboard and re-opening a stop required.
+        if let next = others.filter({ !$0.isCompleted }).sorted(by: { $0.order < $1.order }).first {
+            stop = next
+            etaMinutes = nil
+            LocationService.shared.setArrivalTarget(lat: next.latitude, lng: next.longitude)
+            loadETA()
+        } else {
+            routeCompleted = true
+        }
+
         isCompleting = false
+    }
+
+    /// Driver's own ETA to the current stop - on-device MKDirections,
+    /// no paid routing API, no network cost. Separate from (and much
+    /// simpler than) the customer-facing ETA notifications, which
+    /// remain deferred - this is just what the driver sees for
+    /// themselves.
+    func loadETA() {
+        guard let destination = stop.coordinate,
+              let origin = LocationService.shared.currentLocation else {
+            etaMinutes = nil
+            return
+        }
+
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+        request.transportType = .automobile
+
+        Task {
+            do {
+                let eta = try await MKDirections(request: request).calculateETA()
+                await MainActor.run {
+                    self.etaMinutes = Int(eta.expectedTravelTime / 60)
+                }
+            } catch {
+                await MainActor.run { self.etaMinutes = nil }
+            }
+        }
     }
 }
 
@@ -88,34 +147,39 @@ struct DriverStopView: View {
         ZStack {
             Color("WRBlack").ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 20) {
+            if vm.routeCompleted {
+                routeCompletedView
+            } else {
+                ScrollView {
+                    VStack(spacing: 20) {
 
-                    header
-                    mapSection
-                    actionButtons
-                    // smsButton intentionally hidden - the tracking link it
-                    // sends has no real destination yet (no onOpenURL
-                    // handler, no tracking page built). Re-enable once
-                    // customer tracking (Phase 3) is actually wired up -
-                    // see smsButton below, left in place for that.
-                    statusControl
-                    // photoProofButton intentionally hidden for the snow
-                    // beta - a photo step adds real friction to exactly
-                    // what overnight snow ops needs to be fast: gloves,
-                    // darkness, snow falling, dozens of properties to
-                    // clear before people wake up. Not tier-gating this
-                    // away (access.canAccessProofOfWork() still governs
-                    // whether it WOULD show), just not calling it -
-                    // PhotoProofView/PhotoUploader/the Storage rules all
-                    // stay intact for landscaping jobs, where before/after
-                    // photos are genuinely useful and driver pace isn't
-                    // the same constraint.
-                    completeButton
+                        progressBar
+                        header
+                        mapSection
+                        actionButtons
+                        // smsButton intentionally hidden - the tracking link it
+                        // sends has no real destination yet (no onOpenURL
+                        // handler, no tracking page built). Re-enable once
+                        // customer tracking (Phase 3) is actually wired up -
+                        // see smsButton below, left in place for that.
+                        statusControl
+                        // photoProofButton intentionally hidden for the snow
+                        // beta - a photo step adds real friction to exactly
+                        // what overnight snow ops needs to be fast: gloves,
+                        // darkness, snow falling, dozens of properties to
+                        // clear before people wake up. Not tier-gating this
+                        // away (access.canAccessProofOfWork() still governs
+                        // whether it WOULD show), just not calling it -
+                        // PhotoProofView/PhotoUploader/the Storage rules all
+                        // stay intact for landscaping jobs, where before/after
+                        // photos are genuinely useful and driver pace isn't
+                        // the same constraint.
+                        completeButton
 
-                    Spacer(minLength: 40)
+                        Spacer(minLength: 40)
+                    }
+                    .padding()
                 }
-                .padding()
             }
         }
         .sheet(isPresented: $showPhotoCapture) {
@@ -141,11 +205,29 @@ struct DriverStopView: View {
             // DriverSession.startShift/endShift) - this just tells the
             // already-running tracker what "arrived" means for this stop.
             LocationService.shared.setArrivalTarget(lat: vm.stop.latitude, lng: vm.stop.longitude)
+            vm.loadETA()
+            // Keep the screen awake while an active stop is open - a
+            // mounted tablet/phone dimming mid-shift is exactly the
+            // kind of friction this feature is meant to remove.
+            UIApplication.shared.isIdleTimerDisabled = true
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
     }
 }
 
 extension DriverStopView {
+
+    // MARK: STOP POSITION
+    @ViewBuilder
+    private var progressBar: some View {
+        if let position = vm.stopPosition {
+            Text("Stop \(position.current) of \(position.total)")
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.6))
+        }
+    }
 
     // MARK: HEADER
     private var header: some View {
@@ -158,6 +240,12 @@ extension DriverStopView {
                 .foregroundColor(.white.opacity(0.8))
                 .font(.headline)
                 .multilineTextAlignment(.center)
+
+            if let eta = vm.etaMinutes {
+                Text("ETA \(eta) min")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.white.opacity(0.7))
+            }
         }
         .padding(.top, 10)
     }
@@ -263,7 +351,10 @@ extension DriverStopView {
     // MARK: COMPLETE BUTTON
     private var completeButton: some View {
         Button {
-            Task { await vm.markCompleted() }
+            Task {
+                proofPhotoURL = nil
+                await vm.markCompleted()
+            }
         } label: {
             HStack {
                 if vm.isCompleting {
@@ -284,5 +375,23 @@ extension DriverStopView {
         .opacity(vm.stop.isCompleted ? 0.4 : 1)
         .padding(.top, 10)
     }
-}
 
+    // MARK: ROUTE COMPLETED
+    private var routeCompletedView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.green)
+
+            Text("Route Completed 🎉")
+                .font(.title.bold())
+                .foregroundColor(Color("WRThemeGold"))
+
+            Text("All stops finished. Head back to Dashboard to end your shift.")
+                .foregroundColor(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
