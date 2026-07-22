@@ -26,9 +26,29 @@ struct Driver: Identifiable {
     }
 
     // MARK: - UI Color Helper
+    // Falls back to a stable color derived from this driver's own id
+    // when colorHex isn't explicitly set - so drivers are visually
+    // distinguishable on the fleet map (separate trucks/crews) without
+    // anyone having to manually assign colors first. The same driver
+    // always gets the same fallback color across app launches, since
+    // it's derived from their id, not randomized per session.
     var color: Color {
-        Color(hex: colorHex?.isEmpty == false ? colorHex! : "F5C451")
+        if let colorHex, !colorHex.isEmpty {
+            return Color(hex: colorHex)
+        }
+        return Driver.fallbackPalette[abs(id.hashValue) % Driver.fallbackPalette.count]
     }
+
+    private static let fallbackPalette: [Color] = [
+        Color(hex: "F5C451"), // gold
+        Color(hex: "4FAE6E"), // green
+        Color(hex: "6C9BD1"), // blue
+        Color(hex: "D2685A"), // red-orange
+        Color(hex: "A66CD1"), // purple
+        Color(hex: "4BC4C4"), // teal
+        Color(hex: "E08E45"), // orange
+        Color(hex: "D16CA6")  // pink
+    ]
 }
 
 // MARK: - Decode (Firestore → Driver)

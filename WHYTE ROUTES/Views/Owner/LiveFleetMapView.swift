@@ -15,11 +15,20 @@ struct LiveFleetMapView: View {
             annotationItems: driverVM.drivers.filter { $0.coordinate != nil }) { driver in
 
             MapAnnotation(coordinate: driver.coordinate!) {
-                VStack {
+                VStack(spacing: 2) {
                     Circle()
-                        .fill(WRTheme.gold)
-                        .frame(width: 14, height: 14)
+                        .fill(driver.color)
+                        .frame(width: 16, height: 16)
+                        .overlay(Circle().stroke(.white, lineWidth: 2))
                         .shadow(color: .black.opacity(0.4), radius: 4)
+
+                    Text(driver.name)
+                        .font(.caption2.bold())
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.black.opacity(0.7))
+                        .clipShape(Capsule())
                 }
             }
         }
