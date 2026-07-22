@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 struct DriverProfileView: View {
 
@@ -48,7 +49,15 @@ struct DriverProfileView: View {
 
                 // MARK: - Logout
                 Button(role: .destructive) {
-                    session.logout()
+                    // Signing out of Firebase is what actually matters -
+                    // AuthSession's listener reacts to that and clears
+                    // DriverSession/CompanySession/LocationService itself
+                    // (see AuthSession.listenForAuthChanges). Calling
+                    // session.logout() here directly without signing out
+                    // of Firebase would leave the account still
+                    // authenticated while the driver's own data vanished
+                    // underneath it - that was the actual logout bug.
+                    try? Auth.auth().signOut()
                 } label: {
                     Text("Log Out")
                         .foregroundColor(.white)
