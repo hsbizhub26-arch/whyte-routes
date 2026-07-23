@@ -3,6 +3,8 @@ import MapKit
 import UIKit
 
 /// A service that opens turn-by-turn navigation in popular map apps with sensible fallbacks.
+@MainActor
+@available(iOSApplicationExtension, unavailable)
 final class NavigationService {
 
     // MARK: - Types
@@ -68,9 +70,8 @@ final class NavigationService {
     static func openInGoogleMaps(_ coordinate: CLLocationCoordinate2D, name: String? = nil, mode: DirectionsMode = .driving, avoidTolls: Bool = false, avoidHighways: Bool = false) -> Bool {
         let lat = coordinate.latitude
         let lon = coordinate.longitude
-        // Google Maps' URL scheme is the one provider of the three
-        // that actually supports avoid params - "tolls"/"highways" are
-        // the only recognized values (no HOV option exists here either).
+        // Google Maps URL scheme supports avoid parameters ("tolls", "highways").
+        // Apple Maps and Waze do not expose equivalent options in their external launch APIs.
         var avoid: [String] = []
         if avoidTolls { avoid.append("tolls") }
         if avoidHighways { avoid.append("highways") }
@@ -97,9 +98,9 @@ final class NavigationService {
             URLQueryItem(name: "travelmode", value: mode.googleMapsMode)
         ]
         if let name = name, !name.isEmpty {
-            queryItems.append(URLQueryItem(name: "destination_place_id", value: nil)) // placeholder; name is not used as place_id
-            // Append a query to include name in path when possible
-            // Google Maps web supports destination by query string as well
+            // Google Maps' web fallback accepts a plain-text query
+            // alongside the lat/lon destination, so the stop's name
+            // still shows up even without a real place ID to give it.
             queryItems.append(URLQueryItem(name: "query", value: name))
         }
         if !avoid.isEmpty {
@@ -119,7 +120,7 @@ final class NavigationService {
     /// Opens Waze if installed; falls back to Apple Maps.
     /// - Returns: `true` if the request was initiated, `false` otherwise.
     @discardableResult
-    static func openInWaze(_ coordinate: CLLocationCoordinate2D, name: String? = nil) -> Bool {
+    static func openInWaze(_ coordinate: CLLocationCoordinate2D) -> Bool {
         let lat = coordinate.latitude
         let lon = coordinate.longitude
         let urlString = "waze://?ll=\(lat),\(lon)&navigate=yes"
@@ -144,9 +145,7 @@ final class NavigationService {
     }
 
     /// Navigate to a coordinate using a preferred app with fallbacks.
-    /// avoidTolls/avoidHighways are only actually honored for Google
-    /// Maps - see NavigationSettings for why (no such option exists in
-    /// Apple Maps' or Waze's external launch APIs).
+    /// Note: avoidTolls/avoidHighways are only honored by Google Maps; Apple Maps and Waze ignore them.
     static func navigate(
         to coordinate: CLLocationCoordinate2D,
         name: String = "Destination",
@@ -164,7 +163,7 @@ final class NavigationService {
                 openInAppleMaps(coordinate, name: name, mode: mode)
             }
         case .waze:
-            if !openInWaze(coordinate, name: name) {
+            if !openInWaze(coordinate) {
                 // Fallback to Apple Maps
                 openInAppleMaps(coordinate, name: name, mode: mode)
             }

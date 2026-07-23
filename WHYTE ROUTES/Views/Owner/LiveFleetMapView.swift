@@ -71,12 +71,19 @@ struct LiveFleetMapView: View {
                     }
                 }
             }
+            // .ignoresSafeArea() has to come BEFORE .mapControls - applied
+            // after, it expands the whole map-plus-controls composite, and
+            // MapUserLocationButton loses the safe-area inset it needs to
+            // sit below the status bar (this is what was jamming it up
+            // into the battery/wifi icons). Applying it first means only
+            // the map's own background bleeds full-screen; the controls
+            // overlay added afterward still reads the real safe area.
+            .ignoresSafeArea()
             .mapControls {
                 MapCompass()
                 MapScaleView()
                 MapUserLocationButton()
             }
-            .ignoresSafeArea()
 
             driverLegend
         }
