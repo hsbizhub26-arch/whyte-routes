@@ -4,6 +4,7 @@ import SwiftUI
 struct RoleRouterView: View {
 
     @EnvironmentObject var auth: AuthSession
+    @ObservedObject private var companySession = CompanySession.shared
 
     var body: some View {
         Group {
@@ -17,7 +18,11 @@ struct RoleRouterView: View {
                 switch auth.role {
 
                 case .owner:
-                    OwnerTabView()       // business owner - full admin access
+                    if companySession.currentCompanyId == nil {
+                        CreateCompanyView()   // self-serve signup with no company yet
+                    } else {
+                        OwnerTabView()        // business owner - full admin access
+                    }
 
                 case .manager:
                     ManagerTabView()     // dispatcher / supervisor

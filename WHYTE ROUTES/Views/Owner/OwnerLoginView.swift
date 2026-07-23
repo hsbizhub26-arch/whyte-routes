@@ -107,7 +107,7 @@ extension OwnerLoginView {
                 .font(.largeTitle.bold())
 
             Text(isSignUp
-                 ? "Use the email your invite was sent to"
+                 ? "Starting a new company, or joining one you were invited to"
                  : "Sign in to Whyte Routes")
                 .foregroundColor(.white.opacity(0.7))
                 .font(.subheadline)

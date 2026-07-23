@@ -142,6 +142,20 @@ service cloud.firestore {
                            && request.resource.data.companyId is string
                            && request.resource.data.companyRole is string
                            && usableInviteMatches(request.resource.data.companyId, request.resource.data.companyRole))
+                         ||
+                         // Self-serve signup with no invite waiting: becomes
+                         // a "pending owner" with role owner but no company
+                         // yet - owning zero companies grants no actual
+                         // access anywhere, so this is safe. The only way
+                         // to attach a real companyId/companyRole after
+                         // this is the update rule below, which requires
+                         // proof they actually own a real company doc.
+                         (!isPlatformAdminUID(userId)
+                           && request.resource.data.role == 'owner'
+                           && request.resource.data.isAdmin == false
+                           && (!('platformAdmin' in request.resource.data) || request.resource.data.platformAdmin == false)
+                           && !('companyId' in request.resource.data)
+                           && !('companyRole' in request.resource.data))
                        );
 
       allow update: if isSignedIn() && (
@@ -166,6 +180,24 @@ service cloud.firestore {
                            && request.resource.data.subscription == resource.data.subscription
                            && request.resource.data.companyId == resource.data.companyId
                            && request.resource.data.companyRole == resource.data.companyRole)
+                         ||
+                         // Claiming ownership of a company just created via
+                         // self-serve signup - the one-time transition from
+                         // "pending owner, no company" to "owner of a real
+                         // company." Proven by the company doc's own
+                         // ownerUID, set at creation time and never
+                         // touchable afterward (see companies/{id} create
+                         // rule) - not self-asserted here.
+                         (request.auth.uid == userId
+                           && resource.data.role == 'owner'
+                           && !('companyId' in resource.data)
+                           && request.resource.data.companyId is string
+                           && request.resource.data.companyRole == 'owner'
+                           && get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerUID == request.auth.uid
+                           && request.resource.data.role == resource.data.role
+                           && request.resource.data.isAdmin == resource.data.isAdmin
+                           && request.resource.data.platformAdmin == resource.data.platformAdmin
+                           && request.resource.data.subscription == resource.data.subscription)
                        );
     }
 
@@ -183,7 +215,20 @@ service cloud.firestore {
 
     match /companies/{companyId} {
       allow read: if canAccessCompany(companyId);
-      allow create, delete: if isPlatformAdmin();
+      // Self-serve creation: any signed-in user can create a company
+      // naming themselves as ownerUID, but only on the free starter
+      // tier with billing left on - a self-service signup can never
+      // grant itself a paid tier or a comped/no-billing account for
+      // free. Upgrading past starter goes through the real StoreKit
+      // paywall (see SubscriptionTierView), which is the only path
+      // that can raise subscriptionTier afterward (still platform-
+      // admin/Cloud-Function-only on update, below).
+      allow create: if isPlatformAdmin()
+                    || (isSignedIn()
+                         && request.resource.data.ownerUID == request.auth.uid
+                         && request.resource.data.subscriptionTier == 'starter'
+                         && request.resource.data.billingRequired == true);
+      allow delete: if isPlatformAdmin();
       allow update: if isPlatformAdmin()
                     || (isCompanyOwnerRole(companyId)
                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['navigationSettings']));

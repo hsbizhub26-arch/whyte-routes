@@ -172,10 +172,28 @@ final class AuthSession: ObservableObject {
                             fallbackRole: .driver
                         )
                     } else {
-                        // Genuinely no invite waiting - safe,
-                        // low-privilege default until this account is
-                        // added to a company by an owner.
-                        self.role = .driver
+                        // Genuinely no invite waiting: this is a brand
+                        // new self-serve signup. Persisted as a
+                        // "pending owner" - role owner, no company yet -
+                        // so RoleRouterView shows CreateCompanyView
+                        // instead of OwnerTabView. Owning zero companies
+                        // grants no real access anywhere, so this is
+                        // safe to persist immediately rather than only
+                        // holding it in memory (the old behavior here
+                        // silently defaulted to role .driver with
+                        // nothing ever written to Firestore, which is
+                        // why self-serve signup had no path forward at
+                        // all before this).
+                        let persisted = await UserPermissionsService.shared.createIfNeeded(
+                            uid: user.uid,
+                            email: user.email ?? "",
+                            role: .owner,
+                            subscription: "free",
+                            isAdmin: false,
+                            platformAdmin: false
+                        )
+                        self.permissionsSyncFailed = !persisted
+                        self.role = .owner
                         CompanySession.shared.clear()
                     }
                 }
