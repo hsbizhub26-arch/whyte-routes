@@ -12,6 +12,14 @@ final class AuthSession: ObservableObject {
     @Published var isLoading: Bool = true
     @Published var isPlatformAdmin: Bool = false
 
+    /// True when an owner/manager has also opted into driving routes
+    /// themselves (owner-operators - one person, one truck - are a real
+    /// WHYTE ROUTES customer, not an edge case). Additive to `role`,
+    /// never a replacement for it: an owner with this true still sees
+    /// OwnerTabView, just with an extra "My Route" tab. Meaningless for
+    /// role == .driver, who already has the full driver experience.
+    @Published var alsoDrives: Bool = false
+
     /// True if this account's permissions are only active locally because
     /// the Firestore users/{uid} permissions document couldn't be read or
     /// written (most commonly: Firestore security rules blocking the write).
@@ -39,6 +47,7 @@ final class AuthSession: ObservableObject {
                     self?.role = .none
                     self?.isPlatformAdmin = false
                     self?.permissionsSyncFailed = false
+                    self?.alsoDrives = false
                     CompanySession.shared.clear()
                     DriverSession.shared.logout()
                     LocationService.shared.stopTracking()
@@ -85,6 +94,17 @@ final class AuthSession: ObservableObject {
                         companyRole: permissions.companyRole,
                         fallbackRole: permissions.role
                     )
+
+                    // Owner-operator support: additive, not a role
+                    // switch - bridges DriverSession alongside the
+                    // owner/manager role resolved above, so "My Route"
+                    // has real data without touching self.role at all.
+                    self.alsoDrives = permissions.alsoDrives
+                    if permissions.alsoDrives,
+                       let companyId = permissions.companyId,
+                       permissions.companyRole != "driver" {
+                        await self.bridgeDriverSession(companyId: companyId)
+                    }
                 } else if AccessControl.isPlatformAdmin(uid: user.uid, email: user.email) {
                     // 3. Fallback for platform-owner accounts that haven't
                     //    been migrated to a Firestore permissions document
@@ -95,6 +115,7 @@ final class AuthSession: ObservableObject {
                     //    is also a real company's owner) so both roles are
                     //    captured in the same document from the start.
                     self.isPlatformAdmin = true
+                    self.alsoDrives = false
 
                     let ownedCompany = await CompanyRepository().fetchOwnedCompany(ownerUID: user.uid)
 
@@ -128,6 +149,7 @@ final class AuthSession: ObservableObject {
                     // by an owner, matched only by their own verified
                     // sign-in identity (see the Firestore rule).
                     self.isPlatformAdmin = false
+                    self.alsoDrives = false
 
                     if let invite = await self.findUsableInvite(for: user) {
                         // Order matters, and is enforced by the Firestore

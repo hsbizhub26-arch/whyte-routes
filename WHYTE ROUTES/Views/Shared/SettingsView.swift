@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject var auth: AuthSession
     @State private var showReportIssue = false
     @State private var showSubscription = false
+    @State private var alsoDrivesToggle = false
 
     // No NavigationStack here on purpose - every place this view is
     // shown (ManagerTabView's explicit per-tab NavigationStack, and
@@ -47,6 +48,25 @@ struct SettingsView: View {
                 } footer: {
                     Text("Applied automatically whenever a driver taps Navigate on a stop.")
                         .foregroundColor(.gray)
+                }
+                // Owner-operators (one person, one truck) and managers
+                // who also drive are real WHYTE ROUTES customers, not
+                // an edge case - roles are permissions, not exclusive
+                // identities. Hidden for role == .driver since a
+                // driver already has the full driver experience as
+                // their only view; toggling this would do nothing.
+                if auth.role != .driver {
+                    Section {
+                        Toggle("I also drive routes", isOn: $alsoDrivesToggle)
+                            .tint(WRTheme.gold)
+                            .listRowBackground(Color.black.opacity(0.2))
+                            .onChange(of: alsoDrivesToggle) { _, newValue in
+                                setAlsoDrives(newValue)
+                            }
+                    } footer: {
+                        Text("Adds a \"My Route\" tab alongside your \(auth.role == .owner ? "owner" : "manager") tools - for running your own route without giving up dispatch access.")
+                            .foregroundColor(.gray)
+                    }
                 }
                 Section {
                     Button {
@@ -107,6 +127,20 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showSubscription) {
             SubscriptionTierView()
+        }
+        .onAppear {
+            alsoDrivesToggle = auth.alsoDrives
+        }
+    }
+
+    private func setAlsoDrives(_ newValue: Bool) {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        auth.alsoDrives = newValue
+        Task {
+            await UserPermissionsService.shared.backfillIfMissing(
+                uid: uid,
+                fields: ["alsoDrives": newValue]
+            )
         }
     }
 }

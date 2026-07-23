@@ -44,6 +44,18 @@ struct OwnerTabView: View {
                         Label("Team", systemImage: "person.badge.plus")
                     }
 
+                // Owner-operators (one person, one truck) dispatch AND
+                // drive - this tab is additive, not a role switch, and
+                // only appears when they've opted in via Settings.
+                // Reuses the real driver experience wholesale rather
+                // than duplicating it.
+                if auth.alsoDrives {
+                    DriverTabView()
+                        .tabItem {
+                            Label("My Route", systemImage: "steeringwheel")
+                        }
+                }
+
                 SettingsView()
                     .tabItem {
                         Label("Settings", systemImage: "gear")

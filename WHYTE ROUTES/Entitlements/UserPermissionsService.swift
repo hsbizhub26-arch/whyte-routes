@@ -24,6 +24,15 @@ struct UserPermissionsDocument {
 
     /// This user's role within companyId: "owner" | "manager" | "driver".
     var companyRole: String?
+
+    /// Roles are permissions, not exclusive identities - owner-operators
+    /// are a real, common WHYTE ROUTES customer (one person, one truck,
+    /// dispatching AND driving). True means this owner/manager ALSO has
+    /// a real companies/{id}/drivers/{uid} record and can access the
+    /// driver experience alongside their admin tabs, not instead of them.
+    /// Meaningless (ignored) when companyRole is already "driver" - a
+    /// driver already has the full driver experience as their only view.
+    var alsoDrives: Bool
 }
 
 /// Reads/writes the users/{uid} permissions document that is the
@@ -51,7 +60,8 @@ final class UserPermissionsService {
                 isAdmin: data["isAdmin"] as? Bool ?? false,
                 platformAdmin: data["platformAdmin"] as? Bool ?? false,
                 companyId: data["companyId"] as? String,
-                companyRole: data["companyRole"] as? String
+                companyRole: data["companyRole"] as? String,
+                alsoDrives: data["alsoDrives"] as? Bool ?? false
             )
         } catch {
             // Missing document and read errors (offline, permission-denied)
