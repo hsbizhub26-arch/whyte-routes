@@ -18,7 +18,7 @@
                         <safeAreaInsets key="safeAreaInsets" top="47" left="0" bottom="34" right="0"/>
                         <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                         <subviews>
-                            <label opaque="NO" clipsSubviews="YES" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="WHYTE ROUTES" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontForContentSizeCategory="YES" id="N2w-Yz-9nm">
+                            <label opaque="NO" clipsSubviews="YES" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="WHYTE ROUTES" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" id="N2w-Yz-9nm">
                                 <rect key="frame" x="0" y="0" width="144" height="27"/>
                                 <fontDescription key="fontDescription" type="system" weight="medium" pointSize="22"/>
                                 <color key="textColor" systemColor="labelColor"/>

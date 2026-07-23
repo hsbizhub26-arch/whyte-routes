@@ -39,7 +39,7 @@ final class AddressSearchService: NSObject, ObservableObject {
         do {
             let response = try await search.start()
             guard let item = response.mapItems.first else { return nil }
-            let coordinate = item.placemark.coordinate
+            let coordinate = item.location.coordinate
             let address = [completion.title, completion.subtitle]
                 .filter { !$0.isEmpty }
                 .joined(separator: ", ")

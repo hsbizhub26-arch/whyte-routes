@@ -5,9 +5,11 @@ import Combine
 @MainActor
 final class DriverMapViewModel: ObservableObject {
 
-    @Published var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 43.7, longitude: -79.4),
-        span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04)
+    @Published var cameraPosition: MapCameraPosition = .region(
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 43.7, longitude: -79.4),
+            span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04)
+        )
     )
 
     @Published var driverCoordinate: CLLocationCoordinate2D?
@@ -35,14 +37,18 @@ final class DriverMapViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] coordinate in
                 self?.driverCoordinate = coordinate
-                self?.region.center = coordinate
+                self?.cameraPosition = .region(
+                    MKCoordinateRegion(center: coordinate, span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04))
+                )
             }
             .store(in: &cancellables)
     }
 
     func centerOnDriver() {
         if let coord = driverCoordinate {
-            region.center = coord
+            cameraPosition = .region(
+                MKCoordinateRegion(center: coord, span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04))
+            )
         }
     }
 }
@@ -94,23 +100,24 @@ struct DriverMapView: View {
 
     // MARK: - MAP LAYER
     private var mapLayer: some View {
-        Map(coordinateRegion: $vm.region,
-            showsUserLocation: true,
-            annotationItems: vm.stops.filter { $0.coordinate != nil }
-        ) { stop in
-            MapAnnotation(coordinate: stop.coordinate!) {
-                VStack(spacing: 2) {
-                    Circle()
-                        .fill(stop.isCompleted ? .green : Color("WRThemeGold"))
-                        .frame(width: 18, height: 18)
-                        .shadow(color: Color("WRThemeGold").opacity(0.4), radius: 6)
+        Map(position: $vm.cameraPosition) {
+            UserAnnotation()
 
-                    Text(stop.customerName ?? "")
-                        .font(.caption)
-                        .foregroundColor(.white)
-                }
-                .onTapGesture {
-                    vm.selectedStop = stop
+            ForEach(vm.stops.filter { $0.coordinate != nil }) { stop in
+                Annotation("", coordinate: stop.coordinate!) {
+                    VStack(spacing: 2) {
+                        Circle()
+                            .fill(stop.isCompleted ? .green : Color("WRThemeGold"))
+                            .frame(width: 18, height: 18)
+                            .shadow(color: Color("WRThemeGold").opacity(0.4), radius: 6)
+
+                        Text(stop.customerName ?? "")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                    }
+                    .onTapGesture {
+                        vm.selectedStop = stop
+                    }
                 }
             }
         }

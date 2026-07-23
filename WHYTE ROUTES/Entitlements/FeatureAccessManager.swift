@@ -47,7 +47,15 @@ enum SubscriptionTier: Int, Comparable {
 final class FeatureAccessManager: ObservableObject {
 
     static let shared = FeatureAccessManager()
-    private init() {}
+    // nonisolated because init() itself touches no actor-isolated
+    // state (empty body) - this is what actually lets a MainActor
+    // class have a static-let singleton evaluated at global-init time
+    // (a nonisolated context). nonisolated(unsafe) on the property
+    // instead does NOT fix this: it only suppresses Sendable/data-race
+    // checking on later access, it doesn't authorize calling a
+    // MainActor-isolated initializer from a nonisolated context in
+    // the first place - that combination is a hard compile error.
+    private nonisolated init() {}
 
     var tier: SubscriptionTier {
         SubscriptionTier.from(CompanySession.shared.currentCompany?.subscriptionTier)

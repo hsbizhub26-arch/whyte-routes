@@ -279,12 +279,14 @@ extension DriverStopView {
     @ViewBuilder
     private var mapSection: some View {
         if let coordinate = vm.stop.coordinate {
-            Map(coordinateRegion: .constant(
+            Map(initialPosition: .region(
                 MKCoordinateRegion(
                     center: coordinate,
                     span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)
                 )
-            ))
+            )) {
+                Marker("", coordinate: coordinate)
+            }
             .frame(height: 280)
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(

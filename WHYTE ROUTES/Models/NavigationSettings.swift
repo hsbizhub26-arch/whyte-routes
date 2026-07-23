@@ -12,10 +12,31 @@ import Foundation
 // them, and are ready for a future provider (or paid routing API)
 // that supports more of them - see NavigationService.
 struct NavigationSettings {
-    var avoidTolls: Bool = true
-    var avoidHOV: Bool = true
-    var avoidHighways: Bool = false
-    var preferredProvider: String = NavigationService.MapApp.appleMaps.rawValue
+    var avoidTolls: Bool
+    var avoidHOV: Bool
+    var avoidHighways: Bool
+    var preferredProvider: String
+
+    // Explicit nonisolated init, not the synthesized memberwise one -
+    // the default value NavigationService.MapApp.appleMaps.rawValue
+    // resolves through @MainActor NavigationService, which otherwise
+    // makes the synthesized init MainActor-isolated too. That's fine
+    // for callers already on MainActor, but NavigationService.navigate
+    // uses NavigationSettings() as a default parameter value, and
+    // default-argument expressions are evaluated in a nonisolated
+    // context regardless of the calling function's own isolation -
+    // hence the warning this fixes.
+    nonisolated init(
+        avoidTolls: Bool = true,
+        avoidHOV: Bool = true,
+        avoidHighways: Bool = false,
+        preferredProvider: String = NavigationService.MapApp.appleMaps.rawValue
+    ) {
+        self.avoidTolls = avoidTolls
+        self.avoidHOV = avoidHOV
+        self.avoidHighways = avoidHighways
+        self.preferredProvider = preferredProvider
+    }
 }
 
 extension NavigationSettings {
