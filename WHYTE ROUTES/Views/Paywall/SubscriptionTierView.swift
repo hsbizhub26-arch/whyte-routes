@@ -229,8 +229,8 @@ struct SubscriptionTierView: View {
                 .multilineTextAlignment(.center)
 
             HStack(spacing: 16) {
-                Link("Privacy Policy", destination: URL(string: "https://teamdwlandscaping.com/privacy")!)
-                Link("Terms of Use", destination: URL(string: "https://teamdwlandscaping.com/terms")!)
+                Link("Privacy Policy", destination: URL(string: "https://whyte-routes.web.app/privacy")!)
+                Link("Terms of Use", destination: URL(string: "https://whyte-routes.web.app/terms")!)
             }
             .font(.caption2.bold())
             .foregroundColor(WRTheme.gold)

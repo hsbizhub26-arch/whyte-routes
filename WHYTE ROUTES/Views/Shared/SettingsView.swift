@@ -102,10 +102,10 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Color.black.opacity(0.2))
 
-                    Link("Privacy Policy", destination: URL(string: "https://teamdwlandscaping.com/privacy")!)
+                    Link("Privacy Policy", destination: URL(string: "https://whyte-routes.web.app/privacy")!)
                         .listRowBackground(Color.black.opacity(0.2))
 
-                    Link("Terms of Service", destination: URL(string: "https://teamdwlandscaping.com/terms")!)
+                    Link("Terms of Service", destination: URL(string: "https://whyte-routes.web.app/terms")!)
                         .listRowBackground(Color.black.opacity(0.2))
                 } header: {
                     Text("Support")

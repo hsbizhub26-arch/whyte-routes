@@ -13,5 +13,13 @@
   ],
   "firestore": {
     "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": "hosting",
+    "cleanUrls": true,
+    "ignore": [
+      "firebase.json",
+      "**/.*"
+    ]
   }
 }
