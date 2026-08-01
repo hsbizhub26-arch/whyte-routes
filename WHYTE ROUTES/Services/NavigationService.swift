@@ -1,7 +1,6 @@
 import Foundation
 import MapKit
 import UIKit
-import Contacts
 
 /// A service that opens turn-by-turn navigation in popular map apps with sensible fallbacks.
 @MainActor
@@ -54,26 +53,10 @@ final class NavigationService {
     ///   - name: A display name for the destination.
     ///   - mode: Directions mode; defaults to driving.
     static func openInAppleMaps(_ coordinate: CLLocationCoordinate2D, name: String = "Destination", mode: DirectionsMode = .driving) {
-        if #available(iOS 26.0, *) {
-            // Build an MKMapItem using the modern initializer (iOS 26+), preserving the destination name
-            let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-            let address = CNMutablePostalAddress()
-            // We don't have a postal address; leave fields empty. The `name` will be shown via `item.name`.
-            let item = MKMapItem(location: location, address: address)
-            item.name = name
-            let launchOptions: [String: Any] = [MKLaunchOptionsDirectionsModeKey: mode.appleMapsMode]
-            item.openInMaps(launchOptions: launchOptions)
-        } else {
-            legacyOpenInAppleMaps(coordinate, name: name, mode: mode)
-        }
-    }
-
-    // Legacy path for iOS versions prior to 26, using MKPlacemark-based initializer.
-    // Marked as obsoleted in iOS 26 to silence deprecation warnings when building against iOS 26 SDK.
-    @available(iOS, introduced: 13.0, obsoleted: 26.0)
-    private static func legacyOpenInAppleMaps(_ coordinate: CLLocationCoordinate2D, name: String, mode: DirectionsMode) {
-        let placemark = MKPlacemark(coordinate: coordinate)
-        let item = MKMapItem(placemark: placemark)
+        // Deployment target is iOS 26.0, so the modern location-based
+        // initializer is always available - no MKPlacemark needed.
+        let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let item = MKMapItem(location: location, address: nil)
         item.name = name
         let launchOptions: [String: Any] = [MKLaunchOptionsDirectionsModeKey: mode.appleMapsMode]
         item.openInMaps(launchOptions: launchOptions)
