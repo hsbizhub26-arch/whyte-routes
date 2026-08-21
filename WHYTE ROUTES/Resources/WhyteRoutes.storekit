@@ -60,7 +60,7 @@
               "locale" : "en_CA"
             }
           ],
-          "productID" : "whyteroutes.premium.monthly.v2",
+          "productID" : "whyteroutes.premium.monthly.v3",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Premium Monthly",
           "subscriptionGroupID" : "21845631",
@@ -88,7 +88,7 @@
               "locale" : "en_CA"
             }
           ],
-          "productID" : "whyteroutes.premiumplus.monthly.v2",
+          "productID" : "whyteroutes.premiumplus.monthly.v3",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Premium Plus Monthly",
           "subscriptionGroupID" : "21845631",
@@ -116,7 +116,7 @@
               "locale" : "en_CA"
             }
           ],
-          "productID" : "whyteroutes.premiumplus.yearly.v2",
+          "productID" : "whyteroutes.premiumplus.yearly.v3",
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Premium Plus Yearly",
           "subscriptionGroupID" : "21845631",
@@ -144,7 +144,7 @@
               "locale" : "en_CA"
             }
           ],
-          "productID" : "whyteroutes.premium.yearly.v2",
+          "productID" : "whyteroutes.premium.yearly.v3",
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Premium Yearly",
           "subscriptionGroupID" : "21845631",

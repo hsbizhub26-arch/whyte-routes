@@ -20,10 +20,10 @@ struct SubscriptionTierView: View {
         var id: String { rawValue }
 
         var monthlyProductID: String {
-            self == .premium ? "whyteroutes.premium.monthly.v2" : "whyteroutes.premiumplus.monthly.v2"
+            self == .premium ? "whyteroutes.premium.monthly.v3" : "whyteroutes.premiumplus.monthly.v3"
         }
         var yearlyProductID: String {
-            self == .premium ? "whyteroutes.premium.yearly.v2" : "whyteroutes.premiumplus.yearly.v2"
+            self == .premium ? "whyteroutes.premium.yearly.v3" : "whyteroutes.premiumplus.yearly.v3"
         }
 
         var features: [String] {

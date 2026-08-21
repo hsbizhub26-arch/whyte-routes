@@ -23,10 +23,10 @@ final class PurchaseManager: ObservableObject {
 
     // MARK: - Product IDs (MUST match App Store Connect / WhyteRoutes.storekit)
     static let productIDs: Set<String> = [
-        "whyteroutes.premium.monthly.v2",
-        "whyteroutes.premium.yearly.v2",
-        "whyteroutes.premiumplus.monthly.v2",
-        "whyteroutes.premiumplus.yearly.v2"
+        "whyteroutes.premium.monthly.v3",
+        "whyteroutes.premium.yearly.v3",
+        "whyteroutes.premiumplus.monthly.v3",
+        "whyteroutes.premiumplus.yearly.v3"
     ]
 
     @Published private(set) var products: [Product] = []
