@@ -49,5 +49,14 @@
 	<string>Photo Library access is needed to allow you to choose images as proof for reports.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.1092024277372-rddk1bij01gjq3censt7sudt7ohg1o0n</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
