@@ -98,7 +98,23 @@ final class RouteRepository {
     }
 
     // MARK: - Rename / Reassign an Existing Route
-    func updateRoute(routeId: String, name: String, driverId: String?, completion: ((Bool) -> Void)? = nil) {
+    // Start/end fields use FieldValue.delete() when nil rather than
+    // omitting them, so clearing a previously-set custom start or end
+    // point (going back to "first/last stop is the endpoint") actually
+    // removes the stale value instead of leaving it stranded in
+    // Firestore where it'd keep being read back.
+    func updateRoute(
+        routeId: String,
+        name: String,
+        driverId: String?,
+        startAddress: String? = nil,
+        startLatitude: Double? = nil,
+        startLongitude: Double? = nil,
+        endAddress: String? = nil,
+        endLatitude: Double? = nil,
+        endLongitude: Double? = nil,
+        completion: ((Bool) -> Void)? = nil
+    ) {
         guard let ref = routesRef?.document(routeId) else { completion?(false); return }
 
         var data: [String: Any] = [
@@ -106,6 +122,12 @@ final class RouteRepository {
             "updatedAt": FieldValue.serverTimestamp()
         ]
         data["driverId"] = driverId ?? ""
+        data["startAddress"] = startAddress ?? FieldValue.delete()
+        data["startLatitude"] = startLatitude ?? FieldValue.delete()
+        data["startLongitude"] = startLongitude ?? FieldValue.delete()
+        data["endAddress"] = endAddress ?? FieldValue.delete()
+        data["endLatitude"] = endLatitude ?? FieldValue.delete()
+        data["endLongitude"] = endLongitude ?? FieldValue.delete()
 
         ref.updateData(data) { error in
             if let error = error {

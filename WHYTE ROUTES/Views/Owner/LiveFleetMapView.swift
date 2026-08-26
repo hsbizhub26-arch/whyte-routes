@@ -25,6 +25,7 @@ struct LiveFleetMapView: View {
     // so a stop turning gray as it's completed happens automatically
     // without the owner needing to refresh anything.
     @State private var stopsByDriver: [String: [Stop]] = [:]
+    @State private var routesByDriver: [String: Route] = [:]
     @State private var subscribedDriverIds: Set<String> = []
     @State private var selectedDriverId: String?
 
@@ -55,10 +56,24 @@ struct LiveFleetMapView: View {
                         }
 
                         let stops = stopsByDriver[driver.id] ?? []
-                        let routeCoordinates = stops.compactMap { $0.coordinate }
-                        if routeCoordinates.count > 1 {
-                            MapPolyline(coordinates: routeCoordinates)
+                        let route = routesByDriver[driver.id]
+                        let startCoordinate = route?.startCoordinate
+                        let endCoordinate = route?.endCoordinate
+
+                        // Full path including the explicit depot legs
+                        // when set, so the line actually shows the
+                        // drive to/from them instead of just the
+                        // stops in between.
+                        let fullPath = ([startCoordinate] + stops.compactMap { $0.coordinate } + [endCoordinate]).compactMap { $0 }
+                        if fullPath.count > 1 {
+                            MapPolyline(coordinates: fullPath)
                                 .stroke(driver.color, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                        }
+
+                        if let startCoordinate {
+                            Annotation("", coordinate: startCoordinate) {
+                                endpointPin(systemImage: "flag.fill", color: .green)
+                            }
                         }
 
                         ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
@@ -66,6 +81,12 @@ struct LiveFleetMapView: View {
                                 Annotation("", coordinate: coordinate) {
                                     numberedStopPin(index: index + 1, color: driver.color, completed: stop.isCompleted)
                                 }
+                            }
+                        }
+
+                        if let endCoordinate {
+                            Annotation("", coordinate: endCoordinate) {
+                                endpointPin(systemImage: "flag.checkered", color: .red)
                             }
                         }
                     }
@@ -146,6 +167,18 @@ struct LiveFleetMapView: View {
         }
     }
 
+    // MARK: - Route endpoint pin (explicit start/end, when the route has one set)
+    private func endpointPin(systemImage: String, color: Color) -> some View {
+        Image(systemName: systemImage)
+            .font(.caption.bold())
+            .foregroundColor(.white)
+            .frame(width: 24, height: 24)
+            .background(color)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(.white, lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.35), radius: 2)
+    }
+
     // MARK: - Numbered stop pin (route order, dims once completed)
     private func numberedStopPin(index: Int, color: Color, completed: Bool) -> some View {
         Text("\(index)")
@@ -221,6 +254,9 @@ struct LiveFleetMapView: View {
             subscribedDriverIds.insert(driver.id)
             routeRepo.fetchRouteForDriver(driverId: driver.id) { route in
                 guard let route else { return }
+                Task { @MainActor in
+                    routesByDriver[driver.id] = route
+                }
                 stopsRepo.loadStops(forRoute: route.id) { stops in
                     Task { @MainActor in
                         stopsByDriver[driver.id] = stops.sorted { $0.order < $1.order }

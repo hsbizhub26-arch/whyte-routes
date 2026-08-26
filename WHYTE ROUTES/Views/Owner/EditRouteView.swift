@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 // Supersedes the old AssignRouteView (assign-only, no editing). Real
 // dispatching needs more than a one-time assignment: reordering stops
@@ -16,6 +17,13 @@ struct EditRouteView: View {
     @State private var stops: [Stop] = []
     @State private var drivers: [Driver] = []
     @State private var selectedDriverId: String?
+
+    @State private var startAddress = ""
+    @State private var startLatitude: Double?
+    @State private var startLongitude: Double?
+    @State private var endAddress = ""
+    @State private var endLatitude: Double?
+    @State private var endLongitude: Double?
 
     @State private var originalStopIds: Set<String> = []
     @State private var originalDriverId: String?
@@ -35,8 +43,18 @@ struct EditRouteView: View {
     private let driverRepo = FirestoreDriverRepository()
     private let access = FeatureAccessManager.shared
 
+    private var startCoordinate: CLLocationCoordinate2D? {
+        guard let startLatitude, let startLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: startLatitude, longitude: startLongitude)
+    }
+
+    private var endCoordinate: CLLocationCoordinate2D? {
+        guard let endLatitude, let endLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: endLatitude, longitude: endLongitude)
+    }
+
     private var approximateDistanceKM: Double {
-        RouteOptimizationService.totalDistanceKM(stops)
+        RouteOptimizationService.totalDistanceKM(stops, startCoordinate: startCoordinate, endCoordinate: endCoordinate)
     }
 
     var body: some View {
@@ -61,6 +79,29 @@ struct EditRouteView: View {
                         }
 
                         Section {
+                            HStack(spacing: 8) {
+                                Circle().fill(.green).frame(width: 10, height: 10)
+                                AddressAutocompleteField(address: $startAddress, placeholder: "Start location (optional)") { address, lat, lng in
+                                    startAddress = address
+                                    startLatitude = lat
+                                    startLongitude = lng
+                                }
+                            }
+                            HStack(spacing: 8) {
+                                Circle().fill(.red).frame(width: 10, height: 10)
+                                AddressAutocompleteField(address: $endAddress, placeholder: "End location (optional)") { address, lat, lng in
+                                    endAddress = address
+                                    endLatitude = lat
+                                    endLongitude = lng
+                                }
+                            }
+                        } header: {
+                            Text("Route Endpoints")
+                        } footer: {
+                            Text("Leave blank to use the first/last stop as usual - set these to route from a fixed depot or back to the shop.")
+                        }
+
+                        Section {
                             ForEach(stops) { stop in
                                 stopRow(stop)
                             }
@@ -78,7 +119,11 @@ struct EditRouteView: View {
                             if stops.count > 2 {
                                 Button {
                                     if access.canAccessAdvancedDispatch() {
-                                        stops = RouteOptimizationService.optimize(stops)
+                                        stops = RouteOptimizationService.optimize(
+                                            stops,
+                                            startCoordinate: startCoordinate,
+                                            endCoordinate: endCoordinate
+                                        )
                                     } else {
                                         showUpgradePrompt = true
                                     }
@@ -369,6 +414,12 @@ struct EditRouteView: View {
                     routeName = route.name
                     selectedDriverId = (route.driverId?.isEmpty == false) ? route.driverId : nil
                     originalDriverId = selectedDriverId
+                    startAddress = route.startAddress ?? ""
+                    startLatitude = route.startLatitude
+                    startLongitude = route.startLongitude
+                    endAddress = route.endAddress ?? ""
+                    endLatitude = route.endLatitude
+                    endLongitude = route.endLongitude
                 }
             }
         }
@@ -400,7 +451,20 @@ struct EditRouteView: View {
         isSaving = true
         errorMessage = nil
 
-        routeRepo.updateRoute(routeId: routeId, name: routeName, driverId: selectedDriverId) { success in
+        let trimmedStartAddress = startAddress.trimmingCharacters(in: .whitespaces)
+        let trimmedEndAddress = endAddress.trimmingCharacters(in: .whitespaces)
+
+        routeRepo.updateRoute(
+            routeId: routeId,
+            name: routeName,
+            driverId: selectedDriverId,
+            startAddress: trimmedStartAddress.isEmpty ? nil : trimmedStartAddress,
+            startLatitude: trimmedStartAddress.isEmpty ? nil : startLatitude,
+            startLongitude: trimmedStartAddress.isEmpty ? nil : startLongitude,
+            endAddress: trimmedEndAddress.isEmpty ? nil : trimmedEndAddress,
+            endLatitude: trimmedEndAddress.isEmpty ? nil : endLatitude,
+            endLongitude: trimmedEndAddress.isEmpty ? nil : endLongitude
+        ) { success in
             Task { @MainActor in
                 guard success else {
                     isSaving = false
