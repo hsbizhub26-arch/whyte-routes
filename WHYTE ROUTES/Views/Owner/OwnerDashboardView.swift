@@ -3,9 +3,12 @@ import SwiftUI
 struct OwnerDashboardView: View {
 
     @ObservedObject private var companySession = CompanySession.shared
+    @ObservedObject private var access = FeatureAccessManager.shared
     @StateObject private var driverVM = DriverViewModel()
     @StateObject private var routeService = RouteService.shared
     @State private var showReports = false
+    @State private var customerCount = 0
+    @State private var showUpgradePrompt = false
 
     private var totalCompletedStops: Int {
         driverVM.drivers.reduce(0) { $0 + routeService.reportFor($1).completedStops }
@@ -47,14 +50,31 @@ struct OwnerDashboardView: View {
 
                     driverReportsWidget
 
+                    if let limit = access.customerLimit {
+                        customerUsageWidget(limit: limit)
+                    }
+
                     Spacer(minLength: 16)
                 }
                 .padding(.top, 4)
             }
         }
-        .onAppear { routeService.loadRoutesOnce() }
+        .onAppear {
+            routeService.loadRoutesOnce()
+            CustomerRepository().fetchCustomers { result in
+                if case .success(let list) = result {
+                    customerCount = list.count
+                }
+            }
+        }
         .sheet(isPresented: $showReports) {
             DriverReportsView()
+        }
+        .sheet(isPresented: $showUpgradePrompt) {
+            UpgradeRequiredView(
+                featureName: "More Customers",
+                requiredTier: SubscriptionTier(rawValue: access.tier.rawValue + 1) ?? .enterprise
+            )
         }
     }
 }
@@ -130,6 +150,66 @@ extension OwnerDashboardView {
 
                 Image(systemName: "chevron.right")
                     .foregroundColor(.white.opacity(0.3))
+            }
+            .padding()
+            .background(WRTheme.softBlack)
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(WRTheme.gold.opacity(0.4), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+        }
+        .padding(.horizontal)
+    }
+
+    // Shown only for tiers with an actual cap (FeatureAccessManager
+    // returns nil for unlimited tiers) - a free/trial owner sees at a
+    // glance how much runway they have left without digging into the
+    // Customers tab, and can tap straight through to upgrade once
+    // they're close to the limit.
+    func customerUsageWidget(limit: Int) -> some View {
+        let fraction = limit > 0 ? min(1, Double(customerCount) / Double(limit)) : 0
+        let isNearLimit = customerCount >= limit
+
+        return Button {
+            if isNearLimit { showUpgradePrompt = true }
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 14) {
+                    Image(systemName: "house.fill")
+                        .font(.title3)
+                        .foregroundColor(WRTheme.gold)
+                        .frame(width: 46, height: 46)
+                        .background(WRTheme.gold.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Customers & Addresses")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("\(customerCount) of \(limit) used (\(access.tier.displayName) plan)")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+
+                    Spacer()
+
+                    if isNearLimit {
+                        Image(systemName: "lock.fill")
+                            .foregroundColor(WRTheme.gold)
+                    }
+                }
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(WRTheme.gold.opacity(0.15))
+                        Capsule()
+                            .fill(isNearLimit ? Color.red : WRTheme.gold)
+                            .frame(width: geo.size.width * fraction)
+                    }
+                }
+                .frame(height: 6)
             }
             .padding()
             .background(WRTheme.softBlack)
