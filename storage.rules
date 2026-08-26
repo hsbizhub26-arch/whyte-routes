@@ -11,8 +11,19 @@ service firebase.storage {
     // doc Firestore rules use, so Storage access follows the exact
     // same company-membership rule as everything else - no separate
     // source of truth to keep in sync.
+    function myPermissions() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
     function myCompanyId() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.companyId;
+      return myPermissions().companyId;
+    }
+
+    // Mirrors Firestore rules' isCompanyStaff - owner or manager of
+    // this specific company, not just "signed in".
+    function isCompanyStaff(companyId) {
+      return isSignedIn() && myCompanyId() == companyId
+        && (myPermissions().companyRole == 'owner' || myPermissions().companyRole == 'manager');
     }
 
     // Photo proof-of-work: companies/{companyId}/photos/{driverId}/{stopId}/{fileName}
@@ -20,6 +31,20 @@ service firebase.storage {
     // reviewing proof, drivers uploading it. Never cross-company.
     match /companies/{companyId}/photos/{allPaths=**} {
       allow read, write: if isSignedIn() && myCompanyId() == companyId;
+    }
+
+    // Driver's license photo: companies/{companyId}/licenses/{driverId}/{fileName}
+    // Deliberately narrower than the photos rule above - this is a
+    // government ID, not proof-of-work. Only the driver themselves can
+    // upload their own (request.auth.uid must equal driverId - a
+    // manager can't upload one on someone else's behalf), and only the
+    // driver or an owner/manager of the same company can view it.
+    // Other drivers, even on the same crew, get neither.
+    match /companies/{companyId}/licenses/{driverId}/{fileName} {
+      allow read: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+      allow write: if isSignedIn() && myCompanyId() == companyId
+        && request.auth.uid == driverId;
     }
 
     match /{allPaths=**} {

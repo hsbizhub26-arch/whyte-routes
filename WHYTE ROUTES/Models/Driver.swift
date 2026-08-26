@@ -19,6 +19,17 @@ struct Driver: Identifiable {
     var lastUpdated: Date?
     var colorHex: String?
 
+    // Driver's license photo - set by the driver themselves (see
+    // DriverProfileView). Deliberately a Storage PATH, not a download
+    // URL: Firebase's getDownloadURL() embeds a token that bypasses
+    // Storage security rules for anyone holding the link, which would
+    // defeat the whole point of restricting this to the driver +
+    // owner/manager (storage.rules) if any teammate who can read this
+    // driver doc got hold of it. A bare path grants nothing by itself -
+    // fetching the actual bytes still has to go through
+    // StorageReference.getData(), which does enforce storage.rules.
+    var licensePhotoPath: String?
+
     // MARK: - Map Coordinate Helper
     var coordinate: CLLocationCoordinate2D? {
         guard let lat = latitude, let lng = longitude else { return nil }
@@ -64,6 +75,7 @@ extension Driver {
         self.fleetId = dict["fleetId"] as? String
         self.activeRoute = dict["activeRoute"] as? String
         self.colorHex = dict["colorHex"] as? String
+        self.licensePhotoPath = dict["licensePhotoPath"] as? String
 
         // Latitude (new or legacy)
         if let lat = dict["latitude"] as? Double {
@@ -108,6 +120,7 @@ extension Driver {
         if let latitude { dict["latitude"] = latitude }
         if let longitude { dict["longitude"] = longitude }
         if let colorHex { dict["colorHex"] = colorHex }
+        if let licensePhotoPath { dict["licensePhotoPath"] = licensePhotoPath }
         if let lastUpdated { dict["lastUpdated"] = Timestamp(date: lastUpdated) }
 
         return dict

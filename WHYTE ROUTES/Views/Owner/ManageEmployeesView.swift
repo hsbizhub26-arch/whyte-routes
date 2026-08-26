@@ -83,6 +83,7 @@ struct ManageEmployeesView: View {
     @StateObject private var vm = ManageEmployeesViewModel()
     @State private var renamingDriver: Driver?
     @State private var renameText = ""
+    @State private var licenseViewerDriver: Driver?
 
     var body: some View {
         NavigationStack {
@@ -115,6 +116,9 @@ struct ManageEmployeesView: View {
             } message: {
                 Text("Shown on the live fleet map and everywhere else this driver appears.")
             }
+            .sheet(item: $licenseViewerDriver) { driver in
+                DriverLicenseViewerSheet(driver: driver)
+            }
         }
     }
 
@@ -130,25 +134,36 @@ struct ManageEmployeesView: View {
                     .font(.subheadline)
             } else {
                 ForEach(vm.activeDrivers) { driver in
-                    Button {
-                        renameText = driver.name
-                        renamingDriver = driver
-                    } label: {
-                        HStack {
-                            Circle()
-                                .fill(driver.color)
-                                .frame(width: 10, height: 10)
-                            Text(driver.name)
-                                .foregroundColor(.white)
-                            Spacer()
-                            Image(systemName: "pencil")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.5))
+                    HStack {
+                        Button {
+                            renameText = driver.name
+                            renamingDriver = driver
+                        } label: {
+                            HStack {
+                                Circle()
+                                    .fill(driver.color)
+                                    .frame(width: 10, height: 10)
+                                Text(driver.name)
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Image(systemName: "pencil")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
                         }
-                        .padding()
-                        .background(Color.gray.opacity(0.2))
-                        .cornerRadius(10)
+
+                        Button {
+                            licenseViewerDriver = driver
+                        } label: {
+                            Image(systemName: "person.text.rectangle")
+                                .font(.subheadline)
+                                .foregroundColor(WRTheme.gold)
+                        }
+                        .padding(.leading, 4)
                     }
+                    .padding()
+                    .background(Color.gray.opacity(0.2))
+                    .cornerRadius(10)
                 }
             }
         }
@@ -238,6 +253,71 @@ struct ManageEmployeesView: View {
                     .cornerRadius(10)
                 }
             }
+        }
+    }
+}
+
+// Owner/manager view of a single driver's license photo - fetched
+// through the authenticated Storage SDK call (respects storage.rules),
+// never via a shareable download URL. See Driver.licensePhotoPath for
+// why that distinction matters: a download URL would let anyone who
+// got hold of it view the photo regardless of who they are, which is
+// exactly what this feature is supposed to prevent for other drivers.
+private struct DriverLicenseViewerSheet: View {
+
+    let driver: Driver
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: UIImage?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                WRTheme.gradient.ignoresSafeArea()
+
+                if isLoading {
+                    ProgressView().tint(WRTheme.gold)
+                } else if let image {
+                    ScrollView {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .cornerRadius(12)
+                            .padding()
+                    }
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "person.text.rectangle")
+                            .font(.largeTitle)
+                            .foregroundColor(.white.opacity(0.4))
+                        Text(errorMessage ?? "No license photo on file for \(driver.name).")
+                            .foregroundColor(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                }
+            }
+            .navigationTitle("\(driver.name)'s License")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task {
+            guard let path = driver.licensePhotoPath else {
+                isLoading = false
+                return
+            }
+            do {
+                image = try await PhotoUploader().fetchLicensePhoto(path: path)
+            } catch {
+                errorMessage = "Couldn't load the photo - check your connection."
+            }
+            isLoading = false
         }
     }
 }

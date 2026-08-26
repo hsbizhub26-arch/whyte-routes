@@ -6,6 +6,11 @@ import UIKit
 struct ImagePicker: UIViewControllerRepresentable {
 
     @Binding var image: UIImage?
+    // Optional - fires exactly once per real capture, unlike observing
+    // `image` via onChange(of:), which UIImage can't support anyway
+    // (it isn't Equatable) and which couldn't distinguish "picked a
+    // new photo" from "picked the same photo again" besides.
+    var onPicked: ((UIImage) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
@@ -29,7 +34,10 @@ struct ImagePicker: UIViewControllerRepresentable {
         }
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
-            parent.image = (info[.originalImage] as? UIImage)
+            if let picked = info[.originalImage] as? UIImage {
+                parent.image = picked
+                parent.onPicked?(picked)
+            }
             parent.dismiss()
         }
 

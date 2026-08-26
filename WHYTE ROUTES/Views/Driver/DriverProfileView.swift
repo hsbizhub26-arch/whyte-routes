@@ -6,6 +6,13 @@ struct DriverProfileView: View {
     @ObservedObject private var session = DriverSession.shared
     @State private var showReportIssue = false
 
+    @StateObject private var photoUploader = PhotoUploader()
+    private let driverRepo: DriverRepository = FirestoreDriverRepository()
+    @State private var showCamera = false
+    @State private var licenseImage: UIImage?
+    @State private var isUploadingLicense = false
+    @State private var licenseError: String?
+
     var body: some View {
         ZStack {
             Color("WRBlack").ignoresSafeArea()
@@ -44,6 +51,8 @@ struct DriverProfileView: View {
                     .padding()
                     .background(Color.black.opacity(0.25))
                     .cornerRadius(16)
+
+                    licenseSection(driverId: driver.id)
                 }
 
                 Spacer()
@@ -100,6 +109,14 @@ struct DriverProfileView: View {
                 routeId: session.assignedRoute?.id
             )
         }
+        .sheet(isPresented: $showCamera) {
+            ImagePicker(image: $licenseImage) { picked in
+                Task { await uploadLicense(picked) }
+            }
+        }
+        .task {
+            await loadExistingLicensePhoto()
+        }
     }
 
     // MARK: - Reusable Info Row
@@ -116,6 +133,110 @@ struct DriverProfileView: View {
                 .font(.body)
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Driver's License
+    // Owner/manager-visible, other drivers never see this (see
+    // storage.rules and Driver.licensePhotoPath). Uploading replaces
+    // whatever was there before - a driver only ever has one current
+    // license photo on file.
+    @ViewBuilder
+    private func licenseSection(driverId: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Driver's License")
+                .foregroundColor(Color("WRThemeGold"))
+                .font(.headline)
+
+            Text("Visible only to you and your company's owner/manager - never to other drivers.")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.5))
+
+            if let licenseImage {
+                Image(uiImage: licenseImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 200)
+                    .cornerRadius(12)
+            } else {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.black.opacity(0.3))
+                    .frame(height: 120)
+                    .overlay(
+                        VStack(spacing: 6) {
+                            Image(systemName: "person.text.rectangle")
+                                .font(.title2)
+                            Text("No license photo on file")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.white.opacity(0.5))
+                    )
+            }
+
+            if isUploadingLicense {
+                ProgressView().tint(Color("WRThemeGold"))
+                    .frame(maxWidth: .infinity)
+            } else {
+                Button {
+                    showCamera = true
+                } label: {
+                    Label(licenseImage == nil ? "Take Photo" : "Retake Photo", systemImage: "camera.fill")
+                        .font(.subheadline.bold())
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color("WRThemeGold"))
+                        .cornerRadius(10)
+                }
+            }
+
+            if let licenseError {
+                Text(licenseError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+        .padding()
+        .background(Color.black.opacity(0.25))
+        .cornerRadius(16)
+    }
+
+    private func loadExistingLicensePhoto() async {
+        guard let path = session.driver?.licensePhotoPath else { return }
+        do {
+            licenseImage = try await photoUploader.fetchLicensePhoto(path: path)
+        } catch {
+            // Not an error worth surfacing to the driver - just means
+            // the "no photo on file" state stays showing, same as if
+            // none had ever been uploaded.
+        }
+    }
+
+    private func uploadLicense(_ image: UIImage) async {
+        guard let driverId = session.driver?.id,
+              let companyId = CompanySession.shared.currentCompanyId else {
+            licenseError = "Couldn't upload - try again in a moment."
+            return
+        }
+
+        isUploadingLicense = true
+        licenseError = nil
+
+        do {
+            let path = try await photoUploader.uploadLicensePhoto(image: image, companyId: companyId, driverId: driverId)
+            driverRepo.updateLicensePhotoPath(driverId: driverId, path: path) { success in
+                Task { @MainActor in
+                    if success {
+                        session.driver?.licensePhotoPath = path
+                    } else {
+                        licenseError = "Photo uploaded but couldn't save to your profile - try again."
+                    }
+                }
+            }
+        } catch {
+            licenseError = "Upload failed: \(error.localizedDescription)"
+        }
+
+        isUploadingLicense = false
     }
 }
 

@@ -8,6 +8,7 @@ protocol DriverRepository {
     func listenToDrivers(_ handler: @escaping ([Driver]) -> Void)
     func updateDriverLocation(driverId: String, latitude: Double, longitude: Double)
     func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)?)
+    func updateLicensePhotoPath(driverId: String, path: String, completion: ((Bool) -> Void)?)
     func assignRoute(driverId: String, routeId: String)
 }
 
@@ -141,6 +142,15 @@ final class FirestoreDriverRepository: DriverRepository {
     func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)? = nil) {
         guard let ref = driversRef?.document(driverId) else { completion?(false); return }
         ref.updateData(["name": name]) { error in
+            completion?(error == nil)
+        }
+    }
+
+    // MARK: - Update License Photo Path
+    // Path only, never a download URL - see Driver.licensePhotoPath.
+    func updateLicensePhotoPath(driverId: String, path: String, completion: ((Bool) -> Void)? = nil) {
+        guard let ref = driversRef?.document(driverId) else { completion?(false); return }
+        ref.updateData(["licensePhotoPath": path]) { error in
             completion?(error == nil)
         }
     }
