@@ -71,14 +71,13 @@ struct LiveFleetMapView: View {
                     }
                 }
             }
-            // .ignoresSafeArea() has to come BEFORE .mapControls - applied
-            // after, it expands the whole map-plus-controls composite, and
-            // MapUserLocationButton loses the safe-area inset it needs to
-            // sit below the status bar (this is what was jamming it up
-            // into the battery/wifi icons). Applying it first means only
-            // the map's own background bleeds full-screen; the controls
-            // overlay added afterward still reads the real safe area.
-            .ignoresSafeArea()
+            // Only the sides/bottom bleed full-screen. Leaving the top
+            // safe area alone is what actually keeps MapKit's
+            // auto-placed controls (MapUserLocationButton included)
+            // below the status bar - letting the map extend under the
+            // top too (even with .mapControls applied afterward) still
+            // let those controls creep up into the battery/wifi icons.
+            .ignoresSafeArea(edges: [.horizontal, .bottom])
             .mapControls {
                 MapCompass()
                 MapScaleView()
