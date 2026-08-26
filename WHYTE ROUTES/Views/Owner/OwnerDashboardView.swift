@@ -11,23 +11,45 @@ struct OwnerDashboardView: View {
         driverVM.drivers.reduce(0) { $0 + routeService.reportFor($1).completedStops }
     }
 
+    private var totalStopsToday: Int {
+        routeService.routes.reduce(0) { $0 + $1.stops.count }
+    }
+
+    private var completionFraction: Double {
+        guard totalStopsToday > 0 else { return 0 }
+        return min(1, Double(totalCompletedStops) / Double(totalStopsToday))
+    }
+
     var body: some View {
         ZStack {
             WRTheme.gradient.ignoresSafeArea()
 
-            VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: 20) {
 
-                header
+                    header
 
-                HStack(spacing: 14) {
-                    dashboardBox(title: "Drivers", value: "\(driverVM.drivers.count)")
-                    dashboardBox(title: "Active Routes", value: "\(routeService.routes.count)")
+                    HStack(spacing: 14) {
+                        statCard(
+                            icon: "person.2.fill",
+                            tint: WRTheme.gold,
+                            value: "\(driverVM.drivers.count)",
+                            title: "Drivers"
+                        )
+                        statCard(
+                            icon: "point.topleft.down.curvedto.point.bottomright.up.fill",
+                            tint: WRTheme.routeTeal,
+                            value: "\(routeService.routes.count)",
+                            title: "Active Routes"
+                        )
+                    }
+                    .padding(.horizontal)
+
+                    driverReportsWidget
+
+                    Spacer(minLength: 16)
                 }
-                .padding(.horizontal)
-
-                driverReportsWidget
-
-                Spacer()
+                .padding(.top, 4)
             }
         }
         .onAppear { routeService.loadRoutesOnce() }
@@ -44,20 +66,34 @@ extension OwnerDashboardView {
     // Removed the buttons; the tab bar is the one place to navigate
     // from now, this screen is just the at-a-glance overview.
     var header: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text("Welcome")
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(greeting)
                     .foregroundColor(.white.opacity(0.6))
+                    .font(.subheadline)
                 Text(companySession.currentCompany?.name ?? "your team")
                     .foregroundColor(WRTheme.gold)
                     .font(.title.bold())
             }
             Spacer()
+
+            Image(systemName: "map.circle.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(WRTheme.gold.gradient)
         }
         .padding(.horizontal)
         .padding(.top, 10)
     }
-    
+
+    var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 0..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        default: return "Good evening"
+        }
+    }
+
     // Real summary data (completedStops is now correctly computed -
     // see RouteService.reportFor/stopsByRoute), not just a bare
     // shortcut - tapping it drills into the full Reports screen for
@@ -68,12 +104,18 @@ extension OwnerDashboardView {
             showReports = true
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: "doc.text.fill")
-                    .font(.title2)
-                    .foregroundColor(WRTheme.gold)
-                    .frame(width: 46, height: 46)
-                    .background(WRTheme.gold.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                ZStack {
+                    Circle()
+                        .stroke(WRTheme.gold.opacity(0.2), lineWidth: 4)
+                    Circle()
+                        .trim(from: 0, to: completionFraction)
+                        .stroke(WRTheme.gold, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Image(systemName: "doc.text.fill")
+                        .font(.callout)
+                        .foregroundColor(WRTheme.gold)
+                }
+                .frame(width: 46, height: 46)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Driver Reports")
@@ -96,26 +138,35 @@ extension OwnerDashboardView {
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(WRTheme.gold.opacity(0.4), lineWidth: 1)
             )
+            .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
         }
         .padding(.horizontal)
     }
 
-    func dashboardBox(title: String, value: String) -> some View {
-        VStack(spacing: 6) {
+    func statCard(icon: String, tint: Color, value: String, title: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(tint)
+                .frame(width: 40, height: 40)
+                .background(tint.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
             Text(value)
-                .foregroundColor(WRTheme.gold)
-                .font(.title.bold())
-            Text(title)
                 .foregroundColor(.white)
-                .font(.headline)
+                .font(.system(size: 30, weight: .bold))
+            Text(title)
+                .foregroundColor(.white.opacity(0.6))
+                .font(.subheadline)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(WRTheme.softBlack)
         .cornerRadius(14)
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(WRTheme.gold.opacity(0.4), lineWidth: 2)
+                .stroke(tint.opacity(0.35), lineWidth: 1)
         )
+        .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
     }
 }

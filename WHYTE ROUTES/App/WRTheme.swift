@@ -6,6 +6,7 @@ struct WRTheme {
     static let gold = Color(hex: "#F5C451")
     static let darkGold = Color(hex: "#D9A63A")
     static let softBlack = Color(hex: "#1C1C1E")
+    static let routeTeal = Color(hex: "#4FD1C5")
 
     static let gradient = LinearGradient(
         colors: [.wrBlack, .wrDeepBlack],
