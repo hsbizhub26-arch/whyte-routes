@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import AuthenticationServices
+import CryptoKit
 
 struct OwnerLoginView: View {
 
@@ -16,6 +17,7 @@ struct OwnerLoginView: View {
     @State private var rememberMe = false
     @State private var showingResetAlert = false
     @State private var resetInfo: String = ""
+    @State private var currentAppleNonce: String?
 
     // MARK: - Body
     var body: some View {
@@ -218,25 +220,23 @@ extension OwnerLoginView {
     var ssoButtons: some View {
         HStack(spacing: 12) {
 
-            VStack(spacing: 4) {
-                SignInWithAppleButton(.signIn) { _ in } onCompletion: { _ in }
-                    .signInWithAppleButtonStyle(.whiteOutline)
-                    .frame(height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(WRTheme.gold.opacity(0.35), lineWidth: 1)
-                    )
-                    .opacity(0.4)
-                    .allowsHitTesting(false)
-
-                Text("Not yet available")
-                    .font(.footnote)
-                    .foregroundColor(.gray)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
+            SignInWithAppleButton(.signIn) { request in
+                let nonce = randomNonceString()
+                currentAppleNonce = nonce
+                request.requestedScopes = [.fullName, .email]
+                request.nonce = sha256(nonce)
+            } onCompletion: { result in
+                handleAppleSignInResult(result)
             }
+            .signInWithAppleButtonStyle(.whiteOutline)
+            .frame(height: 44)
             .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(WRTheme.gold.opacity(0.35), lineWidth: 1)
+            )
+            .disabled(isLoading)
 
             VStack(spacing: 4) {
                 Button {
@@ -342,6 +342,59 @@ extension OwnerLoginView {
                 self.error = authError.localizedDescription
             }
         }
+    }
+
+    func handleAppleSignInResult(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let authorization):
+            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+                  let nonce = currentAppleNonce,
+                  let identityToken = credential.identityToken,
+                  let idTokenString = String(data: identityToken, encoding: .utf8) else {
+                error = "Apple sign-in failed. Please try again."
+                return
+            }
+
+            let firebaseCredential = OAuthProvider.appleCredential(
+                withIDToken: idTokenString,
+                rawNonce: nonce,
+                fullName: credential.fullName
+            )
+
+            error = ""
+            isLoading = true
+            Task {
+                defer { isLoading = false }
+                do {
+                    _ = try await Auth.auth().signIn(with: firebaseCredential)
+                } catch let authError {
+                    self.error = authError.localizedDescription
+                }
+            }
+
+        case .failure(let authError):
+            // User cancelling the Apple sign-in sheet isn't a real error.
+            let nsError = authError as NSError
+            if nsError.code != ASAuthorizationError.canceled.rawValue {
+                error = authError.localizedDescription
+            }
+        }
+    }
+
+    // Apple requires the nonce sent with the sign-in request to be
+    // rehashed (SHA256) before Firebase can verify the identity token
+    // against it - this pairing is what prevents replay attacks.
+    func randomNonceString(length: Int = 32) -> String {
+        var randomBytes = [UInt8](repeating: 0, count: length)
+        _ = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        return String(randomBytes.map { charset[Int($0) % charset.count] })
+    }
+
+    func sha256(_ input: String) -> String {
+        SHA256.hash(data: Data(input.utf8))
+            .compactMap { String(format: "%02x", $0) }
+            .joined()
     }
 
     func saveRememberedEmail(_ value: String?) {
