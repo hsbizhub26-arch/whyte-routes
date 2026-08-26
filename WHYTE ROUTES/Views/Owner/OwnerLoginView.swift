@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseAuth
 import AuthenticationServices
 import CryptoKit
+import GoogleSignIn
 
 struct OwnerLoginView: View {
 
@@ -238,34 +239,24 @@ extension OwnerLoginView {
             )
             .disabled(isLoading)
 
-            VStack(spacing: 4) {
-                Button {
-                    // Disabled
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "g.circle.fill")
-                        Text("Google")
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.black.opacity(0.6))
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(WRTheme.gold.opacity(0.35), lineWidth: 1)
-                    )
+            Button {
+                signInWithGoogle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "g.circle.fill")
+                    Text("Google")
                 }
-                .opacity(0.4)
-                .disabled(true)
-
-                Text("Not yet available")
-                    .font(.footnote)
-                    .foregroundColor(.gray)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.black.opacity(0.6))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(WRTheme.gold.opacity(0.35), lineWidth: 1)
+                )
             }
-            .frame(maxWidth: .infinity)
+            .disabled(isLoading)
         }
         .padding(.horizontal)
     }
@@ -395,6 +386,40 @@ extension OwnerLoginView {
         SHA256.hash(data: Data(input.utf8))
             .compactMap { String(format: "%02x", $0) }
             .joined()
+    }
+
+    func signInWithGoogle() {
+        guard let presentingVC = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first?.windows.first?.rootViewController else {
+            error = "Unable to present Google sign-in."
+            return
+        }
+
+        error = ""
+        isLoading = true
+        Task {
+            defer { isLoading = false }
+            do {
+                let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presentingVC)
+                guard let idToken = result.user.idToken?.tokenString else {
+                    self.error = "Google sign-in failed. Please try again."
+                    return
+                }
+                let credential = GoogleAuthProvider.credential(
+                    withIDToken: idToken,
+                    accessToken: result.user.accessToken.tokenString
+                )
+                _ = try await Auth.auth().signIn(with: credential)
+            } catch let signInError {
+                let nsError = signInError as NSError
+                // User cancelling the Google sign-in sheet isn't a real error.
+                if nsError.domain == "com.google.GIDSignIn", nsError.code == GIDSignInError.canceled.rawValue {
+                    return
+                }
+                self.error = signInError.localizedDescription
+            }
+        }
     }
 
     func saveRememberedEmail(_ value: String?) {
