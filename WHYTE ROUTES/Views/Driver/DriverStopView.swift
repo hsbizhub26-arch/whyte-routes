@@ -13,8 +13,47 @@ final class DriverStopViewModel: ObservableObject {
     private let routeService = RouteService.shared
     private let session = DriverSession.shared
 
+    // GPS older than this is treated as unusable for an ETA
+    // notification - better to send nothing than tell a customer
+    // "10 minutes away" based on where the driver was half an hour
+    // ago. Threshold flags are local-only "don't bother calling
+    // again this session" hints; the real once-only guarantee is
+    // sendCustomerNotification's server-side idempotency check, so a
+    // second device or a relaunch can never cause a duplicate.
+    private static let maxLocationAge: TimeInterval = 5 * 60
+    private var eta15Notified = false
+    private var eta10Notified = false
+    private var etaRefreshTimer: Timer?
+
     init(stop: Stop) {
         self.stop = stop
+    }
+
+    deinit {
+        etaRefreshTimer?.invalidate()
+    }
+
+    // Recomputes ETA (and re-checks the 15/10 min thresholds) every
+    // 60s while actually driving to this stop - a one-time ETA
+    // calculated when the screen first opened would never notice the
+    // driver getting closer. Stops itself once arrived/completed,
+    // since ETA-to-a-stop stops meaning anything at that point.
+    func startETARefreshTimer() {
+        stopETARefreshTimer()
+        etaRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.jobStatus == .enRoute else {
+                    self?.stopETARefreshTimer()
+                    return
+                }
+                self.loadETA()
+            }
+        }
+    }
+
+    func stopETARefreshTimer() {
+        etaRefreshTimer?.invalidate()
+        etaRefreshTimer = nil
     }
 
     var route: Route? { session.assignedRoute }
@@ -113,20 +152,56 @@ final class DriverStopViewModel: ObservableObject {
             return
         }
 
+        // Stale GPS must never produce a customer-facing ETA claim -
+        // this only gates the eta15/eta10 notification triggers below,
+        // not the driver's own on-screen ETA display, which stays
+        // useful even with slightly old location data.
+        let locationIsFresh: Bool
+        if let lastUpdate = LocationService.shared.lastLocationUpdate {
+            locationIsFresh = Date().timeIntervalSince(lastUpdate) <= Self.maxLocationAge
+        } else {
+            locationIsFresh = false
+        }
+
         let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+        let sourceItem = MKMapItem(location: CLLocation(latitude: origin.latitude, longitude: origin.longitude), address: nil)
+        let destinationItem = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
+        request.source = sourceItem
+        request.destination = destinationItem
         request.transportType = .automobile
 
         Task {
             do {
                 let eta = try await MKDirections(request: request).calculateETA()
+                let minutes = Int(eta.expectedTravelTime / 60)
                 await MainActor.run {
-                    self.etaMinutes = Int(eta.expectedTravelTime / 60)
+                    self.etaMinutes = minutes
+                    if locationIsFresh {
+                        self.checkETAThresholds(minutes)
+                    }
                 }
             } catch {
                 await MainActor.run { self.etaMinutes = nil }
             }
+        }
+    }
+
+    // Only meaningful while actually driving to this stop - once
+    // arrived/completed, "how far away is the driver" no longer
+    // applies. Threshold crossing only (>15 -> <=15), not "is
+    // currently under 15", so a fluctuating ETA bouncing around 14-16
+    // minutes doesn't matter once it's crossed once - see the
+    // eta15Notified/eta10Notified guards.
+    private func checkETAThresholds(_ minutes: Int) {
+        guard jobStatus == .enRoute, let route else { return }
+
+        if !eta10Notified, minutes <= 10 {
+            eta10Notified = true
+            eta15Notified = true // 10 implies 15 already happened/is moot
+            Task { await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "eta10") }
+        } else if !eta15Notified, minutes <= 15 {
+            eta15Notified = true
+            Task { await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "eta15") }
         }
     }
 }
@@ -206,12 +281,14 @@ struct DriverStopView: View {
             // already-running tracker what "arrived" means for this stop.
             LocationService.shared.setArrivalTarget(lat: vm.stop.latitude, lng: vm.stop.longitude)
             vm.loadETA()
+            vm.startETARefreshTimer()
             // Keep the screen awake while an active stop is open - a
             // mounted tablet/phone dimming mid-shift is exactly the
             // kind of friction this feature is meant to remove.
             UIApplication.shared.isIdleTimerDisabled = true
         }
         .onDisappear {
+            vm.stopETARefreshTimer()
             UIApplication.shared.isIdleTimerDisabled = false
         }
     }
@@ -422,3 +499,4 @@ extension DriverStopView {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+

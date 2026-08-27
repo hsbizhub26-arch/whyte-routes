@@ -11,6 +11,11 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let driverRepo = FirestoreDriverRepository()
 
     @Published var currentLocation: CLLocationCoordinate2D?
+    // When currentLocation was actually set, not just the last time
+    // this object was asked - what ETA-notification staleness checks
+    // compare against, so a phone with no signal for the last 20
+    // minutes doesn't get treated as "still right here."
+    @Published var lastLocationUpdate: Date?
 
     private var driverId: String = ""
     private var stopLat: Double?
@@ -74,6 +79,7 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         guard let location = locations.last else { return }
 
         currentLocation = location.coordinate
+        lastLocationUpdate = Date()
 
         guard !driverId.isEmpty else { return }
         driverRepo.updateDriverLocation(

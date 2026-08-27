@@ -50,10 +50,7 @@ struct NotificationHistoryView: View {
                                 .font(.subheadline)
                             Text(statusLabel(event))
                                 .font(.caption)
-                                .foregroundColor(
-                                    ["no_contact_on_file", "not_opted_in"].contains(event.deliveryStatus)
-                                        ? .orange : .secondary
-                                )
+                                .foregroundColor(statusColor(event.deliveryStatus))
                         }
                         .padding(.vertical, 2)
                     }
@@ -69,16 +66,38 @@ struct NotificationHistoryView: View {
         }
     }
 
+    private func statusColor(_ deliveryStatus: String) -> Color {
+        switch deliveryStatus {
+        case "accepted": return .green
+        case "failed": return .red
+        case "no_contact_on_file", "not_opted_in", "not_entitled": return .orange
+        default: return .secondary
+        }
+    }
+
     private func statusLabel(_ event: NotificationEvent) -> String {
         switch event.deliveryStatus {
+        case "accepted":
+            return "✓ Sent (\(event.contactMethod) to \(event.contactValue))"
+        case "sending":
+            return "⏳ Sending…"
+        case "failed":
+            if let reason = event.failureReason, !reason.isEmpty {
+                return "⚠️ Failed - \(reason)"
+            }
+            return "⚠️ Failed to send."
+        case "not_entitled":
+            return "Not sent - this plan doesn't include live customer notifications."
         case "not_opted_in":
             return "Not sent - customer hasn't opted in to notifications."
         case "no_contact_on_file":
             return "No phone/email on file - not actually sent."
+        case "duplicate_skipped":
+            return "Already sent once for this stop - skipped to avoid a duplicate."
+        case "debug_skipped":
+            return "Development build - no real message was sent."
         case "logged":
             return "Logged (\(event.contactMethod) to \(event.contactValue)) - no real provider connected yet."
-        case "failed":
-            return "Failed."
         default:
             return event.deliveryStatus
         }

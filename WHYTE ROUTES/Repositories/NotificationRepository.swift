@@ -16,14 +16,10 @@ final class NotificationRepository {
             .collection("notifications")
     }
 
-    func save(_ event: NotificationEvent) async {
-        guard let ref = notificationsRef(routeId: event.routeId, stopId: event.stopId) else { return }
-        do {
-            try await ref.document(event.id).setData(event.toDict())
-        } catch {
-            print("⚠️ NotificationRepository.save failed: \(error.localizedDescription)")
-        }
-    }
+    // No client-side save() anymore - sendCustomerNotification (the
+    // Cloud Function) is the only writer of notification records now,
+    // using the Admin SDK. A client-side write here would let anyone
+    // fabricate a fake "sent" entry in their own dispute history.
 
     /// The history for one stop - what a dispute call gets checked against.
     func fetchHistory(routeId: String, stopId: String) async -> [NotificationEvent] {

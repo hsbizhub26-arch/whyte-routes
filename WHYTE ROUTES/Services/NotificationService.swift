@@ -1,31 +1,14 @@
 import Foundation
+import FirebaseFunctions
 
-// A channel is anything capable of delivering one message to one
-// contact. Swapping in real SMS (Twilio) or email (SendGrid/Firebase
-// Trigger Email) later means writing one new type conforming to this
-// protocol - nothing else in NotificationService, the callers in
-// DriverStopView, or the NotificationEvent history schema needs to
-// change.
-protocol NotificationChannel {
-    var method: String { get } // "sms" | "email"
-    func send(to contact: String, message: String) async -> Bool
-}
-
-// No real provider is wired up yet (no Twilio/SendGrid account
-// exists) - this logs exactly what WOULD have gone out and reports
-// success, so the rest of the system (status tracking, the
-// timestamped history an owner can point to in a dispute) is fully
-// real and testable today. Swap for a real channel once a provider
-// is chosen; nothing else changes.
-struct LoggingChannel: NotificationChannel {
-    let method: String
-
-    func send(to contact: String, message: String) async -> Bool {
-        print("📋 [Notification - log only, no real \(method) sent] to \(contact): \(message)")
-        return true
-    }
-}
-
+// Real customer notifications - the actual send, the entitlement
+// check, the consent check, and the duplicate-protection all happen
+// server-side in sendCustomerNotification (functions/index.js). This
+// class is deliberately thin: it calls that function and reports what
+// came back. It never builds the message, never touches provider
+// credentials, and never decides on its own whether something is
+// "sent" - the Cloud Function's real response is the only source of
+// truth for that.
 @MainActor
 final class NotificationService {
 
@@ -33,94 +16,57 @@ final class NotificationService {
     private init() {}
 
     private let repo = NotificationRepository()
-    private let customerRepo = CustomerRepository()
+    private lazy var functions = Functions.functions()
 
-    /// Fires a customer notification for a stop's status change and
-    /// records it to that stop's history regardless of whether a real
-    /// contact method was on file - a "no contact on file" entry is
-    /// still useful proof of what the system tried to do.
+    // A DEBUG build (Xcode Run, simulator, local device builds) never
+    // calls the real function - there's no way to accidentally text a
+    // real customer while developing. TestFlight and App Store builds
+    // are genuine Release builds and do call it for real.
+    private var isRealSendEnabled: Bool {
+        #if DEBUG
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    /// Fires a customer notification for a stop. `type` matches what
+    /// sendCustomerNotification recognizes: "enRoute", "arrived",
+    /// "completed", "eta15", or "eta10". Returns the real delivery
+    /// status ("accepted", "failed", "not_entitled", "not_opted_in",
+    /// "no_contact_on_file", "duplicate_skipped", or "debug_skipped"
+    /// in DEBUG builds) - callers that just fire-and-forget can ignore
+    /// it, but it's real, not a guess.
     @discardableResult
-    func notify(stop: Stop, routeId: String, status: JobStatus) async -> NotificationEvent {
-        let companyName = CompanySession.shared.currentCompany?.name ?? "Your service crew"
-        let message = Self.message(for: status, companyName: companyName)
-
-        // The linked Customer record is the source of truth when one
-        // exists (freshest phone/email/consent - the owner may have
-        // updated it since this stop was created); the stop's own
-        // cached fields are only the fallback for legacy/unlinked
-        // stops that predate customer linking.
-        var name = stop.customerName ?? "Customer"
-        var phone = stop.customerPhone
-        var email = stop.customerEmail
-        var optedIn = stop.customerOptedIn
-
-        if let customerId = stop.customerId,
-           let customer = await customerRepo.fetchCustomer(id: customerId) {
-            name = customer.name
-            phone = customer.phone
-            email = customer.email
-            optedIn = customer.notificationsOptIn
+    func notify(stop: Stop, routeId: String, type: String) async -> String {
+        guard isRealSendEnabled else {
+            print("📋 [DEBUG build - no real notification sent] \(type) for stop \(stop.id)")
+            return "debug_skipped"
         }
 
-        let method: String
-        let contact: String?
-        if let phone, !phone.trimmingCharacters(in: .whitespaces).isEmpty {
-            method = "sms"
-            contact = phone
-        } else if let email, !email.trimmingCharacters(in: .whitespaces).isEmpty {
-            method = "email"
-            contact = email
-        } else {
-            method = "none"
-            contact = nil
+        do {
+            let result = try await functions.httpsCallable("sendCustomerNotification").call([
+                "routeId": routeId,
+                "stopId": stop.id,
+                "type": type
+            ])
+            let data = result.data as? [String: Any]
+            return data?["deliveryStatus"] as? String ?? "unknown"
+        } catch {
+            print("⚠️ sendCustomerNotification failed for stop \(stop.id) (\(type)): \(error.localizedDescription)")
+            return "failed"
         }
+    }
 
-        // Consent is checked before any channel is touched - an
-        // opted-out customer never gets so much as a logged attempt,
-        // only a record that the system correctly declined to notify.
-        var deliveryStatus: String
-        if !optedIn {
-            deliveryStatus = "not_opted_in"
-        } else if let contact {
-            let channel: NotificationChannel = LoggingChannel(method: method)
-            let delivered = await channel.send(to: contact, message: message)
-            deliveryStatus = delivered ? "logged" : "failed"
-        } else {
-            deliveryStatus = "no_contact_on_file"
-        }
-
-        let event = NotificationEvent(
-            id: UUID().uuidString,
-            stopId: stop.id,
-            routeId: routeId,
-            customerName: name,
-            type: status.rawValue,
-            message: message,
-            contactMethod: method,
-            contactValue: contact ?? "",
-            deliveryStatus: deliveryStatus,
-            createdAt: Date()
-        )
-
-        await repo.save(event)
-        return event
+    /// Convenience overload for the three job-status transitions,
+    /// so DriverStopViewModel's existing call sites don't need to
+    /// know the exact string types.
+    @discardableResult
+    func notify(stop: Stop, routeId: String, status: JobStatus) async -> String {
+        await notify(stop: stop, routeId: routeId, type: status.rawValue)
     }
 
     func history(routeId: String, stopId: String) async -> [NotificationEvent] {
         await repo.fetchHistory(routeId: routeId, stopId: stopId)
-    }
-
-    private static func message(for status: JobStatus, companyName: String) -> String {
-        let time = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)
-        switch status {
-        case .scheduled:
-            return "\(companyName): your service has been scheduled."
-        case .enRoute:
-            return "\(companyName) is on the way."
-        case .arrived:
-            return "Your service team has arrived at \(time)."
-        case .completed:
-            return "Your service has been completed at \(time)."
-        }
     }
 }
