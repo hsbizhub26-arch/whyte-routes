@@ -1,5 +1,26 @@
 import SwiftUI
 import MapKit
+import CoreLocation
+
+// Nothing on the owner side ever asked iOS for location permission -
+// UserAnnotation() and MapUserLocationButton() both need
+// CLLocationManager authorization to have actually been granted, and
+// with no request ever made the button had nothing to center on and
+// silently did nothing. Drivers get this via RealtimeLocationManager
+// (needed continuously, for GPS tracking); an owner just glancing at
+// their own position on the fleet map needs a one-time ask, not a
+// running location session, so this stays a tiny standalone requester
+// rather than pulling in that whole class.
+@MainActor
+private final class OwnerLocationAuthorizer: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+
+    func requestIfNeeded() {
+        guard manager.authorizationStatus == .notDetermined else { return }
+        manager.delegate = self
+        manager.requestWhenInUseAuthorization()
+    }
+}
 
 // The live dispatch map - every driver's live GPS position, plus each
 // driver's active route drawn as a numbered, color-matched path (the
@@ -31,6 +52,7 @@ struct LiveFleetMapView: View {
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
+    private let locationAuthorizer = OwnerLocationAuthorizer()
 
     var body: some View {
         if access.canAccessLiveFleetMap() {
@@ -108,6 +130,7 @@ struct LiveFleetMapView: View {
             driverLegend
         }
         .onAppear {
+            locationAuthorizer.requestIfNeeded()
             driverVM.startLiveUpdates()
             loadStopsIfNeeded()
         }
