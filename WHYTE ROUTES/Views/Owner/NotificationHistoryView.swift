@@ -70,7 +70,8 @@ struct NotificationHistoryView: View {
         switch deliveryStatus {
         case "accepted": return .green
         case "failed": return .red
-        case "no_contact_on_file", "not_opted_in", "not_entitled": return .orange
+        case "no_contact_on_file", "not_opted_in", "not_entitled", "type_disabled", "channel_disabled": return .orange
+        case "queued_for_morning": return WRTheme.gold
         default: return .secondary
         }
     }
@@ -90,6 +91,12 @@ struct NotificationHistoryView: View {
             return "Not sent - this plan doesn't include live customer notifications."
         case "not_opted_in":
             return "Not sent - customer hasn't opted in to notifications."
+        case "type_disabled":
+            return "Not sent - customer turned this specific update off."
+        case "channel_disabled":
+            return "Not sent - customer disabled that contact channel."
+        case "queued_for_morning":
+            return "Queued - Quiet Hours active, will send as part of the 6 AM morning summary."
         case "no_contact_on_file":
             return "No phone/email on file - not actually sent."
         case "duplicate_skipped":

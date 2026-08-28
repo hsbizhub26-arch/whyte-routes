@@ -56,6 +56,19 @@ final class CompanyRepository {
         }
     }
 
+    /// Same narrow-field pattern as updateNavigationSettings - a
+    /// company owner may flip this on their own company, nothing else.
+    func updateQuietHoursEnabled(companyId: String, enabled: Bool) async -> Bool {
+        do {
+            try await db.collection("companies").document(companyId)
+                .updateData(["quietHoursEnabled": enabled])
+            return true
+        } catch {
+            print("⚠️ CompanyRepository.updateQuietHoursEnabled(\(companyId)) failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     @discardableResult
     func create(_ company: Company) async -> Company? {
         let docRef = db.collection("companies").document()

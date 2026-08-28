@@ -14,6 +14,7 @@
 // StoreKit transaction (new purchase, renewal, or restore).
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { SignedDataVerifier, Environment } = require("@apple/app-store-server-library");
@@ -178,11 +179,104 @@ const MESSAGE_TEMPLATES = {
   completed: (companyName, time) => `Your service has been completed at ${time}.`,
 };
 
-function buildMessage(type, companyName) {
-  const time = new Date().toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" });
+// Real, previously-unnoticed bug fixed here: without an explicit
+// timeZone, Node formats using the Cloud Function's own runtime
+// timezone (UTC), so a customer would have seen "arrived at 7:15 AM"
+// for an actual 3:15 AM Eastern arrival. Every caller now passes the
+// company's own timeZoneIdentifier through.
+function buildMessage(type, companyName, timeZone) {
+  const time = new Date().toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", timeZone });
   const template = MESSAGE_TEMPLATES[type];
   if (!template) return `${companyName}: update on your service.`;
   return template(companyName, time);
+}
+
+function buildMorningSummaryMessage(companyName, completedAtDate, timeZone) {
+  const time = completedAtDate.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", timeZone });
+  return `${companyName} cleared your driveway last night at ${time}.`;
+}
+
+// Quiet Hours: 11 PM to 6 AM in the company's own local time, only
+// when the owner has explicitly opted in (see Settings/quietHoursEnabled).
+// Nothing about timing changes for anyone who hasn't turned this on.
+function isQuietHours(companyData) {
+  if (!companyData.quietHoursEnabled) return false;
+  const timeZone = companyData.timeZoneIdentifier || "America/Toronto";
+  const hour = parseInt(
+    new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone }).format(new Date()),
+    10
+  );
+  return hour >= 23 || hour < 6;
+}
+
+// The types that are purely "driver is nearby right now" pings - not
+// meaningful to a customer who's asleep, and not meaningful to queue
+// for later either (by 6 AM the driver's long past that stop). These
+// are simply skipped during Quiet Hours, same as not_entitled -
+// nothing is written, nothing is queued.
+const LIVE_ONLY_TYPES = { eta15: true, eta10: true, enRoute: true, arrived: true };
+
+// Sends every queued morning-summary receipt for one company right
+// now. Called two ways: inline, the instant any live-hours call comes
+// in (so the very first "Completed" tap after 6 AM flushes the whole
+// overnight queue immediately, not on a timer) - and from the 6 AM
+// scheduled function itself, as the safety net for a shift that ends
+// before anyone taps anything after Quiet Hours lifts.
+async function flushQueuedMorningSummaries(companyId) {
+  const queueRef = admin.firestore().collection(`companies/${companyId}/queuedMorningSummaries`);
+  const queueSnap = await queueRef.get();
+
+  for (const doc of queueSnap.docs) {
+    const q = doc.data();
+    let method = "none";
+    let contact = null;
+    let result = { accepted: false, failureReason: "No contact information on file." };
+
+    if (q.smsEnabled && q.phone) {
+      method = "sms";
+      contact = q.phone;
+      try {
+        result = await sendSms(q.phone, q.message);
+      } catch (err) {
+        result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
+      }
+    } else if (q.emailEnabled && q.email) {
+      method = "email";
+      contact = q.email;
+      try {
+        result = await sendEmail(q.email, "Your service is complete", q.message);
+      } catch (err) {
+        result = { accepted: false, failureReason: err.message || "Email send threw an error." };
+      }
+    }
+
+    const deliveryStatus = method === "none" ? "no_contact_on_file" : (result.accepted ? "accepted" : "failed");
+
+    if (q.notificationRefPath) {
+      await admin.firestore().doc(q.notificationRefPath).update({
+        contactMethod: method,
+        contactValue: contact || "",
+        deliveryStatus,
+        providerMessageId: result.providerMessageId || null,
+        failureReason: result.failureReason || null,
+      });
+    }
+
+    if (method !== "none") {
+      const period = new Date().toISOString().slice(0, 7);
+      const usageRef = admin.firestore().doc(`companies/${companyId}/notificationUsage/${period}`);
+      const field = method === "sms" ? "smsCount" : "emailCount";
+      const costField = method === "sms" ? "estimatedSmsCostUsd" : "estimatedEmailCostUsd";
+      const costPerMessage = method === "sms" ? 0.0079 : 0;
+      await usageRef.set({
+        [field]: admin.firestore.FieldValue.increment(1),
+        [costField]: admin.firestore.FieldValue.increment(costPerMessage),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    await doc.ref.delete();
+  }
 }
 
 async function sendSms(to, body) {
@@ -275,6 +369,25 @@ exports.sendCustomerNotification = onCall(
       return { deliveryStatus: "not_entitled", notificationId: null };
     }
 
+    const timeZone = companyData.timeZoneIdentifier || "America/Toronto";
+    const quietHours = isQuietHours(companyData);
+
+    // The moment a call comes in outside Quiet Hours, flush whatever's
+    // waiting in the overnight queue - this is what makes the very
+    // first "Completed" tap after 6 AM instantly release last night's
+    // batch, rather than customers waiting on the 6 AM cron.
+    if (!quietHours) {
+      await flushQueuedMorningSummaries(companyId);
+    }
+
+    // Live-only pings (ETA/en route/arrived) mean nothing to a
+    // sleeping customer and can't be meaningfully queued for later -
+    // by 6 AM the driver is long past that stop. Skipped exactly like
+    // not_entitled: nothing written, nothing queued.
+    if (quietHours && LIVE_ONLY_TYPES[type]) {
+      return { deliveryStatus: "skipped_quiet_hours", notificationId: null };
+    }
+
     const stopRef = admin.firestore().doc(`companies/${companyId}/routes/${routeId}/stops/${stopId}`);
     const stopSnap = await stopRef.get();
     const stopData = stopSnap.data();
@@ -284,11 +397,19 @@ exports.sendCustomerNotification = onCall(
 
     // Freshest contact info: the linked Customer record when one
     // exists, same precedence the client already used for the
-    // logging-only path this replaces.
+    // logging-only path this replaces. Per-channel/per-type prefs
+    // default true when there's no linked Customer record (legacy
+    // stops predating this field) so behavior doesn't regress for
+    // them - they only narrow what a real Customer record allows.
     let customerName = stopData.customerName || "Customer";
     let phone = stopData.customerPhone;
     let email = stopData.customerEmail;
     let optedIn = !!stopData.customerOptedIn;
+    let smsEnabled = true;
+    let emailEnabled = true;
+    let notifyEta15 = true;
+    let notifyEta10 = true;
+    let notifyCompleted = true;
 
     if (stopData.customerId) {
       const customerSnap = await admin.firestore().doc(`companies/${companyId}/customers/${stopData.customerId}`).get();
@@ -298,8 +419,36 @@ exports.sendCustomerNotification = onCall(
         phone = customerData.phone;
         email = customerData.email;
         optedIn = !!customerData.notificationsOptIn;
+        smsEnabled = customerData.smsEnabled !== false;
+        emailEnabled = customerData.emailEnabled !== false;
+        notifyEta15 = customerData.notifyEta15 !== false;
+        notifyEta10 = customerData.notifyEta10 !== false;
+        notifyCompleted = customerData.notifyCompleted !== false;
       }
     }
+
+    // GPS-based triggers only - "the backend must verify, not rely on
+    // the frontend" (the client already checks this too, but that's
+    // not enough on its own). enRoute/arrived/completed are driver
+    // button-presses, not location-derived, so they're exempt.
+    const GPS_TYPES = { eta15: true, eta10: true };
+    if (GPS_TYPES[type]) {
+      const driverId = stopData.driverId;
+      let lastUpdated = null;
+      if (driverId) {
+        const driverSnap = await admin.firestore().doc(`companies/${companyId}/drivers/${driverId}`).get();
+        lastUpdated = driverSnap.data() && driverSnap.data().lastUpdated;
+      }
+      const ageMs = lastUpdated ? Date.now() - lastUpdated.toDate().getTime() : Infinity;
+      if (ageMs > 5 * 60 * 1000) {
+        return { deliveryStatus: "gps_stale", notificationId: null };
+      }
+    }
+
+    const typePreferenceOk = type === "eta15" ? notifyEta15
+      : type === "eta10" ? notifyEta10
+      : type === "completed" ? notifyCompleted
+      : true; // enRoute/arrived have no individual toggle yet
 
     const notificationId = `${stopId}_${type}`;
     const notificationRef = stopRef.collection("notifications").doc(notificationId);
@@ -332,14 +481,40 @@ exports.sendCustomerNotification = onCall(
       return { deliveryStatus: "not_opted_in", notificationId };
     }
 
+    if (!typePreferenceOk) {
+      await notificationRef.update({ deliveryStatus: "type_disabled" });
+      return { deliveryStatus: "type_disabled", notificationId };
+    }
+
     const companyName = companyData.name || "Your service crew";
-    const message = buildMessage(type, companyName);
+    const message = buildMessage(type, companyName, timeZone);
+
+    // Consent and preference both passed, and it's Quiet Hours, and
+    // this is the one type worth remembering till morning - queue a
+    // morning-summary receipt instead of texting a sleeping customer
+    // at 3 AM. The company name is baked into the message text right
+    // now (not re-resolved later), so this is already correct for
+    // whichever tenant's subscription this is - no separate per-
+    // tenant lookup needed at flush time.
+    if (quietHours && type === "completed") {
+      const summaryMessage = buildMorningSummaryMessage(companyName, new Date(), timeZone);
+      await admin.firestore().collection(`companies/${companyId}/queuedMorningSummaries`).add({
+        phone: smsEnabled ? phone || null : null,
+        email: emailEnabled ? email || null : null,
+        smsEnabled, emailEnabled,
+        message: summaryMessage,
+        notificationRefPath: notificationRef.path,
+        queuedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      await notificationRef.update({ deliveryStatus: "queued_for_morning", message: summaryMessage });
+      return { deliveryStatus: "queued_for_morning", notificationId };
+    }
 
     let method = "none";
     let contact = null;
     let result = { accepted: false, failureReason: "No contact information on file." };
 
-    if (phone && phone.trim().length > 0) {
+    if (smsEnabled && phone && phone.trim().length > 0) {
       method = "sms";
       contact = phone;
       try {
@@ -347,7 +522,7 @@ exports.sendCustomerNotification = onCall(
       } catch (err) {
         result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
       }
-    } else if (email && email.trim().length > 0) {
+    } else if (emailEnabled && email && email.trim().length > 0) {
       method = "email";
       contact = email;
       try {
@@ -355,9 +530,15 @@ exports.sendCustomerNotification = onCall(
       } catch (err) {
         result = { accepted: false, failureReason: err.message || "Email send threw an error." };
       }
+    } else if ((phone && phone.trim().length > 0) || (email && email.trim().length > 0)) {
+      // Contact info exists but the customer turned that specific
+      // channel off - distinct from genuinely having nothing on file.
+      result = { accepted: false, failureReason: "Customer disabled this contact channel." };
     }
 
-    const deliveryStatus = method === "none" ? "no_contact_on_file" : (result.accepted ? "accepted" : "failed");
+    const deliveryStatus = method === "none"
+      ? (result.failureReason === "Customer disabled this contact channel." ? "channel_disabled" : "no_contact_on_file")
+      : (result.accepted ? "accepted" : "failed");
 
     await notificationRef.update({
       contactMethod: method,
@@ -368,6 +549,25 @@ exports.sendCustomerNotification = onCall(
       message,
     });
 
+    // Usage/cost tracking - only for an actual attempted provider
+    // call (method != "none"), since that's the only case that could
+    // have cost money, win or lose. Twilio SMS ≈ $0.0079 USD/segment,
+    // Resend email is free under its plan - both approximate, real
+    // provider billing is the source of truth, this is for the
+    // owner's own at-a-glance cost visibility.
+    if (method !== "none") {
+      const period = new Date().toISOString().slice(0, 7); // YYYY-MM
+      const usageRef = admin.firestore().doc(`companies/${companyId}/notificationUsage/${period}`);
+      const field = method === "sms" ? "smsCount" : "emailCount";
+      const costField = method === "sms" ? "estimatedSmsCostUsd" : "estimatedEmailCostUsd";
+      const costPerMessage = method === "sms" ? 0.0079 : 0;
+      await usageRef.set({
+        [field]: admin.firestore.FieldValue.increment(1),
+        [costField]: admin.firestore.FieldValue.increment(costPerMessage),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
     console.log(
       `${deliveryStatus === "accepted" ? "✅" : "⚠️"} notification ${notificationId} ` +
       `(company ${companyId}, ${method}) -> ${deliveryStatus}` +
@@ -375,5 +575,99 @@ exports.sendCustomerNotification = onCall(
     );
 
     return { deliveryStatus, notificationId };
+  }
+);
+
+// sendMorningSummaries
+//
+// Safety net for Quiet Hours: flushQueuedMorningSummaries already
+// fires the instant a driver taps anything after 6 AM, so most nights
+// this finds nothing left to do. It exists for the shift that ends
+// before that ever happens - the last stop finished at 4 AM and
+// nobody touches the app again, so nothing would otherwise release
+// that customer's receipt. Runs once daily at 6 AM in each company's
+// own timezone (Cloud Scheduler evaluates the cron per the timeZone
+// given here), only for companies that opted into Quiet Hours at all.
+exports.sendMorningSummaries = onSchedule(
+  {
+    schedule: "0 6 * * *",
+    timeZone: "America/Toronto",
+    secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, RESEND_API_KEY],
+  },
+  async () => {
+    const companiesSnap = await admin.firestore()
+      .collection("companies")
+      .where("quietHoursEnabled", "==", true)
+      .get();
+
+    for (const companyDoc of companiesSnap.docs) {
+      await flushQueuedMorningSummaries(companyDoc.id);
+    }
+  }
+);
+
+// sendTestNotification
+//
+// A deliberate, safe way to prove the real SMS pipeline works without
+// touching any customer record, consent, or entitlement check - the
+// owner types their own number in Settings and gets back exactly what
+// Twilio said, same as a real send. Message is unmistakably marked as
+// a test. Rate-limited per company per day so this can't become an
+// accidental way to run up a Twilio bill.
+const TEST_SENDS_PER_DAY = 10;
+
+exports.sendTestNotification = onCall(
+  { secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign in required.");
+    }
+
+    const phone = (request.data && request.data.phone || "").trim();
+    if (!/^\+[1-9]\d{6,14}$/.test(phone)) {
+      throw new HttpsError("invalid-argument", "Phone must be in +1XXXXXXXXXX format.");
+    }
+
+    const uid = request.auth.uid;
+    const userSnap = await admin.firestore().doc(`users/${uid}`).get();
+    const userData = userSnap.data();
+    if (!userData || !userData.companyId) {
+      throw new HttpsError("failed-precondition", "No company associated with this account.");
+    }
+    const companyId = userData.companyId;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const usageRef = admin.firestore().doc(`companies/${companyId}/testNotificationUsage/${today}`);
+
+    const allowed = await admin.firestore().runTransaction(async (tx) => {
+      const snap = await tx.get(usageRef);
+      const count = (snap.exists && snap.data().count) || 0;
+      if (count >= TEST_SENDS_PER_DAY) return false;
+      tx.set(usageRef, { count: count + 1, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      return true;
+    });
+
+    if (!allowed) {
+      throw new HttpsError("resource-exhausted", `Limit of ${TEST_SENDS_PER_DAY} test messages per day reached.`);
+    }
+
+    let result;
+    try {
+      result = await sendSms(phone, "This is a test notification from WHYTE ROUTES. If you received this, real SMS sending is working.");
+    } catch (err) {
+      result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
+    }
+
+    console.log(
+      `${result.accepted ? "✅" : "⚠️"} test notification (company ${companyId}) -> ` +
+      `${result.accepted ? "accepted" : "failed"}` +
+      (result.failureReason ? ` (${result.failureReason})` : "")
+    );
+
+    return {
+      accepted: result.accepted,
+      failureReason: result.failureReason || null,
+      providerMessageId: result.providerMessageId || null,
+    };
   }
 );

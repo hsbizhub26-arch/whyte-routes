@@ -24,6 +24,18 @@ struct Company: Identifiable {
     var createdAt: Date
 
     var navigationSettings: NavigationSettings = NavigationSettings()
+
+    // Defaults false - nothing about notification timing changes for
+    // a company until its owner explicitly opts in. When true, the
+    // Cloud Function (not this app) suppresses live ETA/status texts
+    // and queues "completed" ones between quietHoursStart and
+    // quietHoursEnd in timeZoneIdentifier, batching them into one
+    // morning-summary text per customer instead. See
+    // sendCustomerNotification/sendMorningSummaries in functions/index.js -
+    // the driver's own workflow (tap the same status buttons) never
+    // changes either way.
+    var quietHoursEnabled: Bool = false
+    var timeZoneIdentifier: String = "America/Toronto"
 }
 
 extension Company {
@@ -41,6 +53,8 @@ extension Company {
         self.subscriptionStatus = dict["subscriptionStatus"] as? String ?? "trialing"
         self.billingRequired = dict["billingRequired"] as? Bool ?? true
         self.navigationSettings = NavigationSettings(from: dict["navigationSettings"] as? [String: Any])
+        self.quietHoursEnabled = dict["quietHoursEnabled"] as? Bool ?? false
+        self.timeZoneIdentifier = dict["timeZoneIdentifier"] as? String ?? "America/Toronto"
 
         if let ts = dict["createdAt"] as? Timestamp {
             self.createdAt = ts.dateValue()
@@ -57,7 +71,9 @@ extension Company {
             "subscriptionStatus": subscriptionStatus,
             "billingRequired": billingRequired,
             "createdAt": Timestamp(date: createdAt),
-            "navigationSettings": navigationSettings.toDict()
+            "navigationSettings": navigationSettings.toDict(),
+            "quietHoursEnabled": quietHoursEnabled,
+            "timeZoneIdentifier": timeZoneIdentifier
         ]
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseFirestore
 
 struct Customer: Identifiable {
     var id: String
@@ -19,6 +20,23 @@ struct Customer: Identifiable {
     // copy still carried on Stop itself is only a fallback for stops
     // created before this record existed or that were never linked.
     var notificationsOptIn: Bool = false
+    // Set the moment notificationsOptIn first flips true (see
+    // AddCustomerView) - proof of *when* consent was given, not just
+    // that it currently is, for CASL record-keeping. Never cleared
+    // once set, even if opt-in is later turned off, so a dispute can
+    // still be answered with "consented on X, withdrawn on Y" instead
+    // of losing the original date.
+    var consentTimestamp: Date? = nil
+    // Per-channel and per-type preferences, all default true so an
+    // existing opted-in customer keeps getting everything they always
+    // got - these only narrow what notificationsOptIn already allows,
+    // never widen it. The Cloud Function checks notificationsOptIn
+    // first as the master gate, then these for which channel/type.
+    var smsEnabled: Bool = true
+    var emailEnabled: Bool = true
+    var notifyEta15: Bool = true
+    var notifyEta10: Bool = true
+    var notifyCompleted: Bool = true
 }
 
 // MARK: - Firestore Decode
@@ -40,6 +58,12 @@ extension Customer {
         self.email = dict["email"] as? String
         self.notes = dict["notes"] as? String
         self.notificationsOptIn = dict["notificationsOptIn"] as? Bool ?? false
+        self.consentTimestamp = (dict["consentTimestamp"] as? Timestamp)?.dateValue()
+        self.smsEnabled = dict["smsEnabled"] as? Bool ?? true
+        self.emailEnabled = dict["emailEnabled"] as? Bool ?? true
+        self.notifyEta15 = dict["notifyEta15"] as? Bool ?? true
+        self.notifyEta10 = dict["notifyEta10"] as? Bool ?? true
+        self.notifyCompleted = dict["notifyCompleted"] as? Bool ?? true
     }
 
     // MARK: - Encode
@@ -49,11 +73,17 @@ extension Customer {
             "address": address,
             "latitude": latitude,
             "longitude": longitude,
-            "notificationsOptIn": notificationsOptIn
+            "notificationsOptIn": notificationsOptIn,
+            "smsEnabled": smsEnabled,
+            "emailEnabled": emailEnabled,
+            "notifyEta15": notifyEta15,
+            "notifyEta10": notifyEta10,
+            "notifyCompleted": notifyCompleted
         ]
         if let phone { d["phone"] = phone }
         if let email { d["email"] = email }
         if let notes { d["notes"] = notes }
+        if let consentTimestamp { d["consentTimestamp"] = Timestamp(date: consentTimestamp) }
         return d
     }
 }

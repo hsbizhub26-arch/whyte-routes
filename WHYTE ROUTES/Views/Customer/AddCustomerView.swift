@@ -18,8 +18,23 @@ struct AddCustomerView: View {
     @State private var latitude: Double = 0
     @State private var longitude: Double = 0
     @State private var notificationsOptIn = false
+    @State private var consentTimestamp: Date? = nil
+    @State private var smsEnabled = true
+    @State private var emailEnabled = true
+    @State private var notifyEta15 = true
+    @State private var notifyEta10 = true
+    @State private var notifyCompleted = true
     @State private var isSaving = false
     @State private var errorMessage: String?
+    // Guards the consent-timestamp side effect below from firing
+    // during the initial onAppear hydration - without this, loading
+    // an existing opted-in customer (notificationsOptIn false->true
+    // as the saved value loads in) could fire the same onChange as a
+    // real user toggle and stamp today's date over their true
+    // original consent date, depending on exactly how SwiftUI batches
+    // the two separate state assignments in onAppear. Real user
+    // toggles always happen well after onAppear has finished.
+    @State private var hasLoadedInitialValues = false
 
     private let repo = CustomerRepository()
 
@@ -57,8 +72,40 @@ struct AddCustomerView: View {
 
                 Section {
                     Toggle("Customer agreed to receive service notifications", isOn: $notificationsOptIn)
+                        .onChange(of: notificationsOptIn) { _, newValue in
+                            // Always re-stamp on every false->true transition,
+                            // not just the first one - a customer who opts
+                            // out and later opts back in has genuinely
+                            // re-consented at a new moment. Freezing the
+                            // original date here would silently hide that
+                            // a withdrawal + re-consent ever happened.
+                            if newValue && hasLoadedInitialValues {
+                                consentTimestamp = Date()
+                            }
+                        }
+                    if let consentTimestamp {
+                        Text("Consent given \(consentTimestamp.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 } footer: {
                     Text("Required before any arrival/completion notification can be sent to this customer.")
+                }
+
+                if notificationsOptIn {
+                    Section("Channels") {
+                        Toggle("Text message (SMS)", isOn: $smsEnabled)
+                        Toggle("Email", isOn: $emailEnabled)
+                    }
+                    Section {
+                        Toggle("Driver ~15 min away", isOn: $notifyEta15)
+                        Toggle("Driver ~10 min away", isOn: $notifyEta10)
+                        Toggle("Service completed", isOn: $notifyCompleted)
+                    } header: {
+                        Text("Which updates")
+                    } footer: {
+                        Text("Turn any of these off to stop just that one - the consent above still covers the rest.")
+                    }
                 }
 
                 if let errorMessage {
@@ -78,6 +125,11 @@ struct AddCustomerView: View {
                 }
             }
             .onAppear {
+                // Runs for both branches below - a brand-new customer
+                // has nothing to hydrate, but still needs the flag set
+                // so their first real toggle (a genuine user action,
+                // not a load artifact) stamps a consent date.
+                defer { hasLoadedInitialValues = true }
                 guard let existingCustomer else { return }
                 name = existingCustomer.name
                 address = existingCustomer.address
@@ -87,6 +139,12 @@ struct AddCustomerView: View {
                 latitude = existingCustomer.latitude
                 longitude = existingCustomer.longitude
                 notificationsOptIn = existingCustomer.notificationsOptIn
+                consentTimestamp = existingCustomer.consentTimestamp
+                smsEnabled = existingCustomer.smsEnabled
+                emailEnabled = existingCustomer.emailEnabled
+                notifyEta15 = existingCustomer.notifyEta15
+                notifyEta10 = existingCustomer.notifyEta10
+                notifyCompleted = existingCustomer.notifyCompleted
             }
         }
     }
@@ -113,7 +171,13 @@ struct AddCustomerView: View {
             phone: phone.isEmpty ? nil : phone,
             email: email.isEmpty ? nil : email,
             notes: notes.isEmpty ? nil : notes,
-            notificationsOptIn: notificationsOptIn
+            notificationsOptIn: notificationsOptIn,
+            consentTimestamp: consentTimestamp,
+            smsEnabled: smsEnabled,
+            emailEnabled: emailEnabled,
+            notifyEta15: notifyEta15,
+            notifyEta10: notifyEta10,
+            notifyCompleted: notifyCompleted
         )
 
         let onComplete: (Bool) -> Void = { success in
