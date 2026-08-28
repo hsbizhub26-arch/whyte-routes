@@ -27,10 +27,19 @@ service firebase.storage {
     }
 
     // Photo proof-of-work: companies/{companyId}/photos/{driverId}/{stopId}/{fileName}
-    // Any signed-in member of the same company can read/write - staff
-    // reviewing proof, drivers uploading it. Never cross-company.
-    match /companies/{companyId}/photos/{allPaths=**} {
-      allow read, write: if isSignedIn() && myCompanyId() == companyId;
+    // Same restriction as the license-photo rule just below (which
+    // this previously didn't match): staff can read any proof photo
+    // company-wide; a driver reads/writes only photos filed under
+    // their own uid segment of the path, set by the app itself at
+    // upload time (see PhotoUploader.uploadPhoto). Previously any
+    // signed-in company member could read, overwrite, or delete any
+    // other driver's proof-of-work photo - the exact evidence these
+    // exist to protect against liability disputes.
+    match /companies/{companyId}/photos/{driverId}/{stopId}/{fileName} {
+      allow read: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+      allow write: if isSignedIn() && myCompanyId() == companyId
+        && request.auth.uid == driverId;
     }
 
     // Driver's license photo: companies/{companyId}/licenses/{driverId}/{fileName}

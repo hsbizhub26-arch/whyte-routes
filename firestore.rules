@@ -74,6 +74,16 @@ service cloud.firestore {
       return isPlatformAdmin() || isCompanyMember(companyId);
     }
 
+    // True if the requester is the driver assigned to this specific
+    // stop - looked up via the stop doc itself (not trusted from the
+    // request), since photos/notifications are separate subcollections
+    // with their own independent rules that don't automatically
+    // inherit a restriction placed on the parent stop.
+    function isAssignedStopDriver(companyId, routeId, stopId) {
+      return isCompanyMember(companyId)
+        && get(/databases/$(database)/documents/companies/$(companyId)/routes/$(routeId)/stops/$(stopId)).data.driverId == request.auth.uid;
+    }
+
     // True if a still-PENDING invite exists, addressed to this
     // requester's own verified email or phone, for exactly this
     // companyId/role. Lets a self-created users/{uid} document set
@@ -198,6 +208,30 @@ service cloud.firestore {
                            && request.resource.data.isAdmin == resource.data.isAdmin
                            && request.resource.data.platformAdmin == resource.data.platformAdmin
                            && request.resource.data.subscription == resource.data.subscription)
+                         ||
+                         // Self-heal for the two hardcoded platform-admin
+                         // bootstrap accounts only (see isPlatformAdminUID) -
+                         // lets AuthSession's backfill correct a doc that
+                         // was created before platformAdmin/role/isAdmin
+                         // existed as fields. Without this, that backfill
+                         // is a chicken-and-egg rejection: the plain self-
+                         // update branch above freezes exactly these three
+                         // fields, and the isPlatformAdmin() bypass can't
+                         // apply either, since the doc doesn't have
+                         // platformAdmin: true set until after this write
+                         // succeeds. Values match the create rule's own
+                         // bootstrap branch exactly; every other field
+                         // (subscription/companyId/companyRole) still
+                         // stays frozen, so this can't be combined to
+                         // sneak through an unrelated change.
+                         (request.auth.uid == userId
+                           && isPlatformAdminUID(userId)
+                           && request.resource.data.role == 'owner'
+                           && request.resource.data.isAdmin == true
+                           && request.resource.data.platformAdmin == true
+                           && request.resource.data.subscription == resource.data.subscription
+                           && request.resource.data.companyId == resource.data.companyId
+                           && request.resource.data.companyRole == resource.data.companyRole)
                        );
     }
 
@@ -231,14 +265,22 @@ service cloud.firestore {
       allow delete: if isPlatformAdmin();
       allow update: if isPlatformAdmin()
                     || (isCompanyOwnerRole(companyId)
-                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['navigationSettings']));
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['navigationSettings', 'quietHoursEnabled']));
 
       // ── companies/{companyId}/drivers/{driverId} ─────────
       // Contains PII (name, phone) alongside location - authenticated
       // company staff only, never public. (See CustomerTrackingView.swift
       // for why customer tracking does NOT read this collection.)
       match /drivers/{driverId} {
-        allow read: if isCompanyMember(companyId);
+        // A plain driver may read only their own record - staff need
+        // every driver's location/contact info for the fleet map, but
+        // a driver has no legitimate reason to read another driver's
+        // phone number, live GPS, or license photo path, and nothing
+        // in the app's own UI ever asks for that. This mirrors the
+        // create/update rules just below, which already drew this
+        // same line - read was the one left too broad.
+        allow read: if isCompanyStaff(companyId)
+                    || (isCompanyMember(companyId) && request.auth.uid == driverId);
         // A driver's own record is created/updated by themselves on
         // first sign-in and while working (name, GPS, shift status) -
         // but only the ONE doc whose ID is their own uid, never any
@@ -271,7 +313,23 @@ service cloud.firestore {
       // ── companies/{companyId}/routes/{routeId} + stops ───
       match /routes/{routeId} {
         allow read: if isCompanyMember(companyId);
-        allow create, update, delete: if isCompanyStaff(companyId);
+        allow create, delete: if isCompanyStaff(companyId);
+        // Staff can change anything (name, driver assignment, etc.).
+        // The route's own assigned driver may update ONLY status/
+        // updatedAt, nothing else - specifically for
+        // RouteRepository.updateStatus, called when a driver finishes
+        // their last stop to mark the whole route completed (so a
+        // later "fetch my current route" query, which excludes
+        // status == completed, doesn't keep matching a finished
+        // route). Without this branch, that write was silently
+        // rejected for every real driver account - it only ever
+        // looked like it worked when tested through an owner's own
+        // "I also drive routes" session, which passes isCompanyStaff
+        // regardless.
+        allow update: if isCompanyStaff(companyId)
+                      || (isCompanyMember(companyId)
+                           && resource.data.driverId == request.auth.uid
+                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']));
 
         // Driver login is now tied to a real Firebase Auth UID (see
         // AuthSession.bridgeDriverSession), so a driver can write only
@@ -281,16 +339,28 @@ service cloud.firestore {
         // so create requires isCompanyStaff (resource doesn't exist
         // yet on create, so the driver branch can't match).
         match /stops/{stopId} {
-          allow read: if isCompanyMember(companyId);
+          // Same tightening as drivers/{driverId} above, mirroring
+          // the write rule directly below: a driver reads only stops
+          // actually assigned to them, not every customer's name/
+          // phone/email/address/notes company-wide. The app's own
+          // DriverSession only ever queries a driver's own assigned
+          // route anyway - this just makes that the enforced boundary,
+          // not just the app's good behavior.
+          allow read: if isCompanyStaff(companyId)
+                      || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
           allow write: if isCompanyStaff(companyId)
                        || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
 
           // ── .../stops/{stopId}/photos/{photoId} ─────────
           // Proof-of-work photo metadata (the actual image lives in
-          // Firebase Storage - see storage.rules). Any company member
-          // can add one (drivers uploading); only staff edit/delete.
+          // Firebase Storage - see storage.rules). Staff read any;
+          // a driver only their own assigned stop's - closes the same
+          // gap as stops/{stopId} above, since this subcollection has
+          // its own rule that wouldn't otherwise inherit that
+          // restriction. Create stays open to any company member
+          // (drivers uploading); only staff edit/delete.
           match /photos/{photoId} {
-            allow read: if isCompanyMember(companyId);
+            allow read: if isCompanyStaff(companyId) || isAssignedStopDriver(companyId, routeId, stopId);
             allow create: if isCompanyMember(companyId);
             allow update, delete: if isCompanyStaff(companyId);
           }
@@ -298,10 +368,11 @@ service cloud.firestore {
           // ── .../stops/{stopId}/notifications/{notificationId} ──
           // Timestamped log of customer notifications - the proof an
           // owner points to in a "you never told me" dispute. Same
-          // access shape as photos: any company member (driver
-          // triggering it) can create, only staff edit/delete.
+          // read tightening as photos just above. Create stays open
+          // to any company member (driver triggering it), only staff
+          // edit/delete.
           match /notifications/{notificationId} {
-            allow read: if isCompanyMember(companyId);
+            allow read: if isCompanyStaff(companyId) || isAssignedStopDriver(companyId, routeId, stopId);
             allow create: if isCompanyMember(companyId);
             allow update, delete: if isCompanyStaff(companyId);
           }
