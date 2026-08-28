@@ -48,6 +48,15 @@ final class DriverStopViewModel: ObservableObject {
     // step, so it can't fire a customer's arrival text for a stop the
     // driver hasn't started driving to (e.g. a stop that happens to be
     // near where they parked overnight).
+    /// Every other stop still worth distinguishing from this one -
+    /// completed stops are excluded, since a finished property behind
+    /// the driver shouldn't stop the next one from registering.
+    func otherStopCoordinates(excluding stop: Stop) -> [CLLocationCoordinate2D] {
+        session.activeStops
+            .filter { $0.id != stop.id && !$0.isCompleted }
+            .compactMap { $0.coordinate }
+    }
+
     private func observeGeofenceArrival() {
         LocationService.shared.$hasArrivedAtTarget
             .filter { $0 }
@@ -158,7 +167,11 @@ final class DriverStopViewModel: ObservableObject {
         if let next = others.filter({ !$0.isCompleted }).sorted(by: { $0.order < $1.order }).first {
             stop = next
             etaMinutes = nil
-            LocationService.shared.setArrivalTarget(lat: next.latitude, lng: next.longitude)
+            LocationService.shared.setArrivalTarget(
+                lat: next.latitude,
+                lng: next.longitude,
+                otherStops: otherStopCoordinates(excluding: next)
+            )
             loadETA()
         } else {
             routeCompleted = true
@@ -317,7 +330,11 @@ struct DriverStopView: View {
             // GPS tracking itself is tied to the shift lifecycle (see
             // DriverSession.startShift/endShift) - this just tells the
             // already-running tracker what "arrived" means for this stop.
-            LocationService.shared.setArrivalTarget(lat: vm.stop.latitude, lng: vm.stop.longitude)
+            LocationService.shared.setArrivalTarget(
+                lat: vm.stop.latitude,
+                lng: vm.stop.longitude,
+                otherStops: vm.otherStopCoordinates(excluding: vm.stop)
+            )
             vm.loadETA()
             vm.startETARefreshTimer()
             // Keep the screen awake while an active stop is open - a

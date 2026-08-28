@@ -32,13 +32,19 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // under-triggering (driver stands there and nothing happens) is a
     // worse failure than triggering a few metres early.
     private static let arrivalRadius: CLLocationDistance = 40
-    // Fixes less accurate than this can't meaningfully be inside a
-    // 40m circle, so they're ignored for geofencing.
-    private static let maxUsableAccuracy: CLLocationAccuracy = 50
+    // Tight on purpose. Neighbouring houses are ~20m apart, so a fix
+    // vague to 50m can rank the wrong one as nearest and arrive at the
+    // neighbour. Typical open-sky accuracy is 5-15m, so this still
+    // passes normally; under heavy tree cover it won't, and the driver
+    // taps Arrived by hand. Under-triggering is a mild annoyance -
+    // texting the wrong customer that their driveway is done is not.
+    private static let maxUsableAccuracy: CLLocationAccuracy = 25
 
     private var driverId: String = ""
     private var stopLat: Double?
     private var stopLng: Double?
+    /// Every other stop still on the route - see detectArrival.
+    private var otherStopCoordinates: [CLLocationCoordinate2D] = []
 
     private override init() {
         super.init()
@@ -79,7 +85,10 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // Set/cleared independently of start/stop tracking so opening a
     // specific stop doesn't restart the location manager - it just
     // tells an already-running tracker what "arrived" means right now.
-    func setArrivalTarget(lat: Double?, lng: Double?) {
+    /// - Parameter otherStops: every OTHER stop still on this route.
+    ///   Used to disambiguate neighbouring properties - see
+    ///   detectArrival for why a plain radius check isn't enough.
+    func setArrivalTarget(lat: Double?, lng: Double?, otherStops: [CLLocationCoordinate2D] = []) {
         // Only reset the geofence when the target actually moves to a
         // different place. This is called from onAppear too, so
         // resetting unconditionally would re-arm the geofence every
@@ -88,6 +97,7 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         let isSameTarget = (lat == stopLat && lng == stopLng)
         self.stopLat = lat
         self.stopLng = lng
+        self.otherStopCoordinates = otherStops
         if !isSameTarget {
             hasArrivedAtTarget = false
         }
@@ -144,10 +154,30 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
               location.horizontalAccuracy <= Self.maxUsableAccuracy else { return }
 
         let stop = CLLocation(latitude: sLat, longitude: sLng)
-        if location.distance(from: stop) <= Self.arrivalRadius {
-            hasArrivedAtTarget = true
-            print("🎯 Geofence: arrived at stop (accuracy \(Int(location.horizontalAccuracy))m)")
+        let distanceToTarget = location.distance(from: stop)
+        guard distanceToTarget <= Self.arrivalRadius else { return }
+
+        // Neighbouring properties: on a residential street houses sit
+        // ~20m apart, well inside the arrival radius, so "am I within
+        // 40m of the target" is true for three houses at once and
+        // can't tell them apart. Worse, the driver standing at house 1
+        // is already inside house 2's radius the instant house 2
+        // becomes the target - which would mark house 2 arrived
+        // without moving, text that customer, and (being one-shot)
+        // then never fire when the driver actually got there.
+        //
+        // Ranking instead of thresholding fixes both: only arrive at
+        // the target if it is genuinely the closest remaining stop.
+        // Standing at house 1 with house 2 as the target, house 1 is
+        // nearer, so nothing fires until the driver has actually
+        // moved closer to house 2 than to house 1.
+        for other in otherStopCoordinates {
+            let otherLocation = CLLocation(latitude: other.latitude, longitude: other.longitude)
+            if location.distance(from: otherLocation) < distanceToTarget { return }
         }
+
+        hasArrivedAtTarget = true
+        print("🎯 Geofence: arrived at stop (\(Int(distanceToTarget))m, accuracy \(Int(location.horizontalAccuracy))m)")
     }
 
     // MARK: - Error Handling
