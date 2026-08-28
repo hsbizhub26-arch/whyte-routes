@@ -16,6 +16,13 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // compare against, so a phone with no signal for the last 20
     // minutes doesn't get treated as "still right here."
     @Published var lastLocationUpdate: Date?
+    // Set the moment permission is revoked (Settings app, or denied
+    // outright) or a fix genuinely can't be obtained - the driver UI
+    // can surface this instead of silently tracking nothing for the
+    // rest of a shift. nil means "no known problem," not "confirmed
+    // working" - a phone with no signal briefly is normal and doesn't
+    // set this.
+    @Published var trackingError: String?
 
     private var driverId: String = ""
     private var stopLat: Double?
@@ -25,6 +32,11 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
+        // Without this, CoreLocation reports on essentially every GPS
+        // tick - a real battery and Firestore-write cost over an
+        // overnight shift, with no map/ETA benefit: a vehicle moving
+        // 20m hasn't meaningfully changed which stop it's near.
+        manager.distanceFilter = 20
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
     }
@@ -104,7 +116,32 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     }
 
     // MARK: - Error Handling
+    // Distinguishes a transient miss (no fix yet, briefly indoors/in a
+    // dead zone - CoreLocation keeps trying on its own, nothing for
+    // the driver to act on) from something that actually needs
+    // surfacing. A silent console print was the whole problem: a
+    // driver had no way to know GPS had genuinely stopped working
+    // partway through a shift.
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("❌ Location Error:", error.localizedDescription)
+        if let clError = error as? CLError, clError.code == .locationUnknown {
+            return
+        }
+        trackingError = "Location tracking stopped working: \(error.localizedDescription)"
+    }
+
+    // MARK: - Authorization Changes
+    // Catches a driver revoking permission mid-shift (Settings app,
+    // accidental tap) - without this, tracking just silently stops
+    // with no signal anywhere in the app that it happened.
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        switch status {
+        case .denied, .restricted:
+            trackingError = "Location access was turned off - customer ETA updates and the live fleet map won't work until it's re-enabled in Settings."
+        case .authorizedAlways, .authorizedWhenInUse:
+            trackingError = nil
+        default:
+            break
+        }
     }
 }

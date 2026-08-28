@@ -249,7 +249,17 @@ struct DriverStopView: View {
                         // stay intact for landscaping jobs, where before/after
                         // photos are genuinely useful and driver pace isn't
                         // the same constraint.
-                        completeButton
+                        //
+                        // One button per stage, Uber-Driver-style - only
+                        // shown once actually arrived. It used to render
+                        // (enabled) at every stage, including .scheduled -
+                        // a driver could tap straight to Completed without
+                        // ever tapping Start Driving or I've Arrived,
+                        // silently skipping the en-route/arrived customer
+                        // texts along with the steps themselves.
+                        if vm.jobStatus == .arrived || vm.jobStatus == .completed {
+                            completeButton
+                        }
 
                         Spacer(minLength: 40)
                     }
@@ -362,7 +372,17 @@ extension DriverStopView {
                     span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)
                 )
             )) {
-                Marker("", coordinate: coordinate)
+                // Custom gold pin, not MapKit's stock red marker - the
+                // stock one is the one place left that broke the
+                // black/gold branding every other pin in the app
+                // already follows (see LiveFleetMapView/DriverMapView).
+                Annotation("", coordinate: coordinate) {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.title)
+                        .foregroundColor(Color("WRThemeGold"))
+                        .background(Circle().fill(.white).padding(3))
+                        .shadow(color: .black.opacity(0.35), radius: 4)
+                }
             }
             .frame(height: 280)
             .clipShape(RoundedRectangle(cornerRadius: 18))
@@ -377,7 +397,9 @@ extension DriverStopView {
     private var actionButtons: some View {
         VStack(spacing: 16) {
             NavigationButton(coordinate: vm.stop.coordinate)
-            TimerPill()
+            if let arrivedAt = vm.stop.arrivedAt {
+                TimerPill(arrivedAt: arrivedAt)
+            }
         }
     }
 

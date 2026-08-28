@@ -12,6 +12,9 @@ struct DriverProfileView: View {
     @State private var licenseImage: UIImage?
     @State private var isUploadingLicense = false
     @State private var licenseError: String?
+    @State private var isEditingName = false
+    @State private var nameInput = ""
+    @State private var isSavingName = false
 
     var body: some View {
         ZStack {
@@ -37,7 +40,7 @@ struct DriverProfileView: View {
 
                     VStack(spacing: 16) {
 
-                        infoRow(title: "Name", value: driver.name)
+                        editableNameRow(driver: driver)
                         infoRow(title: "Vehicle", value: driver.vehicle)
                         infoRow(title: "Phone", value: driver.phone ?? "N/A")
 
@@ -116,6 +119,81 @@ struct DriverProfileView: View {
         }
         .task {
             await loadExistingLicensePhoto()
+        }
+    }
+
+    // MARK: - Editable Name Row
+    // The actual fix for "welcome, someone@gmail.com" - a driver
+    // record's name previously had no UI anywhere that let a driver
+    // set their own, so it silently stayed whatever placeholder
+    // (often the account email) it was created with. Saves through
+    // the same FirestoreDriverRepository.updateDriverName an owner's
+    // ManageEmployeesView already used - now the driver has that path
+    // too, on their own record only.
+    @ViewBuilder
+    private func editableNameRow(driver: Driver) -> some View {
+        if isEditingName {
+            HStack {
+                Text("Name")
+                    .foregroundColor(Color("WRThemeGold"))
+                    .font(.headline)
+
+                TextField("Your name", text: $nameInput)
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .onSubmit { saveName(driverId: driver.id) }
+
+                Button {
+                    saveName(driverId: driver.id)
+                } label: {
+                    if isSavingName {
+                        ProgressView().tint(Color("WRThemeGold"))
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(Color("WRThemeGold"))
+                    }
+                }
+                .disabled(isSavingName || nameInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.vertical, 4)
+        } else {
+            HStack {
+                Text("Name")
+                    .foregroundColor(Color("WRThemeGold"))
+                    .font(.headline)
+
+                Spacer()
+
+                Text(driver.name)
+                    .foregroundColor(.white)
+                    .font(.body)
+
+                Button {
+                    nameInput = driver.name
+                    isEditingName = true
+                } label: {
+                    Image(systemName: "pencil.circle")
+                        .foregroundColor(Color("WRThemeGold"))
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func saveName(driverId: String) {
+        let trimmed = nameInput.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        isSavingName = true
+        driverRepo.updateDriverName(driverId: driverId, name: trimmed) { success in
+            Task { @MainActor in
+                isSavingName = false
+                if success {
+                    session.driver?.name = trimmed
+                    isEditingName = false
+                }
+            }
         }
     }
 

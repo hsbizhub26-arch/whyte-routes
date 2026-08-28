@@ -10,6 +10,7 @@ protocol DriverRepository {
     func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)?)
     func updateLicensePhotoPath(driverId: String, path: String, completion: ((Bool) -> Void)?)
     func assignRoute(driverId: String, routeId: String)
+    func fetchActiveShift(driverId: String, completion: @escaping (Shift?) -> Void)
 }
 
 /// Firestore implementation for all DriverRepository actions.
@@ -165,6 +166,27 @@ final class FirestoreDriverRepository: DriverRepository {
                 "activeRoute": routeId,
                 "updatedAt": FieldValue.serverTimestamp()
             ])
+    }
+
+    // MARK: - Fetch a Driver's Currently Active Shift
+    // Powers the owner's driver-detail card on the fleet map ("Shift:
+    // 5h 42m") - a driver's own shift lifecycle already writes here
+    // (see ShiftRepository), this just reads it back for someone else
+    // looking at that driver, not the driver's own session.
+    func fetchActiveShift(driverId: String, completion: @escaping (Shift?) -> Void) {
+        guard let ref = driversRef?.document(driverId).collection("shifts") else {
+            completion(nil)
+            return
+        }
+        ref.whereField("status", isEqualTo: "active")
+            .limit(to: 1)
+            .getDocuments { snapshot, error in
+                guard error == nil, let doc = snapshot?.documents.first else {
+                    completion(nil)
+                    return
+                }
+                completion(Shift(from: doc.data(), id: doc.documentID))
+            }
     }
 
     /// Called on whichever driver a route is being taken AWAY from

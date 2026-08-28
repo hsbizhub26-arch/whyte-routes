@@ -43,7 +43,21 @@ final class ShiftRepository {
         }
     }
 
+    // Checks Firestore itself for an existing active shift before
+    // creating one - DriverSession's own `activeShift == nil` guard is
+    // in-memory only, and restoreActiveShift() runs as a fire-and-
+    // forget Task from setDriver(), not awaited. That leaves a real
+    // window right after sign-in where a driver could tap Start Shift
+    // before the restore resolves, otherwise creating a second,
+    // orphaned "active" shift doc that silently corrupts hours/payroll
+    // reporting (fetchActiveShift's limit(to: 1) would then return
+    // whichever one Firestore feels like). Returning the real existing
+    // shift instead of blindly creating a new one closes that for any
+    // caller, not just this one call site.
     func startShift(driverId: String) async throws -> Shift {
+        if let existing = await fetchActiveShift(driverId: driverId) {
+            return existing
+        }
         let ref = try shiftsRef(driverId: driverId)
         let doc = ref.document()
         let shift = Shift(id: doc.documentID, driverId: driverId, startedAt: Date(), endedAt: nil, status: "active")

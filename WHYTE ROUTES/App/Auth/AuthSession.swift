@@ -288,6 +288,16 @@ final class AuthSession: ObservableObject {
     /// their own record has something stable to check against.
     /// Without this bridge, DriverTabView/DriverDashboardView have no
     /// way to know which driver just signed in.
+    /// Called when "I also drive routes" is toggled on live (see
+    /// SettingsView.setAlsoDrives) - the bridge above only ever ran
+    /// once, during the initial sign-in flow, so without this,
+    /// DriverSession stayed empty (driver dashboard stuck on "No
+    /// driver profile loaded yet") until the whole app relaunched.
+    func ensureDriverSessionBridged() async {
+        guard let companyId = CompanySession.shared.currentCompanyId else { return }
+        await bridgeDriverSession(companyId: companyId)
+    }
+
     private func bridgeDriverSession(companyId: String) async {
         guard let uid = user?.uid else { return }
         let repo = FirestoreDriverRepository()

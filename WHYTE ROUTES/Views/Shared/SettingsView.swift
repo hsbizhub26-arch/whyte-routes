@@ -1,11 +1,18 @@
 import SwiftUI
 import FirebaseAuth
+import FirebaseFunctions
 
 struct SettingsView: View {
     @EnvironmentObject var auth: AuthSession
     @State private var showReportIssue = false
     @State private var showSubscription = false
     @State private var alsoDrivesToggle = false
+    @State private var testPhone = ""
+    @State private var testResult: String?
+    @State private var isSendingTest = false
+    @State private var quietHoursToggle = false
+    @ObservedObject private var companySession = CompanySession.shared
+    private let companyRepo = CompanyRepository()
 
     // No NavigationStack here on purpose - every place this view is
     // shown (ManagerTabView's explicit per-tab NavigationStack, and
@@ -81,6 +88,45 @@ struct SettingsView: View {
                     Text("View plan details, upgrade, or restore a previous purchase.")
                         .foregroundColor(.gray)
                 }
+                if auth.role != .driver {
+                    Section {
+                        Toggle("Quiet Hours (11 PM – 6 AM)", isOn: $quietHoursToggle)
+                            .tint(WRTheme.gold)
+                            .listRowBackground(Color.black.opacity(0.2))
+                            .onChange(of: quietHoursToggle) { _, newValue in
+                                guard let companyId = companySession.currentCompanyId else { return }
+                                Task { await companyRepo.updateQuietHoursEnabled(companyId: companyId, enabled: newValue) }
+                            }
+                    } footer: {
+                        Text("While on: live ETA/status texts are held overnight and every completed job is batched into one morning-summary text per customer instead. Drivers don't do anything differently - same buttons, same taps.")
+                            .foregroundColor(.gray)
+                    }
+                }
+                Section {
+                    TextField("+1XXXXXXXXXX", text: $testPhone)
+                        .keyboardType(.phonePad)
+                        .listRowBackground(Color.black.opacity(0.2))
+
+                    Button {
+                        sendTest()
+                    } label: {
+                        Text(isSendingTest ? "Sending…" : "Send Test SMS")
+                    }
+                    .disabled(isSendingTest || testPhone.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .listRowBackground(Color.black.opacity(0.2))
+
+                    if let testResult {
+                        Text(testResult)
+                            .font(.footnote)
+                            .foregroundColor(testResult.hasPrefix("✅") ? .green : .red)
+                            .listRowBackground(Color.black.opacity(0.2))
+                    }
+                } header: {
+                    Text("Test Notifications")
+                } footer: {
+                    Text("Sends a real SMS through the live provider, clearly marked as a test - never to a real customer record. Limited to 10 per day.")
+                        .foregroundColor(.gray)
+                }
                 Section {
                     NavigationLink(destination: PermissionsHelpView()) {
                         Text("Permissions Help")
@@ -130,6 +176,32 @@ struct SettingsView: View {
         }
         .onAppear {
             alsoDrivesToggle = auth.alsoDrives
+            quietHoursToggle = companySession.currentCompany?.quietHoursEnabled ?? false
+        }
+    }
+
+    private func sendTest() {
+        let phone = testPhone.trimmingCharacters(in: .whitespaces)
+        isSendingTest = true
+        testResult = nil
+        Task {
+            do {
+                let result = try await Functions.functions().httpsCallable("sendTestNotification").call(["phone": phone])
+                let data = result.data as? [String: Any]
+                let accepted = data?["accepted"] as? Bool ?? false
+                let failureReason = data?["failureReason"] as? String
+                await MainActor.run {
+                    testResult = accepted
+                        ? "✅ Sent - check that phone for the text."
+                        : "⚠️ Failed - \(failureReason ?? "unknown error")"
+                    isSendingTest = false
+                }
+            } catch {
+                await MainActor.run {
+                    testResult = "⚠️ Failed - \(error.localizedDescription)"
+                    isSendingTest = false
+                }
+            }
         }
     }
 
@@ -141,6 +213,9 @@ struct SettingsView: View {
                 uid: uid,
                 fields: ["alsoDrives": newValue]
             )
+            if newValue {
+                await auth.ensureDriverSessionBridged()
+            }
         }
     }
 }
