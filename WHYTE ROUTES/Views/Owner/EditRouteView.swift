@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import FirebaseFunctions
 
 // Supersedes the old AssignRouteView (assign-only, no editing). Real
 // dispatching needs more than a one-time assignment: reordering stops
@@ -33,6 +34,8 @@ struct EditRouteView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var historyStop: Stop?
+    @State private var sendingLinkStopId: String?
+    @State private var trackingLinkResults: [String: String] = [:]
     @State private var pickerTargetId: String?
     @State private var showUpgradePrompt = false
     @State private var moveTargetStop: Stop?
@@ -235,6 +238,48 @@ struct EditRouteView: View {
         .buttonStyle(.borderless)
     }
 
+    // The link, the SMS and the usage record all happen server-side
+    // (sendTrackingLink) - same reason as every other customer message:
+    // entitlement, consent and the Twilio credentials must not be
+    // decided or held on a device. Re-sending reuses the customer's
+    // existing link rather than orphaning a page they already have open.
+    private func sendTrackingLink(for stop: Stop) {
+        sendingLinkStopId = stop.id
+        trackingLinkResults[stop.id] = nil
+        Task {
+            do {
+                let result = try await Functions.functions()
+                    .httpsCallable("sendTrackingLink")
+                    .call(["routeId": routeId, "stopId": stop.id])
+                let data = result.data as? [String: Any]
+                let status = data?["deliveryStatus"] as? String ?? "unknown"
+                await MainActor.run {
+                    trackingLinkResults[stop.id] = trackingLinkMessage(for: status, data: data)
+                    sendingLinkStopId = nil
+                }
+            } catch {
+                await MainActor.run {
+                    trackingLinkResults[stop.id] = "⚠️ Couldn't send - \(error.localizedDescription)"
+                    sendingLinkStopId = nil
+                }
+            }
+        }
+    }
+
+    private func trackingLinkMessage(for status: String, data: [String: Any]?) -> String {
+        switch status {
+        case "accepted":       return "✓ Tracking link texted to the customer."
+        case "not_opted_in":   return "⚠️ This customer hasn't agreed to receive messages yet."
+        case "channel_disabled": return "⚠️ This customer has text messages turned off."
+        case "no_contact_on_file": return "⚠️ No phone number on file for this customer."
+        case "not_entitled":   return "⚠️ Your plan doesn't include customer notifications."
+        case "failed":
+            let reason = data?["failureReason"] as? String
+            return "⚠️ Failed to send\(reason.map { " - \($0)" } ?? ".")"
+        default:               return "⚠️ \(status)"
+        }
+    }
+
     @ViewBuilder
     private func stopRow(_ stop: Stop) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -272,6 +317,25 @@ struct EditRouteView: View {
                 if originalStopIds.contains(stop.id) {
                     rowActionButton("View Notification Log") {
                         historyStop = stop
+                    }
+
+                    // For customers who'd rather check on their own than
+                    // be texted at every step - one message with a link
+                    // instead of a stream of ETA/status updates. Only
+                    // offered where there's actually a number to send to.
+                    if let phone = stop.customerPhone, !phone.isEmpty {
+                        rowActionButton(
+                            sendingLinkStopId == stop.id ? "Sending…" : "Send Tracking Link"
+                        ) {
+                            sendTrackingLink(for: stop)
+                        }
+                        .disabled(sendingLinkStopId != nil)
+                    }
+
+                    if let result = trackingLinkResults[stop.id] {
+                        Text(result)
+                            .font(.caption)
+                            .foregroundColor(result.hasPrefix("✓") ? .green : .red)
                     }
                 }
             }

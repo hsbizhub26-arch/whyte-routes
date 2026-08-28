@@ -21,6 +21,8 @@ final class TrackingLinkRepository {
         address: String,
         driverId: String,
         stopId: String,
+        stopLatitude: Double? = nil,
+        stopLongitude: Double? = nil,
         completion: @escaping (TrackingLink?) -> Void
     ) {
         guard let companyId = CompanySession.shared.currentCompanyId else {
@@ -31,7 +33,7 @@ final class TrackingLinkRepository {
 
         let doc = trackingLinksRef(companyId: companyId).document()
 
-        let data: [String: Any] = [
+        var data: [String: Any] = [
             "customerName": customerName,
             "address": address,
             "driverId": driverId,
@@ -39,6 +41,8 @@ final class TrackingLinkRepository {
             "active": true,
             "createdAt": FieldValue.serverTimestamp()
         ]
+        if let stopLatitude { data["stopLatitude"] = stopLatitude }
+        if let stopLongitude { data["stopLongitude"] = stopLongitude }
 
         doc.setData(data) { error in
             if let error = error {
@@ -60,6 +64,57 @@ final class TrackingLinkRepository {
                 completion(link)
             }
         }
+    }
+
+    // MARK: - Publish Live Position (driver, authenticated)
+    // Writes ONLY a coordinate and an ETA - deliberately never the
+    // driver's name, phone or id. This one document is world-readable
+    // by anyone holding the link (see firestore.rules), so anything
+    // written here is effectively public and must stay non-identifying.
+    //
+    // Always the same document id ("current"), so the customer's page
+    // can listen to a known path and the collection can't grow a new
+    // document per GPS ping.
+    func publishLocation(
+        companyId: String,
+        linkId: String,
+        latitude: Double,
+        longitude: Double,
+        etaMinutes: Int?
+    ) {
+        var data: [String: Any] = [
+            "latitude": latitude,
+            "longitude": longitude,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if let etaMinutes { data["etaMinutes"] = etaMinutes }
+
+        trackingLinksRef(companyId: companyId)
+            .document(linkId)
+            .collection("location")
+            .document("current")
+            .setData(data, merge: true)
+    }
+
+    /// The still-active link for a given stop, if one was ever created.
+    /// Used by the driver's stop screen to know whether a customer is
+    /// actually watching before it starts publishing position.
+    func activeLink(forStopId stopId: String, completion: @escaping (TrackingLink?) -> Void) {
+        guard let companyId = CompanySession.shared.currentCompanyId else {
+            completion(nil)
+            return
+        }
+        trackingLinksRef(companyId: companyId)
+            .whereField("stopId", isEqualTo: stopId)
+            .whereField("active", isEqualTo: true)
+            .limit(to: 1)
+            .getDocuments { snap, error in
+                guard error == nil, let doc = snap?.documents.first else {
+                    completion(nil)
+                    return
+                }
+                completion(TrackingLink(from: doc.data(), id: doc.documentID, companyId: companyId))
+            }
     }
 
     // MARK: - Deactivate Link (staff, authenticated)

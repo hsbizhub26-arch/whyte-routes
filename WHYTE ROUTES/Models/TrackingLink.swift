@@ -11,6 +11,12 @@ struct TrackingLink: Identifiable {
     var stopId: String
     var active: Bool
     var createdAt: Date?
+    /// The destination itself, denormalised onto the link so the
+    /// customer's page can draw the property pin without reading the
+    /// stop document - which it has no permission to read, and which
+    /// holds contact details a customer shouldn't see.
+    var stopLatitude: Double?
+    var stopLongitude: Double?
 }
 
 extension TrackingLink {
@@ -36,6 +42,9 @@ extension TrackingLink {
         } else {
             self.createdAt = nil
         }
+
+        self.stopLatitude = dict["stopLatitude"] as? Double
+        self.stopLongitude = dict["stopLongitude"] as? Double
     }
 
     func toDict() -> [String: Any] {
@@ -50,15 +59,22 @@ extension TrackingLink {
         if let createdAt {
             d["createdAt"] = Timestamp(date: createdAt)
         }
+        if let stopLatitude { d["stopLatitude"] = stopLatitude }
+        if let stopLongitude { d["stopLongitude"] = stopLongitude }
 
         return d
     }
 
-    /// Encodes both the company and the link itself - a customer's
-    /// tracking view is unauthenticated, so the URL is the only thing
-    /// that tells it which company's subcollection to read from.
+    /// Encodes both the company and the link itself - the customer's
+    /// page is unauthenticated, so the URL is the only thing telling
+    /// it which company's subcollection to read from.
+    ///
+    /// Points at Firebase Hosting (hosting/track.html), the same place
+    /// the privacy policy and terms are served from. It previously
+    /// pointed at whyteroutes.app, a domain the project doesn't own,
+    /// so every link generated would have gone nowhere.
     var url: URL? {
-        URL(string: "https://whyteroutes.app/tracking/\(companyId)/\(id)")
+        URL(string: "https://whyte-routes.web.app/track?c=\(companyId)&t=\(id)")
     }
 }
 

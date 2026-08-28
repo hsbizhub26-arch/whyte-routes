@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WHYTE ROUTES — Live Tracking</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root {
+    --gold: #F5C451;
+    --bg: #000;
+    --panel: #121212;
+    --text: #fff;
+    --muted: rgba(255,255,255,.6);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 16px 20px calc(12px + env(safe-area-inset-top));
+    padding-top: calc(16px + env(safe-area-inset-top));
+    border-bottom: 1px solid rgba(245,196,81,.25);
+  }
+  .brand { color: var(--gold); font-weight: 800; letter-spacing: .5px; font-size: 15px; }
+  .company { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  #map { flex: 1 1 auto; min-height: 240px; background: #1a1a1a; }
+  .panel {
+    background: var(--panel);
+    border-top: 1px solid rgba(245,196,81,.25);
+    padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
+  }
+  .status { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+  .eta { color: var(--gold); font-size: 34px; font-weight: 800; margin: 6px 0 2px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; }
+  .addr { margin-top: 12px; font-size: 15px; }
+  .addr span { color: var(--muted); display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 2px; }
+  .stale { color: #ffb15c; font-size: 13px; margin-top: 10px; }
+  .center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; text-align: center; }
+  .center p { color: var(--muted); max-width: 340px; line-height: 1.5; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--gold); margin-right:7px; vertical-align:middle; }
+  .leaflet-container { background: #1a1a1a; }
+  /* OSM tiles are bright; dim them so the page stays dark-themed. */
+  .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">WHYTE ROUTES</div>
+  <div class="company" id="companyLine">Live service tracking</div>
+</header>
+
+<div id="map" hidden></div>
+
+<div class="center" id="message">
+  <p id="messageText">Loading your tracking link…</p>
+</div>
+
+<div class="panel" id="panel" hidden>
+  <p class="status" id="status"><span class="dot"></span><span id="statusText">On the way</span></p>
+  <div class="eta" id="eta" hidden></div>
+  <p class="sub" id="etaSub" hidden>estimated arrival</p>
+  <div class="addr"><span>Service address</span><div id="address">—</div></div>
+  <p class="stale" id="stale" hidden></p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, doc, onSnapshot }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// Public web config. Firebase web API keys are identifiers, not
+// secrets - what actually protects this data is firestore.rules,
+// which allows an unauthenticated `get` on exactly this one tracking
+// link document (found only via its unguessable id) and its
+// location-only subcollection. Nothing else in the project is
+// readable from here.
+const app = initializeApp({
+  apiKey: "AIzaSyCI9eTiEKbFwr1tWR-O4vHUe3k5HNZaHKk",
+  authDomain: "whyte-routes.firebaseapp.com",
+  projectId: "whyte-routes",
+  storageBucket: "whyte-routes.firebasestorage.app",
+  messagingSenderId: "1092024277372",
+  appId: "1:1092024277372:web:75f29262a1ed98a3bdecf9"
+});
+const db = getFirestore(app);
+
+const params = new URLSearchParams(location.search);
+const companyId = params.get("c");
+const linkId = params.get("t");
+
+const $ = (id) => document.getElementById(id);
+function showMessage(text) {
+  $("message").hidden = false;
+  $("messageText").textContent = text;
+  $("panel").hidden = true;
+  $("map").hidden = true;
+}
+function showTracking() {
+  $("message").hidden = true;
+  $("panel").hidden = false;
+  $("map").hidden = false;
+  if (map) setTimeout(() => map.invalidateSize(), 0);
+}
+
+if (!companyId || !linkId) {
+  showMessage("This tracking link looks incomplete. Please use the full link from your text message.");
+  throw new Error("missing params");
+}
+
+let map = null, driverMarker = null, stopMarker = null, hasFitBounds = false;
+
+function ensureMap() {
+  if (map) return;
+  map = L.map("map", { zoomControl: false, attributionControl: true }).setView([43.7, -79.4], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+}
+
+const goldIcon = () => L.divIcon({
+  className: "",
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:#F5C451;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.5)"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9]
+});
+const homeIcon = () => L.divIcon({
+  className: "",
+  html: '<div style="width:16px;height:16px;border-radius:4px;background:#fff;border:3px solid #F5C451;box-shadow:0 0 0 2px rgba(0,0,0,.5)"></div>',
+  iconSize: [16, 16], iconAnchor: [8, 8]
+});
+
+// ── The tracking link itself: address, status, whether it's still live
+onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId), (snap) => {
+  if (!snap.exists()) {
+    showMessage("This tracking link is no longer available. If your service is still scheduled, your contractor can send a new link.");
+    return;
+  }
+  const d = snap.data();
+  $("address").textContent = d.address || "—";
+  if (d.customerName) $("companyLine").textContent = "Live service tracking";
+
+  if (d.active === false || d.completed === true) {
+    $("statusText").textContent = "Service complete";
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+    $("stale").hidden = true;
+    showTracking();
+    return;
+  }
+  showTracking();
+
+  if (typeof d.stopLatitude === "number" && typeof d.stopLongitude === "number") {
+    ensureMap();
+    const pos = [d.stopLatitude, d.stopLongitude];
+    if (!stopMarker) stopMarker = L.marker(pos, { icon: homeIcon() }).addTo(map);
+    else stopMarker.setLatLng(pos);
+    fitIfPossible();
+  }
+}, () => {
+  showMessage("Couldn't load this tracking link. Please check your connection and try again.");
+});
+
+// ── Live driver position, published by the driver's app while en route
+onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", "current"), (snap) => {
+  if (!snap.exists()) {
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+    $("statusText").textContent = "Scheduled";
+    $("stale").hidden = false;
+    $("stale").textContent = "Your driver hasn't started toward this stop yet.";
+    return;
+  }
+  const d = snap.data();
+  ensureMap();
+
+  if (typeof d.latitude === "number" && typeof d.longitude === "number") {
+    const pos = [d.latitude, d.longitude];
+    if (!driverMarker) driverMarker = L.marker(pos, { icon: goldIcon() }).addTo(map);
+    else driverMarker.setLatLng(pos);
+    fitIfPossible();
+  }
+
+  if (typeof d.etaMinutes === "number" && d.etaMinutes >= 0) {
+    $("statusText").textContent = "On the way";
+    $("eta").hidden = false;
+    $("etaSub").hidden = false;
+    $("eta").textContent = d.etaMinutes <= 1 ? "Arriving now" : `${d.etaMinutes} min`;
+  } else {
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+  }
+
+  // A position that stopped updating is worse than no position - it
+  // would quietly show a driver frozen mid-street as if it were live.
+  const updated = d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : null;
+  if (updated) {
+    const ageMin = Math.round((Date.now() - updated) / 60000);
+    if (ageMin >= 5) {
+      $("stale").hidden = false;
+      $("stale").textContent = `Last update ${ageMin} min ago — your driver may be out of signal.`;
+    } else {
+      $("stale").hidden = true;
+    }
+  }
+}, () => { /* location may legitimately not exist yet */ });
+
+function fitIfPossible() {
+  if (hasFitBounds || !map) return;
+  const pts = [];
+  if (driverMarker) pts.push(driverMarker.getLatLng());
+  if (stopMarker) pts.push(stopMarker.getLatLng());
+  if (pts.length === 2) {
+    map.fitBounds(L.latLngBounds(pts).pad(0.35));
+    hasFitBounds = true;
+  } else if (pts.length === 1) {
+    map.setView(pts[0], 14);
+  }
+}
+</script>
+</body>
+</html>

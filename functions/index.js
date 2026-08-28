@@ -671,3 +671,150 @@ exports.sendTestNotification = onCall(
     };
   }
 );
+
+// sendTrackingLink
+//
+// For customers who'd rather not be texted at every step: one message
+// with a link they can open whenever they want, instead of a stream of
+// ETA and status updates. The page it points at is public but
+// unguessable (hosting/track.html reads one Firestore document by its
+// auto-generated id) and exposes only a position, an ETA and the
+// service address - never the driver's name, phone or id.
+//
+// The link is created here rather than on the client so the URL that
+// gets sent is always one this function actually just wrote, and so
+// re-sending reuses the existing link instead of quietly orphaning the
+// one the customer already has open.
+const TRACKING_BASE_URL = "https://whyte-routes.web.app/track";
+
+exports.sendTrackingLink = onCall(
+  { secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign in required.");
+    }
+
+    const { routeId, stopId } = request.data || {};
+    if (!routeId || !stopId) {
+      throw new HttpsError("invalid-argument", "routeId and stopId are required.");
+    }
+
+    const uid = request.auth.uid;
+    const userSnap = await admin.firestore().doc(`users/${uid}`).get();
+    const userData = userSnap.data();
+    if (!userData || !userData.companyId) {
+      throw new HttpsError("failed-precondition", "No company associated with this account.");
+    }
+    const companyId = userData.companyId;
+
+    const companySnap = await admin.firestore().doc(`companies/${companyId}`).get();
+    const companyData = companySnap.data();
+    if (!companyData) {
+      throw new HttpsError("failed-precondition", "Company not found.");
+    }
+    if (tierRank(companyData.subscriptionTier) < 1) {
+      return { deliveryStatus: "not_entitled" };
+    }
+
+    const stopRef = admin.firestore().doc(`companies/${companyId}/routes/${routeId}/stops/${stopId}`);
+    const stopSnap = await stopRef.get();
+    const stopData = stopSnap.data();
+    if (!stopData) {
+      throw new HttpsError("not-found", "Stop not found.");
+    }
+
+    // Same precedence as sendCustomerNotification: the linked Customer
+    // record wins over the copy cached on the stop.
+    let customerName = stopData.customerName || "Customer";
+    let phone = stopData.customerPhone;
+    let optedIn = !!stopData.customerOptedIn;
+    let smsEnabled = true;
+
+    if (stopData.customerId) {
+      const customerSnap = await admin.firestore().doc(`companies/${companyId}/customers/${stopData.customerId}`).get();
+      const customerData = customerSnap.data();
+      if (customerData) {
+        customerName = customerData.name || customerName;
+        phone = customerData.phone;
+        optedIn = !!customerData.notificationsOptIn;
+        smsEnabled = customerData.smsEnabled !== false;
+      }
+    }
+
+    if (!optedIn) return { deliveryStatus: "not_opted_in" };
+    if (!smsEnabled) return { deliveryStatus: "channel_disabled" };
+    if (!phone || !phone.trim()) return { deliveryStatus: "no_contact_on_file" };
+
+    // Reuse an existing active link for this stop so a customer who
+    // already has the page open doesn't get a URL that silently stops
+    // updating when a second link supersedes it.
+    const linksRef = admin.firestore().collection(`companies/${companyId}/trackingLinks`);
+    const existing = await linksRef
+      .where("stopId", "==", stopId)
+      .where("active", "==", true)
+      .limit(1)
+      .get();
+
+    let linkId;
+    if (!existing.empty) {
+      linkId = existing.docs[0].id;
+    } else {
+      const doc = linksRef.doc();
+      await doc.set({
+        customerName,
+        address: stopData.address || "",
+        driverId: stopData.driverId || "",
+        stopId,
+        routeId,
+        active: true,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        ...(typeof stopData.latitude === "number" ? { stopLatitude: stopData.latitude } : {}),
+        ...(typeof stopData.longitude === "number" ? { stopLongitude: stopData.longitude } : {}),
+      });
+      linkId = doc.id;
+    }
+
+    const url = `${TRACKING_BASE_URL}?c=${companyId}&t=${linkId}`;
+    const companyName = companyData.name || "Your service crew";
+    const message = `${companyName}: track your service in real time here - ${url}`;
+
+    let result;
+    try {
+      result = await sendSms(phone, message);
+    } catch (err) {
+      result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
+    }
+
+    const deliveryStatus = result.accepted ? "accepted" : "failed";
+
+    // Logged alongside the other customer notifications so the owner's
+    // history shows that a link was sent, not just ETA/status texts.
+    await stopRef.collection("notifications").doc(`${stopId}_trackingLink`).set({
+      stopId, routeId, customerName,
+      type: "trackingLink",
+      contactMethod: "sms",
+      contactValue: phone,
+      deliveryStatus,
+      providerMessageId: result.providerMessageId || null,
+      failureReason: result.failureReason || null,
+      message,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    if (result.accepted) {
+      const period = new Date().toISOString().slice(0, 7);
+      await admin.firestore().doc(`companies/${companyId}/notificationUsage/${period}`).set({
+        smsCount: admin.firestore.FieldValue.increment(1),
+        estimatedSmsCostUsd: admin.firestore.FieldValue.increment(0.0079),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    console.log(
+      `${result.accepted ? "✅" : "⚠️"} tracking link ${linkId} (company ${companyId}) -> ${deliveryStatus}` +
+      (result.failureReason ? ` (${result.failureReason})` : "")
+    );
+
+    return { deliveryStatus, url, linkId, failureReason: result.failureReason || null };
+  }
+);
