@@ -236,6 +236,7 @@ final class DriverStopViewModel: ObservableObject {
 struct DriverStopView: View {
 
     @StateObject private var vm: DriverStopViewModel
+    @StateObject private var nav = NavigationSession()
     @ObservedObject private var session = DriverSession.shared
     @ObservedObject private var access = FeatureAccessManager.shared
     @State private var showPhotoCapture = false
@@ -326,7 +327,17 @@ struct DriverStopView: View {
         }
         .onDisappear {
             vm.stopETARefreshTimer()
+            nav.stop()
             UIApplication.shared.isIdleTimerDisabled = false
+        }
+        // Navigation's job is done the moment the driver is there -
+        // whether they arrived by the geofence firing or by tapping.
+        // Without this it would keep announcing (and holding the audio
+        // session) while they're out of the truck working the property.
+        .onChange(of: vm.jobStatus) { _, status in
+            if status != .enRoute && nav.isNavigating {
+                nav.stop()
+            }
         }
     }
 }
@@ -410,6 +421,17 @@ extension DriverStopView {
                         .background(Circle().fill(.white).padding(3))
                         .shadow(color: .black.opacity(0.35), radius: 4)
                 }
+
+                // The driver's own position and the live route, shown
+                // only while navigating - this map is a static preview
+                // of the stop the rest of the time.
+                if nav.isNavigating {
+                    UserAnnotation()
+                    if let polyline = nav.route?.polyline {
+                        MapPolyline(polyline)
+                            .stroke(Color("WRThemeGold"), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    }
+                }
             }
             .frame(height: 280)
             .clipShape(RoundedRectangle(cornerRadius: 18))
@@ -417,13 +439,88 @@ extension DriverStopView {
                 RoundedRectangle(cornerRadius: 18)
                     .stroke(Color("WRThemeGold"), lineWidth: 2)
             )
+            .overlay(alignment: .top) {
+                if nav.isNavigating { maneuverBanner }
+            }
         }
+    }
+
+    // Sits over the map while navigating: what the next turn is, how
+    // far to it, and what's left overall. Deliberately large text -
+    // this is read at a glance from a mount, in the dark, moving.
+    private var maneuverBanner: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if nav.isRecalculating {
+                Text("Rerouting…")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.black)
+            } else {
+                if let distance = nav.distanceToManeuver {
+                    Text(formattedDistance(distance))
+                        .font(.title3.bold())
+                        .foregroundColor(.black)
+                }
+                Text(nav.currentInstruction ?? "Starting navigation…")
+                    .font(.headline)
+                    .foregroundColor(.black)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let remaining = nav.remainingDistance, let eta = nav.remainingTime {
+                Text("\(formattedDistance(remaining)) · \(Int(eta / 60)) min to stop")
+                    .font(.caption)
+                    .foregroundColor(.black.opacity(0.7))
+            }
+
+            if let error = nav.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color("WRThemeGold"))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(8)
+    }
+
+    private func formattedDistance(_ metres: CLLocationDistance) -> String {
+        metres >= 1000
+            ? String(format: "%.1f km", metres / 1000)
+            : "\(Int(metres)) m"
     }
 
     // MARK: ACTION BUTTONS
     private var actionButtons: some View {
         VStack(spacing: 16) {
+            // In-app nav is the primary action now; the handoff to
+            // Apple/Google/Waze stays available underneath rather than
+            // being removed - those still win on live traffic, and a
+            // driver with a strong preference shouldn't lose it.
+            if let coordinate = vm.stop.coordinate {
+                Button {
+                    if nav.isNavigating {
+                        nav.stop()
+                    } else {
+                        nav.start(to: coordinate)
+                    }
+                } label: {
+                    Label(
+                        nav.isNavigating ? "End Navigation" : "Start Navigation",
+                        systemImage: nav.isNavigating ? "xmark.circle.fill" : "location.north.circle.fill"
+                    )
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(nav.isNavigating ? Color.red.opacity(0.85) : Color("WRThemeGold"))
+                    .foregroundColor(nav.isNavigating ? .white : .black)
+                    .cornerRadius(12)
+                }
+            }
+
             NavigationButton(coordinate: vm.stop.coordinate)
+
             if let arrivedAt = vm.stop.arrivedAt {
                 TimerPill(arrivedAt: arrivedAt)
             }

@@ -71,6 +71,7 @@
 				Resources/WhyteRoutes.storekit,
 				Services/AddressSearchService.swift,
 				Services/NavigationService.swift,
+				Services/NavigationSession.swift,
 				Services/NotificationService.swift,
 				Services/RealtimeLocationManager.swift,
 				Services/RouteOptimizationService.swift,
