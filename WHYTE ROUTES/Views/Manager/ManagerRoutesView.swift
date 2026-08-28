@@ -1,11 +1,26 @@
 import SwiftUI
 
+// Same dual-.sheet conflict as ManagerDashboardView had (see that
+// file's comment) - two independent .sheet modifiers on one view,
+// both triggerable from the same "Assign Driver" tap. Same fix: one
+// enum-backed sheet state instead of two separate ones.
+private enum ManagerRoutesSheet: Identifiable {
+    case routeDetail(Route)
+    case assignDriver(Route)
+
+    var id: String {
+        switch self {
+        case .routeDetail(let route): return "detail-\(route.id)"
+        case .assignDriver(let route): return "assign-\(route.id)"
+        }
+    }
+}
+
 struct ManagerRoutesView: View {
 
     @StateObject private var vm = RoutesViewModel()
 
-    @State private var selectedRoute: Route?
-    @State private var showAssignSheet = false
+    @State private var activeSheet: ManagerRoutesSheet?
 
     var body: some View {
         ZStack {
@@ -22,10 +37,9 @@ struct ManagerRoutesView: View {
                     VStack(spacing: 20) {
                         ForEach(vm.routes) { route in
                             ManagerRouteCard(route: route) {
-                                selectedRoute = route
+                                activeSheet = .routeDetail(route)
                             } assignDriverAction: {
-                                selectedRoute = route
-                                showAssignSheet = true
+                                activeSheet = .assignDriver(route)
                             }
                         }
                     }
@@ -35,13 +49,13 @@ struct ManagerRoutesView: View {
                 Spacer()
             }
         }
-        .sheet(isPresented: $showAssignSheet) {
-            if let route = selectedRoute {
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .routeDetail(let route):
+                ManagerRouteDetailView(route: route)
+            case .assignDriver(let route):
                 ManagerAssignDriverSheet(route: route)
             }
-        }
-        .sheet(item: $selectedRoute) { route in
-            ManagerRouteDetailView(route: route)
         }
     }
 }

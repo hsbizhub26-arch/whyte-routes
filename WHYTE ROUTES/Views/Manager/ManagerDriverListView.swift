@@ -87,8 +87,14 @@ extension ManagerDriverListView {
 
                 Spacer()
 
+                // Matches the color convention used everywhere else in
+                // the app (on-shift status, notification history):
+                // green means actively working, not "idle." This was
+                // previously inverted - a driver out working a route
+                // showed red (normally the "problem" color) while an
+                // idle driver showed green.
                 Circle()
-                    .fill(driver.activeRoute == nil ? .green : .red)
+                    .fill(driver.activeRoute == nil ? Color.gray : Color.green)
                     .frame(width: 14, height: 14)
             }
 
@@ -103,7 +109,13 @@ extension ManagerDriverListView {
             }
 
             if let coord = driver.coordinate {
-                Text("Location: \(coord.latitude.rounded()), \(coord.longitude.rounded())")
+                // .rounded() previously threw away essentially all
+                // precision here (~100km per whole-number step in
+                // lat/lng) - every driver anywhere in southern Ontario
+                // would round to nearly the same 1-2 values, making
+                // this display meaningless. %.4f keeps ~11m precision,
+                // plenty for "roughly where is this driver."
+                Text("Location: \(coord.latitude, specifier: "%.4f"), \(coord.longitude, specifier: "%.4f")")
                     .foregroundColor(.white.opacity(0.7))
                     .font(.caption)
             }

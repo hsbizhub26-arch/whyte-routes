@@ -1,14 +1,31 @@
 import SwiftUI
 
+// Two separate .sheet modifiers (isPresented + item) previously lived
+// on ManagerDashboardView at once - tapping "Assign Driver" set both
+// trigger conditions in the same action, and SwiftUI can't reliably
+// present two independent sheets from one view. One of them (in
+// practice, route detail instead of the assign-driver picker) won
+// unpredictably. A single enum-backed sheet state removes the
+// ambiguity entirely - there is exactly one sheet identity at a time.
+private enum ManagerDashboardSheet: Identifiable {
+    case routeDetail(Route)
+    case assignDriver(Route)
+
+    var id: String {
+        switch self {
+        case .routeDetail(let route): return "detail-\(route.id)"
+        case .assignDriver(let route): return "assign-\(route.id)"
+        }
+    }
+}
+
 struct ManagerDashboardView: View {
 
     @StateObject private var routesVM = RoutesViewModel()
     @StateObject private var driversVM = DriverViewModel()
 
-    @State private var selectedRoute: Route?
     @State private var selectedDriver: Driver?
-    @State private var showAssignSheet = false
-    @State private var showRouteDetail = false
+    @State private var activeSheet: ManagerDashboardSheet?
 
     var body: some View {
         ZStack {
@@ -29,15 +46,14 @@ struct ManagerDashboardView: View {
 
                 Spacer(minLength: 20)
             }
-            .opacity(showAssignSheet ? 0.2 : 1)
         }
-        .sheet(isPresented: $showAssignSheet) {
-            if let route = selectedRoute {
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .routeDetail(let route):
+                ManagerRouteDetailView(route: route)
+            case .assignDriver(let route):
                 ManagerAssignDriverSheet(route: route)
             }
-        }
-        .sheet(item: $selectedRoute) { route in
-            ManagerRouteDetailView(route: route)
         }
         .navigationBarHidden(true)
     }
@@ -70,10 +86,9 @@ extension ManagerDashboardView {
 
             ForEach(routesVM.routes) { route in
                 ManagerRouteCard(route: route) {
-                    selectedRoute = route
+                    activeSheet = .routeDetail(route)
                 } assignDriverAction: {
-                    selectedRoute = route
-                    showAssignSheet = true
+                    activeSheet = .assignDriver(route)
                 }
             }
         }

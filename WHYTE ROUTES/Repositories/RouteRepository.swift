@@ -140,24 +140,37 @@ final class RouteRepository {
     }
 
     // MARK: - Update Route Status
+    // No completion handler previously meant a permission-denied write
+    // here (e.g. the Firestore-rules gap that let this silently fail
+    // for real driver accounts) would never surface anywhere, not even
+    // a console log - the driver just had no idea their route never
+    // actually got marked completed.
     func updateStatus(routeId: String, status: String) {
         routesRef?
             .document(routeId)
             .updateData([
                 "status": status,
                 "updatedAt": FieldValue.serverTimestamp()
-            ])
+            ]) { error in
+                if let error {
+                    print("❌ Failed updating route status (\(routeId) -> \(status)): \(error.localizedDescription)")
+                }
+            }
     }
 
     // MARK: - Assign Driver
-    func assignDriver(routeId: String, driverId: String) {
-        routesRef?
-            .document(routeId)
-            .updateData([
-                "driverId": driverId,
-                "status": "assigned",
-                "updatedAt": FieldValue.serverTimestamp()
-            ])
+    func assignDriver(routeId: String, driverId: String, completion: ((Bool) -> Void)? = nil) {
+        guard let ref = routesRef?.document(routeId) else { completion?(false); return }
+        ref.updateData([
+            "driverId": driverId,
+            "status": "assigned",
+            "updatedAt": FieldValue.serverTimestamp()
+        ]) { error in
+            if let error {
+                print("❌ Failed assigning driver (\(routeId) -> \(driverId)): \(error.localizedDescription)")
+            }
+            completion?(error == nil)
+        }
     }
 
     // MARK: - Create New Route

@@ -33,8 +33,12 @@ struct ManagerTabView: View {
 
             // Additive, not a role switch - see OwnerTabView for the
             // same pattern. Only appears when opted into via Settings.
+            // embedded: true so this doesn't nest a second tab bar
+            // under this one - a manager who also drives had the same
+            // double-tab-bar problem owners did until this matched
+            // the fix already made on the Owner side.
             if auth.alsoDrives {
-                DriverTabView()
+                DriverTabView(embedded: true)
                     .tabItem {
                         Image(systemName: "steeringwheel")
                         Text("My Route")
