@@ -23,6 +23,18 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // working" - a phone with no signal briefly is normal and doesn't
     // set this.
     @Published var trackingError: String?
+    // One-shot per arrival target - see detectArrival. Reset whenever
+    // setArrivalTarget points at a different stop.
+    @Published var hasArrivedAtTarget = false
+
+    // 40m rather than a tighter radius: a driveway, the truck parked
+    // at the curb, and the GPS fix itself all sit a little apart, and
+    // under-triggering (driver stands there and nothing happens) is a
+    // worse failure than triggering a few metres early.
+    private static let arrivalRadius: CLLocationDistance = 40
+    // Fixes less accurate than this can't meaningfully be inside a
+    // 40m circle, so they're ignored for geofencing.
+    private static let maxUsableAccuracy: CLLocationAccuracy = 50
 
     private var driverId: String = ""
     private var stopLat: Double?
@@ -68,8 +80,17 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // specific stop doesn't restart the location manager - it just
     // tells an already-running tracker what "arrived" means right now.
     func setArrivalTarget(lat: Double?, lng: Double?) {
+        // Only reset the geofence when the target actually moves to a
+        // different place. This is called from onAppear too, so
+        // resetting unconditionally would re-arm the geofence every
+        // time the driver returned to a stop they'd already arrived
+        // at, re-firing auto-arrival on a stop already in progress.
+        let isSameTarget = (lat == stopLat && lng == stopLng)
         self.stopLat = lat
         self.stopLng = lng
+        if !isSameTarget {
+            hasArrivedAtTarget = false
+        }
     }
 
     // MARK: - Location Permission Handler
@@ -100,18 +121,32 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
             longitude: location.coordinate.longitude
         )
 
-        detectArrival(at: location.coordinate)
+        detectArrival(at: location)
     }
 
-    // MARK: - Detect Arrival
-    private func detectArrival(at coord: CLLocationCoordinate2D) {
-        guard let sLat = stopLat, let sLng = stopLng else { return }
+    // MARK: - Detect Arrival (geofence)
+    // Fires once per arrival target: flips to true the first time the
+    // driver comes within arrivalRadius of the current stop, and is
+    // reset by setArrivalTarget when the target changes. Whoever owns
+    // the stop's status (DriverStopViewModel) observes this and makes
+    // the actual transition - this stays a pure location concern and
+    // doesn't reach up into view models or write to Firestore itself.
+    private func detectArrival(at location: CLLocation) {
+        guard !hasArrivedAtTarget,
+              let sLat = stopLat, let sLng = stopLng else { return }
 
-        let driver = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+        // A fix the phone itself reports as poor (or invalid, which
+        // CoreLocation signals with a negative value) must not trip a
+        // geofence - a 200m-accurate fix "inside" a 40m radius means
+        // nothing, and a false auto-arrival would stamp the wrong
+        // arrivedAt and fire the customer's arrival text early.
+        guard location.horizontalAccuracy >= 0,
+              location.horizontalAccuracy <= Self.maxUsableAccuracy else { return }
+
         let stop = CLLocation(latitude: sLat, longitude: sLng)
-
-        if driver.distance(from: stop) < 30 {
-            print("🎯 Driver Arrived at stop!")
+        if location.distance(from: stop) <= Self.arrivalRadius {
+            hasArrivedAtTarget = true
+            print("🎯 Geofence: arrived at stop (accuracy \(Int(location.horizontalAccuracy))m)")
         }
     }
 

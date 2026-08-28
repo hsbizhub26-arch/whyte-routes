@@ -25,12 +25,39 @@ final class DriverStopViewModel: ObservableObject {
     private var eta10Notified = false
     private var etaRefreshTimer: Timer?
 
+    private var cancellables = Set<AnyCancellable>()
+
     init(stop: Stop) {
         self.stop = stop
+        observeGeofenceArrival()
     }
 
     deinit {
         etaRefreshTimer?.invalidate()
+    }
+
+    // Auto-arrival: LocationService flips hasArrivedAtTarget when the
+    // driver physically reaches the stop, and this turns that into the
+    // real status transition. Saves a tap in the cold with gloves on,
+    // and stamps arrivedAt at the moment they actually got there
+    // rather than whenever they got around to pressing the button -
+    // which is what the on-site duration is measured from.
+    //
+    // Only ever promotes enRoute -> arrived. It never touches a stop
+    // that's already arrived/completed, and never skips the en-route
+    // step, so it can't fire a customer's arrival text for a stop the
+    // driver hasn't started driving to (e.g. a stop that happens to be
+    // near where they parked overnight).
+    private func observeGeofenceArrival() {
+        LocationService.shared.$hasArrivedAtTarget
+            .filter { $0 }
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.jobStatus == .enRoute else { return }
+                    await self.markArrived()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     // Recomputes ETA (and re-checks the 15/10 min thresholds) every
