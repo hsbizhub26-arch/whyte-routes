@@ -5,7 +5,28 @@ struct DriverTabView: View {
     @ObservedObject private var session = DriverSession.shared
     @State private var selection: Int = 0
 
+    // True only when hosted as the owner's "My Route" tab inside
+    // OwnerTabView - a real driver signing in directly (RoleRouterView's
+    // .driver case) always gets the full tab bar below, unchanged.
+    // Embedded mode skips wrapping in a second TabView entirely
+    // instead of just hiding tabItems, since a hidden-but-present
+    // TabView still reserves its own bar height beneath the owner's
+    // real tab bar - two navigation layers stacked was the actual
+    // complaint, not just an unwanted label.
+    var embedded: Bool = false
+
     var body: some View {
+        Group {
+            if embedded {
+                DriverDashboardView(embedded: true)
+            } else {
+                fullTabView
+            }
+        }
+        .onAppear { setupDriverOnLogin() }
+    }
+
+    private var fullTabView: some View {
         TabView(selection: $selection) {
 
             // DASHBOARD
@@ -24,14 +45,6 @@ struct DriverTabView: View {
                 }
                 .tag(1)
 
-            // LIVE MAP
-            DriverMapView()
-                .tabItem {
-                    Image(systemName: "map.fill")
-                    Text("Live Map")
-                }
-                .tag(2)
-
             // PROFILE
             DriverProfileView()
                 .tabItem {
@@ -43,7 +56,6 @@ struct DriverTabView: View {
         .accentColor(Color("WRThemeGold"))
         .toolbarBackground(Color("WRBlack"), for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
-        .onAppear { setupDriverOnLogin() }
     }
 }
 

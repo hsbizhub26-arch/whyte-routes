@@ -29,10 +29,23 @@ struct OwnerTabView: View {
                         Label("Assign", systemImage: "square.and.pencil")
                     }
 
-                LiveFleetMapView()
-                    .tabItem {
-                        Label("Fleet", systemImage: "map")
-                    }
+                // Owner-operators (one person, one truck) dispatch AND
+                // drive - this tab is additive, not a role switch, and
+                // only appears when they've opted in via Settings.
+                // Reuses the real driver experience (map-first
+                // dashboard, embedded: true so it doesn't nest a
+                // second tab bar under this one - see DriverTabView)
+                // rather than duplicating it. Placed here, in the
+                // first five tabs, on purpose: iOS auto-collapses
+                // anything past five into "More", and an owner who
+                // drives checks this one daily - Reports/Team/Settings
+                // don't need to be as immediately reachable.
+                if auth.alsoDrives {
+                    DriverTabView(embedded: true)
+                        .tabItem {
+                            Label("My Route", systemImage: "steeringwheel")
+                        }
+                }
 
                 DriverReportsView()
                     .tabItem {
@@ -43,18 +56,6 @@ struct OwnerTabView: View {
                     .tabItem {
                         Label("Team", systemImage: "person.badge.plus")
                     }
-
-                // Owner-operators (one person, one truck) dispatch AND
-                // drive - this tab is additive, not a role switch, and
-                // only appears when they've opted in via Settings.
-                // Reuses the real driver experience wholesale rather
-                // than duplicating it.
-                if auth.alsoDrives {
-                    DriverTabView()
-                        .tabItem {
-                            Label("My Route", systemImage: "steeringwheel")
-                        }
-                }
 
                 SettingsView()
                     .tabItem {

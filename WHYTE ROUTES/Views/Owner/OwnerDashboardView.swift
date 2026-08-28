@@ -25,41 +25,13 @@ struct OwnerDashboardView: View {
 
     var body: some View {
         ZStack {
-            WRTheme.gradient.ignoresSafeArea()
-
-            ScrollView {
-                VStack(spacing: 20) {
-
-                    header
-
-                    HStack(spacing: 14) {
-                        statCard(
-                            icon: "person.2.fill",
-                            tint: WRTheme.gold,
-                            value: "\(driverVM.drivers.count)",
-                            title: "Drivers"
-                        )
-                        statCard(
-                            icon: "point.topleft.down.curvedto.point.bottomright.up.fill",
-                            tint: WRTheme.routeTeal,
-                            value: "\(routeService.routes.count)",
-                            title: "Active Routes"
-                        )
-                    }
-                    .padding(.horizontal)
-
-                    driverReportsWidget
-
-                    if let limit = access.customerLimit {
-                        customerUsageWidget(limit: limit)
-                    }
-
-                    Spacer(minLength: 16)
-                }
-                .padding(.top, 4)
+            LiveFleetMapView(driverVM: driverVM)
+            DraggableBottomSheet(collapsedHeight: 150) {
+                widgetSheet
             }
         }
         .onAppear {
+            driverVM.startLiveUpdates()
             routeService.loadRoutesOnce()
             CustomerRepository().fetchCustomers { result in
                 if case .success(let list) = result {
@@ -75,6 +47,39 @@ struct OwnerDashboardView: View {
                 featureName: "More Customers",
                 requiredTier: SubscriptionTier(rawValue: access.tier.rawValue + 1) ?? .enterprise
             )
+        }
+    }
+
+    var widgetSheet: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                header
+
+                HStack(spacing: 14) {
+                    statCard(
+                        icon: "person.2.fill",
+                        tint: WRTheme.gold,
+                        value: "\(driverVM.drivers.count)",
+                        title: "Drivers"
+                    )
+                    statCard(
+                        icon: "point.topleft.down.curvedto.point.bottomright.up.fill",
+                        tint: WRTheme.routeTeal,
+                        value: "\(routeService.routes.count)",
+                        title: "Active Routes"
+                    )
+                }
+                .padding(.horizontal)
+
+                driverReportsWidget
+
+                if let limit = access.customerLimit {
+                    customerUsageWidget(limit: limit)
+                }
+
+                Spacer(minLength: 16)
+            }
+            .padding(.top, 4)
         }
     }
 }

@@ -31,7 +31,11 @@ private final class OwnerLocationAuthorizer: NSObject, CLLocationManagerDelegate
 // focus their route alone, tap again (or "All") to see the whole fleet.
 struct LiveFleetMapView: View {
 
-    @StateObject private var driverVM = DriverViewModel()
+    // Passed in by the caller (OwnerDashboardView, which is now the
+    // only place this is shown) rather than owned here, so the map and
+    // the stat widgets around it share one live driver listener
+    // instead of running two independent ones for the same data.
+    @ObservedObject var driverVM: DriverViewModel
     @ObservedObject private var access = FeatureAccessManager.shared
 
     @State private var cameraPosition: MapCameraPosition = .region(
@@ -49,9 +53,11 @@ struct LiveFleetMapView: View {
     @State private var routesByDriver: [String: Route] = [:]
     @State private var subscribedDriverIds: Set<String> = []
     @State private var selectedDriverId: String?
+    @State private var selectedDriverShift: Shift?
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
+    private let driverRepo: DriverRepository = FirestoreDriverRepository()
     private let locationAuthorizer = OwnerLocationAuthorizer()
 
     var body: some View {
@@ -75,6 +81,9 @@ struct LiveFleetMapView: View {
                     if selectedDriverId == nil || selectedDriverId == driver.id {
                         Annotation(driver.name, coordinate: driver.coordinate!) {
                             driverPin(driver)
+                                .onTapGesture {
+                                    selectDriver(driver.id)
+                                }
                         }
 
                         let stops = stopsByDriver[driver.id] ?? []
@@ -128,6 +137,14 @@ struct LiveFleetMapView: View {
             }
 
             driverLegend
+
+            if let selectedDriverId, let driver = visibleDrivers.first(where: { $0.id == selectedDriverId }) {
+                driverDetailCard(driver: driver)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: selectedDriverId)
+            }
         }
         .onAppear {
             locationAuthorizer.requestIfNeeded()
@@ -221,6 +238,7 @@ struct LiveFleetMapView: View {
             HStack(spacing: 8) {
                 legendChip(title: "All", color: .white, isSelected: selectedDriverId == nil) {
                     selectedDriverId = nil
+                    selectedDriverShift = nil
                 }
 
                 ForEach(visibleDrivers) { driver in
@@ -230,7 +248,7 @@ struct LiveFleetMapView: View {
                         isSelected: selectedDriverId == driver.id,
                         stopCount: stopsByDriver[driver.id]?.count
                     ) {
-                        selectedDriverId = (selectedDriverId == driver.id) ? nil : driver.id
+                        selectDriver(driver.id)
                     }
                 }
             }
@@ -266,6 +284,93 @@ struct LiveFleetMapView: View {
             )
             .clipShape(Capsule())
         }
+    }
+
+    // MARK: - Driver selection (pin tap or legend chip - same action)
+    private func selectDriver(_ id: String) {
+        let wasSelected = selectedDriverId == id
+        selectedDriverId = wasSelected ? nil : id
+        selectedDriverShift = nil
+        guard !wasSelected else { return }
+        driverRepo.fetchActiveShift(driverId: id) { shift in
+            Task { @MainActor in
+                // Only apply if the owner hasn't already tapped a
+                // different driver while this fetch was in flight.
+                if selectedDriverId == id { selectedDriverShift = shift }
+            }
+        }
+    }
+
+    // MARK: - Driver detail card
+    // What "select a driver, view timing" actually means for an
+    // owner - not just a colored dot, but the same at-a-glance status
+    // (shift length, current stop, time at that property) the driver
+    // themselves sees on their own dashboard.
+    private func driverDetailCard(driver: Driver) -> some View {
+        let stops = stopsByDriver[driver.id] ?? []
+        let currentStop = stops.first { !$0.isCompleted }
+        let stopPosition = currentStop.flatMap { stop in stops.firstIndex(where: { $0.id == stop.id }).map { ($0 + 1, stops.count) } }
+        let isWorking = selectedDriverShift?.isActive ?? false
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Circle().fill(driver.color).frame(width: 10, height: 10)
+                Text(driver.name)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                Text(isWorking ? "🟢 Working" : "⚪️ Off shift")
+                    .font(.caption.bold())
+                    .foregroundColor(.white.opacity(0.8))
+            }
+
+            if let route = routesByDriver[driver.id] {
+                Text(route.name)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.7))
+            }
+
+            if let currentStop, let stopPosition {
+                Text("Stop \(stopPosition.0) of \(stopPosition.1)")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+                Text(currentStop.address)
+                    .font(.subheadline)
+                    .foregroundColor(.white)
+            }
+
+            HStack(spacing: 20) {
+                if let shift = selectedDriverShift, shift.isActive {
+                    detailStat(label: "Shift", value: elapsedText(shift.durationSeconds))
+                }
+                if let currentStop, currentStop.status == JobStatus.arrived.rawValue, let arrivedAt = currentStop.arrivedAt {
+                    detailStat(label: "At Property", value: elapsedText(Int(Date().timeIntervalSince(arrivedAt))))
+                }
+            }
+        }
+        .padding()
+        .background(Color.black.opacity(0.85))
+        .cornerRadius(16)
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(driver.color.opacity(0.6), lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 10)
+        .padding(.horizontal, 16)
+    }
+
+    private func detailStat(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.5))
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(Color("WRThemeGold"))
+        }
+    }
+
+    private func elapsedText(_ seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
 
     // MARK: - Route/stop loading

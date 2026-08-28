@@ -72,51 +72,88 @@ struct DriverMapView: View {
             topButtons
             stopSheet
 
-            if vm.driverCoordinate == nil {
-                waitingForGPSBanner
+            if let trackingError = LocationService.shared.trackingError {
+                gpsBanner(text: trackingError, color: .red)
+            } else if vm.driverCoordinate == nil {
+                gpsBanner(
+                    text: DriverSession.shared.activeShift == nil
+                        ? "Start your shift to begin live tracking."
+                        : "Waiting for GPS…",
+                    color: Color("WRThemeGold")
+                )
             }
         }
     }
 
-    // Shown until the first GPS fix arrives - true before a shift has
-    // started (tracking is tied to the shift lifecycle, not this
-    // screen) and briefly after, until CoreLocation reports a location.
-    private var waitingForGPSBanner: some View {
+    // Shown either while waiting for the first GPS fix (normal, gold)
+    // or when tracking has genuinely broken - permission revoked, a
+    // real CLError - partway through a shift (a real problem, red, so
+    // it reads as different from "just starting up").
+    private func gpsBanner(text: String, color: Color) -> some View {
         VStack {
             Spacer()
-            Text(DriverSession.shared.activeShift == nil
-                 ? "Start your shift to begin live tracking."
-                 : "Waiting for GPS…")
+            Text(text)
                 .font(.footnote.bold())
                 .foregroundColor(.black)
+                .multilineTextAlignment(.center)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(Color("WRThemeGold"))
+                .background(color)
                 .clipShape(Capsule())
                 .shadow(radius: 6)
+                .padding(.horizontal, 24)
                 .padding(.bottom, 40)
         }
     }
 
+    // Route order, not whatever order Firestore happened to return -
+    // this is what the pin numbers and the polyline are both drawn
+    // from, so "stop 4" on the map is the same stop 4 the driver sees
+    // in the Route list.
+    private var orderedStops: [Stop] {
+        vm.stops.sorted { $0.order < $1.order }
+    }
+
     // MARK: - MAP LAYER
+    // Numbered pins + a connecting line - the same inRoute-style
+    // "see your whole run at a glance" treatment LiveFleetMapView
+    // already gives the owner's fleet view, now on the driver's own
+    // map too instead of unlabeled dots.
     private var mapLayer: some View {
         Map(position: $vm.cameraPosition) {
             UserAnnotation()
 
-            ForEach(vm.stops.filter { $0.coordinate != nil }) { stop in
-                Annotation("", coordinate: stop.coordinate!) {
-                    VStack(spacing: 2) {
-                        Circle()
-                            .fill(stop.isCompleted ? .green : Color("WRThemeGold"))
-                            .frame(width: 18, height: 18)
-                            .shadow(color: Color("WRThemeGold").opacity(0.4), radius: 6)
+            let routeCoordinates = ([vm.driverCoordinate] + orderedStops.compactMap { $0.coordinate }).compactMap { $0 }
+            if routeCoordinates.count > 1 {
+                MapPolyline(coordinates: routeCoordinates)
+                    .stroke(Color("WRThemeGold"), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+            }
 
-                        Text(stop.customerName ?? "")
-                            .font(.caption)
-                            .foregroundColor(.white)
-                    }
-                    .onTapGesture {
-                        vm.selectedStop = stop
+            ForEach(Array(orderedStops.enumerated()), id: \.element.id) { index, stop in
+                if let coordinate = stop.coordinate {
+                    Annotation("", coordinate: coordinate) {
+                        VStack(spacing: 2) {
+                            Text("\(index + 1)")
+                                .font(.caption.bold())
+                                .foregroundColor(.white)
+                                .frame(width: 26, height: 26)
+                                .background(stop.isCompleted ? Color.green : Color("WRThemeGold"))
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                                .opacity(stop.isCompleted ? 0.55 : 1)
+                                .shadow(color: .black.opacity(0.35), radius: 4)
+
+                            Text(stop.customerName ?? "")
+                                .font(.caption2.bold())
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.black.opacity(0.7))
+                                .clipShape(Capsule())
+                        }
+                        .onTapGesture {
+                            vm.selectedStop = stop
+                        }
                     }
                 }
             }
