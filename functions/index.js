@@ -447,6 +447,24 @@ exports.sendCustomerNotification = onCall(
         notifyEta15 = customerData.notifyEta15 !== false;
         notifyEta10 = customerData.notifyEta10 !== false;
         notifyCompleted = customerData.notifyCompleted !== false;
+      } else {
+        // THE CUSTOMER RECORD IS GONE. STOP.
+        //
+        // The defaults above are seeded from the copy cached on the
+        // stop, which exists so that legacy stops with no linked
+        // Customer at all still work. But this stop DOES name a
+        // customer - the record has just been deleted - and without
+        // this branch the deletion silently fell through to that
+        // cached copy and kept texting the phone number frozen there,
+        // with the cached customerOptedIn still true.
+        //
+        // Which means deleting a customer did not stop contacting
+        // them. That is the one thing deleting a customer has to do:
+        // it is how an owner acts on "take me off your list", and
+        // getting it wrong is a consent failure, not a bug in test
+        // data. A missing record is the strongest possible signal not
+        // to send, so it is treated as exactly that.
+        return { deliveryStatus: "customer_deleted", notificationId: null };
       }
     }
 
@@ -761,6 +779,11 @@ exports.sendTrackingLink = onCall(
         phone = customerData.phone;
         optedIn = !!customerData.notificationsOptIn;
         smsEnabled = customerData.smsEnabled !== false;
+      } else {
+        // Same rule as sendCustomerNotification: a deleted customer
+        // record means do not contact, not "fall back to the phone
+        // number cached on the stop."
+        return { deliveryStatus: "customer_deleted" };
       }
     }
 
