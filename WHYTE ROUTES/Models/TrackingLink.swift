@@ -7,7 +7,14 @@ struct TrackingLink: Identifiable {
     var companyId: String
     var customerName: String
     var address: String
-    var driverId: String
+    /// Optional and NO LONGER PUBLISHED. The tracking-link document is
+    /// world-readable to whoever holds the link, and an adversarial
+    /// review flagged this as a stable per-employee identifier being
+    /// exposed unauthenticated for no functional reason - nothing in
+    /// the customer page reads it, and stop/link association is done
+    /// by stopId. Kept decodable so links written before this change
+    /// still parse.
+    var driverId: String?
     var stopId: String
     var active: Bool
     var createdAt: Date?
@@ -24,10 +31,10 @@ extension TrackingLink {
     init?(from dict: [String: Any], id: String, companyId: String) {
         guard let customerName = dict["customerName"] as? String,
               let address = dict["address"] as? String,
-              let driverId = dict["driverId"] as? String,
               let stopId = dict["stopId"] as? String else {
             return nil
         }
+        let driverId = dict["driverId"] as? String
 
         self.id = id
         self.companyId = companyId
@@ -51,7 +58,6 @@ extension TrackingLink {
         var d: [String: Any] = [
             "customerName": customerName,
             "address": address,
-            "driverId": driverId,
             "stopId": stopId,
             "active": active
         ]

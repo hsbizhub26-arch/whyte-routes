@@ -3,24 +3,32 @@ import CoreLocation
 import MapKit
 import Combine
 
-// Publishes the driver's live position to every customer who holds a
-// tracking link for the route currently being driven.
+// Publishes route progress to every customer holding a tracking link
+// for the route being driven.
 //
-// PRIVACY IS THE WHOLE DESIGN HERE. Each customer's tracking page is
-// world-readable by anyone holding its (unguessable) link, so what
-// gets written to it is effectively public. Every customer therefore
-// gets their OWN location document containing only:
+// PRIVACY IS THE WHOLE DESIGN HERE. Each customer's location document
+// is world-readable to whoever holds their (unguessable) link, so
+// anything written to it is effectively public. What each customer
+// gets therefore depends entirely on whether the truck is currently
+// theirs:
 //
-//   - where the truck is, and which way it's pointing
-//   - how many stops are still ahead of THEM (a bare number)
-//   - an ETA, and only when they're actually next
+//   WAITING (someone else is being served):
+//     - their queue position, and nothing else. No coordinates.
+//   CURRENT (the driver is on the way to them):
+//     - live coordinates, heading and a real ETA.
+//
+// That split is not incidental. An earlier version published
+// coordinates to everyone and relied on the queue position being "just
+// a number" - which an adversarial review broke: the number CHANGING
+// is itself a signal. A customer five stops back watching the count
+// drop knows the truck's coordinates at that instant are the home of
+// whoever was just finished, and can enumerate every address ahead of
+// them that way. Withholding position until a customer is next means
+// the only property their map can ever reveal is their own.
 //
 // The queue position is computed here, in the app, which legitimately
-// holds the whole route - and only the resulting integer is published.
-// A customer's page never reads the stops collection, so it can't
-// learn another customer's name, address, phone or coordinates. That
-// is the difference between "2 stops ahead of you" and leaking two
-// strangers' home addresses.
+// holds the whole route; only the resulting integer is published, and
+// the page never reads the stops collection.
 @MainActor
 final class TrackingBroadcastService {
 
@@ -109,12 +117,29 @@ final class TrackingBroadcastService {
             guard let link = linksByStopId[stop.id] else { continue }
 
             let isCurrent = (index == 0)
+
+            // COORDINATES ONLY FOR THE CUSTOMER BEING DRIVEN TO.
+            //
+            // An adversarial review caught this: publishing only a
+            // COUNT to customers further back is not actually private,
+            // because the count CHANGING is itself a signal. Someone
+            // five stops down the route watching "4 stops before
+            // yours" drop to 3 knows the truck's coordinates at that
+            // instant are the home address of whoever was just
+            // finished. Repeat for each decrement and they can
+            // enumerate every address ahead of them, reverse-geocode
+            // it, and timestamp each service.
+            //
+            // So a waiting customer gets their queue position and
+            // nothing else - no coordinates, no heading. The map only
+            // starts moving once the truck is genuinely theirs, at
+            // which point the only address it can reveal is their own.
             linkRepo.publishLocation(
                 companyId: companyId,
                 linkId: link.id,
-                latitude: coordinate.latitude,
-                longitude: coordinate.longitude,
-                heading: LocationService.shared.currentHeading,
+                latitude: isCurrent ? coordinate.latitude : nil,
+                longitude: isCurrent ? coordinate.longitude : nil,
+                heading: isCurrent ? LocationService.shared.currentHeading : nil,
                 stopsBefore: index,
                 isCurrentDestination: isCurrent,
                 // Only the customer actually being driven to gets an

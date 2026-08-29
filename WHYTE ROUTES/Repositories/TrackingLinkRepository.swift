@@ -36,7 +36,6 @@ final class TrackingLinkRepository {
         var data: [String: Any] = [
             "customerName": customerName,
             "address": address,
-            "driverId": driverId,
             "stopId": stopId,
             "active": true,
             "createdAt": FieldValue.serverTimestamp()
@@ -78,26 +77,46 @@ final class TrackingLinkRepository {
     func publishLocation(
         companyId: String,
         linkId: String,
-        latitude: Double,
-        longitude: Double,
+        latitude: Double?,
+        longitude: Double?,
         heading: Double? = nil,
         stopsBefore: Int? = nil,
         isCurrentDestination: Bool? = nil,
         etaMinutes: Int?
     ) {
         var data: [String: Any] = [
-            "latitude": latitude,
-            "longitude": longitude,
             "updatedAt": FieldValue.serverTimestamp()
         ]
-        if let heading { data["heading"] = heading }
+
+        // Coordinates are ACTIVELY REMOVED, not merely omitted, for a
+        // customer who isn't the current destination. These writes use
+        // merge, so leaving them out would preserve whatever was there
+        // before - the exact stale position that would let a waiting
+        // customer read the truck's location at another property.
+        if let latitude, let longitude {
+            data["latitude"] = latitude
+            data["longitude"] = longitude
+        } else {
+            data["latitude"] = FieldValue.delete()
+            data["longitude"] = FieldValue.delete()
+        }
+
+        if let heading {
+            data["heading"] = heading
+        } else {
+            data["heading"] = FieldValue.delete()
+        }
         // A COUNT of the stops ahead of this customer - never anything
         // identifying about them. This is what lets the page say
         // "2 stops before yours" without the customer's page ever
         // being able to read another customer's record.
         if let stopsBefore { data["stopsBefore"] = stopsBefore }
         if let isCurrentDestination { data["isCurrentDestination"] = isCurrentDestination }
-        if let etaMinutes { data["etaMinutes"] = etaMinutes }
+        if let etaMinutes {
+            data["etaMinutes"] = etaMinutes
+        } else {
+            data["etaMinutes"] = FieldValue.delete()
+        }
 
         trackingLinksRef(companyId: companyId)
             .document(linkId)

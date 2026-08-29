@@ -217,11 +217,20 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   const d = snap.data();
   ensureMap();
 
+  // A waiting customer's document carries no coordinates at all - the
+  // driver's position is only published once they are the current
+  // destination, so that the truck's location can never reveal the
+  // property it is parked at while serving someone else. Drop any
+  // marker if coordinates go away.
   if (typeof d.latitude === "number" && typeof d.longitude === "number") {
     const pos = [d.latitude, d.longitude];
     if (!driverMarker) driverMarker = L.marker(pos, { icon: goldIcon() }).addTo(map);
     else driverMarker.setLatLng(pos);
     fitIfPossible();
+  } else if (driverMarker) {
+    map.removeLayer(driverMarker);
+    driverMarker = null;
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
   }
 
   // Queue position drives the whole status. `stopsBefore` is a bare
@@ -236,6 +245,8 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     $("queueBadge").textContent = stopsBefore;
     $("queueText").textContent =
       stopsBefore === 1 ? "stop before yours" : "stops before yours";
+    $("stale").hidden = false;
+    $("stale").textContent = "Your driver's live location appears once they're on the way to you.";
   } else {
     $("queue").hidden = true;
     $("statusText").textContent = isNext ? "On the way to you" : "On the way";
@@ -267,7 +278,7 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   // A position that stopped updating is worse than no position - it
   // would quietly show a driver frozen mid-street as if it were live.
   const updated = d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : null;
-  if (updated) {
+  if (updated && driverMarker) {
     const ageMin = Math.round((Date.now() - updated) / 60000);
     if (ageMin >= 5) {
       $("stale").hidden = false;

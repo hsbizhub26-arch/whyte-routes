@@ -763,9 +763,13 @@ exports.sendTrackingLink = onCall(
       await doc.set({
         customerName,
         address: stopData.address || "",
-        driverId: stopData.driverId || "",
         stopId,
-        routeId,
+        // driverId and routeId are deliberately NOT written here.
+        // This document is world-readable to anyone holding the link,
+        // and an adversarial review flagged both as internal
+        // identifiers published unauthenticated for no functional
+        // reason - the page never reads them, and the app associates
+        // links to stops by stopId alone.
         active: true,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         ...(typeof stopData.latitude === "number" ? { stopLatitude: stopData.latitude } : {}),

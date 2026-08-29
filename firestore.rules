@@ -70,6 +70,22 @@ service cloud.firestore {
       );
     }
 
+    // A tracking link is publicly readable only while the job it was
+    // created for is genuinely live, plus a two-hour grace window after
+    // completion so the customer can still see "Service complete".
+    // Bounded from creation as well, so a link on a job that is never
+    // formally closed out doesn't stay readable forever.
+    //
+    // Reads the PARENT link document by path rather than `resource`,
+    // so the same condition works for the location subcollection.
+    function isLiveTrackingLink(companyId, linkId) {
+      let link = get(/databases/$(database)/documents/companies/$(companyId)/trackingLinks/$(linkId)).data;
+      return (link.active == true
+               && request.time < link.createdAt + duration.value(24, 'h'))
+          || (link.completedAt != null
+               && request.time < link.completedAt + duration.value(2, 'h'));
+    }
+
     function canAccessCompany(companyId) {
       return isPlatformAdmin() || isCompanyMember(companyId);
     }
@@ -384,18 +400,30 @@ service cloud.firestore {
       // taps their texted link needs to read this one specific
       // document with no login. `get` by known ID is public; `list`
       // is not. Writes require company staff.
+      //
+      // The read is NOT unconditional. It previously was, which made
+      // revocation cosmetic: closing a job set active:false, but the
+      // rule still allowed the read, so the "Service complete" state
+      // existed only in page JavaScript that an attacker simply
+      // wouldn't run. A forwarded or screenshotted link was in effect
+      // a permanent bearer credential to a named customer's address
+      // and coordinates. Now the rule itself enforces the lifecycle:
+      // readable while genuinely active, plus a short grace window
+      // after completion so the customer's page can show that their
+      // service finished before the link goes dark for good.
       match /trackingLinks/{linkId} {
-        allow get: if true;
+        allow get: if isLiveTrackingLink(companyId, linkId);
         allow list: if isCompanyMember(companyId);
         allow create, update: if isCompanyMember(companyId);
         allow delete: if isCompanyStaff(companyId);
 
         // Public-safe live position for the customer tracking view -
-        // a location only, never the driver's name/phone. Staff/system
-        // write it; anyone with the link can read it. (App-side: this
-        // path isn't populated yet - see the TODO in CustomerTrackingView.swift.)
+        // a location only, never the driver's name/phone/id. The
+        // driver's app deletes this document when the stop completes;
+        // gating it on the parent link as well means a leftover
+        // document can't outlive the job it belonged to.
         match /location/{locId} {
-          allow get: if true;
+          allow get: if isLiveTrackingLink(companyId, linkId);
           allow write: if isCompanyMember(companyId);
         }
       }
