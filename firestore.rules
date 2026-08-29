@@ -378,7 +378,14 @@ service cloud.firestore {
                       || (isCompanyMember(companyId) && request.auth.uid == driverId);
         allow update: if isCompanyStaff(companyId)
                       || (isCompanyMember(companyId) && request.auth.uid == driverId);
-        allow delete: if isCompanyStaff(companyId);
+        // Staff can remove anyone; a driver can remove ONLY themselves,
+        // which is what account deletion needs (Guideline 5.1.1(v)).
+        // Without the second branch, deleting your account left behind
+        // the driver record holding your name, phone, last known GPS
+        // position and licence-photo path - and no signed-in identity
+        // that could ever remove it afterwards.
+        allow delete: if isCompanyStaff(companyId)
+                      || (isCompanyMember(companyId) && request.auth.uid == driverId);
 
         // ── companies/{companyId}/drivers/{driverId}/shifts/{shiftId} ─
         // Clock-in/clock-out records. A driver logs only their own

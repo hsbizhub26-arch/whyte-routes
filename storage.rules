@@ -48,9 +48,15 @@ service firebase.storage {
     match /companies/{companyId}/photos/{driverId}/{stopId}/{fileName} {
       allow read: if isSignedIn() && myCompanyId() == companyId
         && (request.auth.uid == driverId || isCompanyStaff(companyId));
-      allow write: if isSignedIn() && myCompanyId() == companyId
+      // create/update and delete are split because request.resource is
+      // null on a delete - folding isReasonableImage() into a blanket
+      // `write` would make every deletion fail its size check, which
+      // account deletion depends on.
+      allow create, update: if isSignedIn() && myCompanyId() == companyId
         && request.auth.uid == driverId
         && isReasonableImage();
+      allow delete: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
     }
 
     // Driver's license photo: companies/{companyId}/licenses/{driverId}/{fileName}
@@ -63,9 +69,15 @@ service firebase.storage {
     match /companies/{companyId}/licenses/{driverId}/{fileName} {
       allow read: if isSignedIn() && myCompanyId() == companyId
         && (request.auth.uid == driverId || isCompanyStaff(companyId));
-      allow write: if isSignedIn() && myCompanyId() == companyId
+      // create/update and delete are split because request.resource is
+      // null on a delete - folding isReasonableImage() into a blanket
+      // `write` would make every deletion fail its size check, which
+      // account deletion depends on.
+      allow create, update: if isSignedIn() && myCompanyId() == companyId
         && request.auth.uid == driverId
         && isReasonableImage();
+      allow delete: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
     }
 
     match /{allPaths=**} {

@@ -101,6 +101,23 @@ struct DriverProfileView: View {
                 }
                 .padding(.horizontal)
 
+                // MARK: - Delete Account
+                // Required by App Store Guideline 5.1.1(v) for any app
+                // that creates accounts, and this is the only screen a
+                // driver has that could host it - their tabs are
+                // Dashboard / Route / Profile, with no Settings. Until
+                // this existed, deletion lived solely in SettingsView,
+                // which only owners and managers ever see.
+                DeleteAccountButton(standalone: true)
+                    .padding(.horizontal)
+                    .padding(.top, 4)
+
+                Text("Deleting your account removes your driver profile, your licence photo, and your login. It cannot be undone.")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
                 Spacer(minLength: 30)
             }
             .padding()

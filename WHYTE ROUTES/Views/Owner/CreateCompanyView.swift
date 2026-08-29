@@ -94,6 +94,16 @@ struct CreateCompanyView: View {
                     }
                     .foregroundColor(.white.opacity(0.6))
                     .frame(maxWidth: .infinity)
+
+                    // This screen is where a brand-new signup lands, and
+                    // where it STAYS until a company is created - so for
+                    // anyone who signs up and changes their mind, it is
+                    // the whole app. Offering only Sign Out left them
+                    // with an account they could not remove, which is
+                    // exactly the case Guideline 5.1.1(v) covers. It is
+                    // also the first screen an App Store reviewer sees.
+                    DeleteAccountButton(standalone: true)
+                        .padding(.top, 8)
                 }
                 .padding()
             }
