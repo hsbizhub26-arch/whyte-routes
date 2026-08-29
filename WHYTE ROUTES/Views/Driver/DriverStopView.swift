@@ -260,6 +260,12 @@ struct DriverStopView: View {
     @ObservedObject private var access = FeatureAccessManager.shared
     @State private var showPhotoCapture = false
     @State private var proofPhotoURL: String?
+    /// The map was `initialPosition:`, which means exactly what it says
+    /// - it framed the stop once and then never moved again, so during
+    /// navigation the driver watched their own dot walk off the edge.
+    /// Bound now, so it can follow while navigating and snap back to
+    /// the stop when navigation ends.
+    @State private var navCamera: MapCameraPosition = .automatic
 
     init(stop: Stop) {
         _vm = StateObject(wrappedValue: DriverStopViewModel(stop: stop))
@@ -362,6 +368,27 @@ struct DriverStopView: View {
                 nav.stop()
             }
         }
+        // Follow the truck, rotated the way it's actually pointing,
+        // while navigating - a north-up map is close to useless at a
+        // junction in the dark. Back to framing the stop when
+        // navigation ends.
+        .onChange(of: nav.isNavigating) { _, navigating in
+            withAnimation {
+                navCamera = navigating
+                    ? .userLocation(followsHeading: true, fallback: .automatic)
+                    : stopRegion()
+            }
+        }
+        .onAppear { navCamera = stopRegion() }
+    }
+
+    /// The static framing of this stop, used before and after
+    /// navigation.
+    private func stopRegion() -> MapCameraPosition {
+        guard let c = vm.stop.coordinate else { return .automatic }
+        return .region(
+            MKCoordinateRegion(center: c, span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01))
+        )
     }
 }
 
@@ -427,12 +454,7 @@ extension DriverStopView {
     @ViewBuilder
     private var mapSection: some View {
         if let coordinate = vm.stop.coordinate {
-            Map(initialPosition: .region(
-                MKCoordinateRegion(
-                    center: coordinate,
-                    span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)
-                )
-            )) {
+            Map(position: $navCamera) {
                 // Custom gold pin, not MapKit's stock red marker - the
                 // stock one is the one place left that broke the
                 // black/gold branding every other pin in the app
@@ -472,7 +494,19 @@ extension DriverStopView {
     // far to it, and what's left overall. Deliberately large text -
     // this is read at a glance from a mount, in the dark, moving.
     private var maneuverBanner: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .top, spacing: 12) {
+            // A glanceable arrow. Reading a sentence off a phone mount
+            // at 3am with snow coming down is not the same task as
+            // reading one on a desk - the shape registers before the
+            // words do.
+            if !nav.isRecalculating {
+                Image(systemName: maneuverSymbol(nav.currentInstruction))
+                    .font(.title.bold())
+                    .foregroundColor(.black)
+                    .frame(width: 38)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
             if nav.isRecalculating {
                 Text("Rerouting…")
                     .font(.subheadline.bold())
@@ -500,6 +534,7 @@ extension DriverStopView {
                     .font(.caption)
                     .foregroundColor(.red)
             }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -512,6 +547,28 @@ extension DriverStopView {
         metres >= 1000
             ? String(format: "%.1f km", metres / 1000)
             : "\(Int(metres)) m"
+    }
+
+    /// Maps MapKit's instruction text onto an SF Symbol.
+    ///
+    /// MapKit does not hand back a maneuver TYPE on MKRoute.Step - only
+    /// the sentence - so matching on the text is the available option.
+    /// Order matters: "slight left" has to be tested before "left", or
+    /// every slight turn renders as a hard one.
+    private func maneuverSymbol(_ instruction: String?) -> String {
+        let s = (instruction ?? "").lowercased()
+        if s.contains("u-turn") || s.contains("u turn") { return "arrow.uturn.up" }
+        if s.contains("roundabout") || s.contains("rotary") { return "arrow.triangle.2.circlepath" }
+        if s.contains("slight left") { return "arrow.up.left" }
+        if s.contains("slight right") { return "arrow.up.right" }
+        if s.contains("sharp left") { return "arrow.turn.up.left" }
+        if s.contains("sharp right") { return "arrow.turn.up.right" }
+        if s.contains("exit") { return "arrow.up.right" }
+        if s.contains("merge") { return "arrow.merge" }
+        if s.contains("arriv") || s.contains("destination") { return "mappin.circle.fill" }
+        if s.contains("left") { return "arrow.turn.up.left" }
+        if s.contains("right") { return "arrow.turn.up.right" }
+        return "arrow.up"
     }
 
     // MARK: ACTION BUTTONS
