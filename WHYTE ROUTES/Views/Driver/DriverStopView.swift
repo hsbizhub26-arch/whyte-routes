@@ -143,6 +143,12 @@ final class DriverStopViewModel: ObservableObject {
         routeService.updateStop(routeId: route.id, stop: stop)
         await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .completed)
 
+        // This customer's service is done, so their live tracking ends
+        // here: the position document is deleted and the link marked
+        // complete. Without this they could keep watching the truck
+        // drive on to other people's homes for the rest of the shift.
+        TrackingLinkRepository().closeOut(stopId: stop.id)
+
         // Real bug found during a full-workday audit: nothing anywhere
         // ever marked a Route itself "completed" once every stop on it
         // was done - RouteRepository.updateStatus existed but had zero

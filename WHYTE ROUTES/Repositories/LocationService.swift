@@ -11,6 +11,10 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let driverRepo = FirestoreDriverRepository()
 
     @Published var currentLocation: CLLocationCoordinate2D?
+    /// Degrees clockwise from true north, or nil until a direction of
+    /// travel is known. Used to point the driver pin on the customer's
+    /// tracking page the way the truck is actually facing.
+    @Published var currentHeading: CLLocationDirection?
     // When currentLocation was actually set, not just the last time
     // this object was asked - what ETA-notification staleness checks
     // compare against, so a phone with no signal for the last 20
@@ -123,6 +127,13 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
 
         currentLocation = location.coordinate
         lastLocationUpdate = Date()
+        // Negative course means CoreLocation couldn't determine a
+        // direction (typically stationary) - keep the last known
+        // heading rather than snapping the customer's map pin to
+        // north every time the truck stops at a light.
+        if location.course >= 0 {
+            currentHeading = location.course
+        }
 
         guard !driverId.isEmpty else { return }
         driverRepo.updateDriverLocation(

@@ -76,6 +76,7 @@
 				Services/RealtimeLocationManager.swift,
 				Services/RouteOptimizationService.swift,
 				Services/SMSService.swift,
+				Services/TrackingBroadcastService.swift,
 				Utilities/TimestampFormatter.swift,
 				ViewModels/Driver/DriverNextStopController.swift,
 				ViewModels/Driver/DriverSession.swift,

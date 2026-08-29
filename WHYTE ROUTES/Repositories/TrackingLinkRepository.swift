@@ -80,6 +80,9 @@ final class TrackingLinkRepository {
         linkId: String,
         latitude: Double,
         longitude: Double,
+        heading: Double? = nil,
+        stopsBefore: Int? = nil,
+        isCurrentDestination: Bool? = nil,
         etaMinutes: Int?
     ) {
         var data: [String: Any] = [
@@ -87,6 +90,13 @@ final class TrackingLinkRepository {
             "longitude": longitude,
             "updatedAt": FieldValue.serverTimestamp()
         ]
+        if let heading { data["heading"] = heading }
+        // A COUNT of the stops ahead of this customer - never anything
+        // identifying about them. This is what lets the page say
+        // "2 stops before yours" without the customer's page ever
+        // being able to read another customer's record.
+        if let stopsBefore { data["stopsBefore"] = stopsBefore }
+        if let isCurrentDestination { data["isCurrentDestination"] = isCurrentDestination }
         if let etaMinutes { data["etaMinutes"] = etaMinutes }
 
         trackingLinksRef(companyId: companyId)
@@ -115,6 +125,41 @@ final class TrackingLinkRepository {
                 }
                 completion(TrackingLink(from: doc.data(), id: doc.documentID, companyId: companyId))
             }
+    }
+
+    // MARK: - Close Out a Stop's Tracking Link
+    // Called the moment a stop is completed. Deletes the live position
+    // document FIRST, then marks the link inactive.
+    //
+    // Deleting rather than merely flagging is the point: that document
+    // is world-readable to anyone holding the link, so a customer whose
+    // own service is finished must not be able to keep watching the
+    // truck drive on to other people's homes for the rest of the shift.
+    // Hiding it in the page would leave the data sitting there for
+    // anyone who opened a console; removing it means there is nothing
+    // left to read. The page's "Service complete" state then comes from
+    // the link's own active/completed flags.
+    func closeOut(stopId: String) {
+        guard let companyId = CompanySession.shared.currentCompanyId else { return }
+
+        activeLink(forStopId: stopId) { [weak self] link in
+            guard let self, let link else { return }
+
+            let linkRef = self.trackingLinksRef(companyId: companyId).document(link.id)
+
+            linkRef.collection("location").document("current").delete { error in
+                if let error {
+                    print("\u{26a0}\u{fe0f} Couldn't delete tracking position for stop \(stopId): \(error.localizedDescription)")
+                }
+                // Flag the link regardless - a failed delete must not
+                // leave the customer's page looking permanently live.
+                linkRef.updateData([
+                    "active": false,
+                    "completed": true,
+                    "completedAt": FieldValue.serverTimestamp()
+                ])
+            }
+        }
     }
 
     // MARK: - Deactivate Link (staff, authenticated)

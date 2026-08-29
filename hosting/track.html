@@ -44,6 +44,21 @@
   .addr { margin-top: 12px; font-size: 15px; }
   .addr span { color: var(--muted); display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 2px; }
   .stale { color: #ffb15c; font-size: 13px; margin-top: 10px; }
+  .queue {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 14px; padding: 12px 14px;
+    background: rgba(245,196,81,.10);
+    border: 1px solid rgba(245,196,81,.35);
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .queue #queueBadge {
+    background: var(--gold); color: #000;
+    font-weight: 800; font-size: 14px;
+    min-width: 26px; height: 26px; border-radius: 13px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto;
+  }
   .center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; text-align: center; }
   .center p { color: var(--muted); max-width: 340px; line-height: 1.5; }
   .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--gold); margin-right:7px; vertical-align:middle; }
@@ -69,6 +84,7 @@
   <p class="status" id="status"><span class="dot"></span><span id="statusText">On the way</span></p>
   <div class="eta" id="eta" hidden></div>
   <p class="sub" id="etaSub" hidden>estimated arrival</p>
+  <div class="queue" id="queue" hidden><span id="queueBadge">2</span><span id="queueText">stops before yours</span></div>
   <div class="addr"><span>Service address</span><div id="address">—</div></div>
   <p class="stale" id="stale" hidden></p>
 </div>
@@ -120,6 +136,11 @@ if (!companyId || !linkId) {
 }
 
 let map = null, driverMarker = null, stopMarker = null, hasFitBounds = false;
+// Once the service is done this latches true and never clears. The
+// link doc and the location doc have independent listeners that can
+// fire in either order, so without this a late position update could
+// repaint a live-looking driver onto a completed page.
+let serviceComplete = false;
 
 function ensureMap() {
   if (map) return;
@@ -152,10 +173,17 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId), (snap) => {
   if (d.customerName) $("companyLine").textContent = "Live service tracking";
 
   if (d.active === false || d.completed === true) {
+    serviceComplete = true;
     $("statusText").textContent = "Service complete";
     $("eta").hidden = true;
     $("etaSub").hidden = true;
     $("stale").hidden = true;
+    $("queue").hidden = true;
+    // Remove the driver entirely rather than leaving a last-known pin
+    // sitting on the map - their position is no longer this customer's
+    // business once their own service is finished.
+    if (driverMarker && map) { map.removeLayer(driverMarker); driverMarker = null; }
+    if (routeLine && map) { map.removeLayer(routeLine); routeLine = null; }
     showTracking();
     return;
   }
@@ -174,6 +202,10 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId), (snap) => {
 
 // ── Live driver position, published by the driver's app while en route
 onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", "current"), (snap) => {
+  // The driver's app deletes this document when the stop is completed,
+  // so there is normally nothing left to read. This guard covers the
+  // ordering race where a final update lands just as the link flips.
+  if (serviceComplete) return;
   if (!snap.exists()) {
     $("eta").hidden = true;
     $("etaSub").hidden = true;
@@ -192,8 +224,28 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     fitIfPossible();
   }
 
-  if (typeof d.etaMinutes === "number" && d.etaMinutes >= 0) {
-    $("statusText").textContent = "On the way";
+  // Queue position drives the whole status. `stopsBefore` is a bare
+  // count published by the driver's app - this page is never able to
+  // read who or where those other stops are.
+  const stopsBefore = typeof d.stopsBefore === "number" ? d.stopsBefore : null;
+  const isNext = d.isCurrentDestination === true || stopsBefore === 0;
+
+  if (stopsBefore !== null && stopsBefore > 0) {
+    $("statusText").textContent = "Driver has a stop on the way";
+    $("queue").hidden = false;
+    $("queueBadge").textContent = stopsBefore;
+    $("queueText").textContent =
+      stopsBefore === 1 ? "stop before yours" : "stops before yours";
+  } else {
+    $("queue").hidden = true;
+    $("statusText").textContent = isNext ? "On the way to you" : "On the way";
+  }
+
+  // An ETA is only published for the customer actually being driven
+  // to. For anyone further back it would be a guess dressed up as a
+  // fact - how long each property ahead takes is exactly what nobody
+  // can know yet - so the queue position is shown instead.
+  if (isNext && typeof d.etaMinutes === "number" && d.etaMinutes >= 0) {
     $("eta").hidden = false;
     $("etaSub").hidden = false;
     $("eta").textContent = d.etaMinutes <= 1 ? "Arriving now" : `${d.etaMinutes} min`;
@@ -201,6 +253,16 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     $("eta").hidden = true;
     $("etaSub").hidden = true;
   }
+
+  // The route line is drawn ONLY once this customer is next.
+  //
+  // Two reasons, and the privacy one is the important one: drawing a
+  // path through the stops actually being driven would trace a line
+  // straight to other customers' homes. And while the driver is
+  // servicing someone else first, a direct line here would imply
+  // they're heading over now, which isn't true. So: no line until the
+  // truck is genuinely on its way to this address.
+  updateRouteLine(isNext);
 
   // A position that stopped updating is worse than no position - it
   // would quietly show a driver frozen mid-street as if it were live.
@@ -215,6 +277,28 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     }
   }
 }, () => { /* location may legitimately not exist yet */ });
+
+// A straight driver->destination line, drawn only when this customer
+// is next. Deliberately NOT the real road route: fetching directions
+// would need a keyed routing provider on a public page, and the only
+// path worth drawing here is the one to this address. Nothing about
+// any other stop is ever represented on this map.
+let routeLine = null;
+function updateRouteLine(shouldShow) {
+  if (!map) return;
+  if (!shouldShow || !driverMarker || !stopMarker) {
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    return;
+  }
+  const pts = [driverMarker.getLatLng(), stopMarker.getLatLng()];
+  if (routeLine) {
+    routeLine.setLatLngs(pts);
+  } else {
+    routeLine = L.polyline(pts, {
+      color: "#F5C451", weight: 4, opacity: .85, dashArray: "8 8"
+    }).addTo(map);
+  }
+}
 
 function fitIfPossible() {
   if (hasFitBounds || !map) return;

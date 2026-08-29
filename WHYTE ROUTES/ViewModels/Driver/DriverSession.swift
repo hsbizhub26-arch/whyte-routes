@@ -48,6 +48,7 @@ final class DriverSession: ObservableObject {
         activeShift = await shiftRepo.fetchActiveShift(driverId: driverId)
         if activeShift != nil {
             LocationService.shared.startTracking(driverId: driverId)
+            TrackingBroadcastService.shared.start()
         }
     }
 
@@ -62,6 +63,7 @@ final class DriverSession: ObservableObject {
         do {
             activeShift = try await shiftRepo.startShift(driverId: driverId)
             LocationService.shared.startTracking(driverId: driverId)
+            TrackingBroadcastService.shared.start()
             return true
         } catch {
             shiftError = error.localizedDescription
@@ -78,6 +80,7 @@ final class DriverSession: ObservableObject {
             try await shiftRepo.endShift(driverId: driverId, shiftId: shift.id)
             activeShift = nil
             LocationService.shared.stopTracking()
+            TrackingBroadcastService.shared.stop()
             return true
         } catch {
             shiftError = error.localizedDescription
@@ -118,6 +121,7 @@ final class DriverSession: ObservableObject {
         stopsRepo.loadStops(forRoute: routeId) { stops in
             Task { @MainActor in
                 self.activeStops = stops
+                TrackingBroadcastService.shared.refreshLinks()
             }
         }
     }
@@ -133,6 +137,8 @@ final class DriverSession: ObservableObject {
 
         activeStops = updatedStops
         stopsRepo.saveStops(forRoute: routeId, stops: updatedStops)
+        // Finishing one stop moves everyone behind it up the queue.
+        TrackingBroadcastService.shared.refreshLinks()
     }
 
     // MARK: Next stop
