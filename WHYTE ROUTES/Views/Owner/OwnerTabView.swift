@@ -73,7 +73,11 @@ struct OwnerTabView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Owner access is active, but not saved to the server.")
                     .font(.footnote.bold())
-                Text("Your permissions couldn't sync to Firestore. Access still works on this device - check the Firestore security rules for the users collection.")
+                // Was: "...check the Firestore security rules for the
+                // users collection." A paying contractor has no idea
+                // what that is and can do nothing about it - it was a
+                // note to ourselves left on a customer's home screen.
+                Text("We couldn't save your account settings just now. Everything still works on this device - it should sort itself out shortly. If it keeps showing, get in touch from Settings.")
                     .font(.caption2)
             }
             .foregroundColor(.black)

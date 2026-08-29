@@ -120,6 +120,33 @@ final class UserPermissionsService {
     /// touching anything else already there - used to backfill
     /// platformAdmin/companyId/companyRole onto documents that were
     /// created before those fields existed.
+    /// Attaches an existing, company-less account to a company after
+    /// their invite finally arrived - see the late-invite path in
+    /// AuthSession.
+    ///
+    /// Reports whether it actually succeeded, unlike backfillIfMissing,
+    /// because the caller must not consume the invite on a failed
+    /// write: burning it would leave the person locked out with no
+    /// invite left to retry against, which is a worse version of the
+    /// bug this exists to fix.
+    ///
+    /// The Firestore rule that permits this is the self-update branch,
+    /// which freezes role/isAdmin/platformAdmin/subscription and, since
+    /// the cross-tenant fix, companyId and companyRole too - so this
+    /// write is allowed only where they are currently absent.
+    func attachToCompany(uid: String, companyId: String, companyRole: String) async -> Bool {
+        do {
+            try await db.collection("users").document(uid).setData([
+                "companyId": companyId,
+                "companyRole": companyRole
+            ], merge: true)
+            return true
+        } catch {
+            print("⚠️ Failed attaching users/\(uid) to company \(companyId): \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func backfillIfMissing(uid: String, fields: [String: Any]) async {
         let docRef = db.collection("users").document(uid)
         do {

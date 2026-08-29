@@ -57,6 +57,19 @@ final class RouteService: ObservableObject {
     // is needed separately from Route.stops)
     private func loadStopsForReports(_ routes: [Route]) {
         for route in routes {
+            // One listener per route, ever.
+            //
+            // This is called from loadRoutesOnce, which several screens
+            // call on every appearance - and RouteService is a
+            // singleton that never releases anything, so each visit to
+            // the dashboard, Assign Routes, or Driver Reports attached
+            // a fresh listener to every route on top of the ones
+            // already running. Ten routes and a few tab taps is dozens
+            // of live listeners against a client limit of 100, each one
+            // billing reads and waking the app for the same changes.
+            guard !subscribedStopRouteIds.contains(route.id) else { continue }
+            subscribedStopRouteIds.insert(route.id)
+
             stopsRepo.loadStops(forRoute: route.id) { [weak self] stops in
                 Task { @MainActor in
                     self?.stopsByRoute[route.id] = stops
@@ -64,6 +77,10 @@ final class RouteService: ObservableObject {
             }
         }
     }
+
+    /// Routes that already have a stops listener attached - see
+    /// loadStopsForReports.
+    private var subscribedStopRouteIds: Set<String> = []
 
     // MARK: - Listen to Stops for a Route
     func listenToStops(for routeId: String) {

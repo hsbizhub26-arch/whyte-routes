@@ -90,6 +90,38 @@ final class AuthSession: ObservableObject {
                         }
                     }
 
+                    // A LATE INVITE.
+                    //
+                    // The invite check below only ever ran when
+                    // users/{uid} did not exist yet - i.e. only on the
+                    // very first sign-in. So a driver who downloaded the
+                    // app and signed in BEFORE their owner got round to
+                    // inviting them was created as a company-less
+                    // pending owner, and from then on took this branch
+                    // forever: the invite would be created, sit there
+                    // pending, and never be looked at again. They were
+                    // locked out permanently, with no retry anywhere in
+                    // the UI and nothing on screen explaining it. The
+                    // order people do things in is not something we get
+                    // to dictate, and this is the likelier order.
+                    //
+                    // Re-checking costs one query, and only for accounts
+                    // that have no company at all.
+                    if permissions.companyId == nil, !permissions.platformAdmin,
+                       let invite = await self.findUsableInvite(for: user) {
+                        let attached = await UserPermissionsService.shared.attachToCompany(
+                            uid: user.uid,
+                            companyId: invite.companyId,
+                            companyRole: invite.role
+                        )
+                        if attached {
+                            await InviteRepository().consume(invite)
+                            permissions.companyId = invite.companyId
+                            permissions.companyRole = invite.role
+                            print("🎟️ Late invite accepted for \(user.uid) -> \(invite.companyId) as \(invite.role)")
+                        }
+                    }
+
                     self.permissionsSyncFailed = false
                     self.isPlatformAdmin = permissions.platformAdmin
                     self.role = await self.resolveRole(
@@ -178,7 +210,15 @@ final class AuthSession: ObservableObject {
                         let persisted = await UserPermissionsService.shared.createIfNeeded(
                             uid: user.uid,
                             email: user.email ?? "",
-                            role: .driver,
+                            // Was hardcoded .driver, so an invited
+                            // MANAGER was stored as a driver. Harmless
+                            // in practice - resolveRole and every rule
+                            // branch off companyRole, not this - but the
+                            // record was simply wrong, and the next
+                            // person to trust this field would have been
+                            // misled. The create rule requires it not be
+                            // 'owner', which invite roles never are.
+                            role: invite.role == "manager" ? .manager : .driver,
                             subscription: "free",
                             isAdmin: false,
                             platformAdmin: false,

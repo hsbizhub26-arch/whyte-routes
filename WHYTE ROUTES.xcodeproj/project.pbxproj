@@ -67,7 +67,6 @@
 				"Resources/GoogleService-Info.plist",
 				Resources/LaunchScreen.storyboard,
 				Resources/PrivacyInfo.xcprivacy,
-				Resources/WhyteRoutes.storekit,
 				Services/AddressSearchService.swift,
 				Services/NavigationService.swift,
 				Services/NavigationSession.swift,

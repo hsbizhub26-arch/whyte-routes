@@ -268,6 +268,39 @@ service cloud.firestore {
                            && request.resource.data.companyId == resource.data.companyId
                            && request.resource.data.companyRole == resource.data.companyRole)
                          ||
+                         // A LATE INVITE.
+                         //
+                         // Same proof as the invite branch of the create
+                         // rule - a pending invite addressed to this
+                         // account's own verified identity - but for an
+                         // account that ALREADY EXISTS and has no company.
+                         //
+                         // That is the common case, not an edge one: a
+                         // driver who installs the app and signs in
+                         // before their owner gets round to inviting them
+                         // becomes a company-less pending owner, and the
+                         // create rule can never apply to them again. The
+                         // invite would sit pending forever.
+                         //
+                         // `!('companyId' in resource.data)` is what
+                         // keeps this from being a way around the freeze
+                         // above: it only ever moves someone from no
+                         // company to the one company that actually
+                         // invited them, never between tenants. role
+                         // stays frozen - nothing authorizes off it
+                         // (isCompanyStaff and isCompanyMember both read
+                         // companyRole), so a stale 'owner' there grants
+                         // exactly nothing.
+                         (request.auth.uid == userId
+                           && !('companyId' in resource.data)
+                           && request.resource.data.companyId is string
+                           && request.resource.data.companyRole is string
+                           && usableInviteMatches(request.resource.data.companyId, request.resource.data.companyRole)
+                           && request.resource.data.role == resource.data.role
+                           && request.resource.data.isAdmin == resource.data.isAdmin
+                           && request.resource.data.platformAdmin == resource.data.platformAdmin
+                           && request.resource.data.subscription == resource.data.subscription)
+                         ||
                          // Claiming ownership of a company just created via
                          // self-serve signup - the one-time transition from
                          // "pending owner, no company" to "owner of a real
