@@ -40,23 +40,46 @@ const APP_APPLE_ID = 6755896122;
 // intentional - it's the pre-existing raw value the client already
 // maps from, kept here so this function never drifts from what the
 // app actually reads.
+//
+// !! THESE FOUR IDS MUST MATCH, EXACTLY AND CASE-SENSITIVELY:
+//      PurchaseManager.productIDs        (WHYTE ROUTES/App/Auth/PurchaseManager.swift)
+//      Resources/WhyteRoutes.storekit
+//      App Store Connect
+//      this map
+//    They already drifted once: this map stayed on .v2 after the app
+//    moved to .v3, which meant every real purchase was charged by
+//    Apple, passed signature verification, and then fell straight
+//    into the "Unrecognized product ID" throw below - so the customer
+//    paid and got nothing, on every launch and every renewal, silently.
+//    Nothing in the build catches this; only a real purchase does.
 const PRODUCT_TO_TIER = {
-  "whyteroutes.premium.monthly.v2": "professional",
-  "whyteroutes.premium.yearly.v2": "professional",
-  "whyteroutes.premiumplus.monthly.v2": "premiumPlus",
-  "whyteroutes.premiumplus.yearly.v2": "premiumPlus",
+  "whyteroutes.premium.monthly.v3": "professional",
+  "whyteroutes.premium.yearly.v3": "professional",
+  "whyteroutes.premiumplus.monthly.v3": "premiumPlus",
+  "whyteroutes.premiumplus.yearly.v3": "premiumPlus",
 };
 
 // A SignedDataVerifier is locked to one Apple environment at
 // construction time, but this one deployed function has to accept
 // transactions from whichever environment the calling build actually
-// ran in - Xcode local StoreKit testing (its own local certificate,
-// not real Apple ones) during development, Sandbox once builds go out
-// via TestFlight, and eventually Production. Rather than guess, try
-// verifying against all three and use whichever one actually
-// succeeds - the JWS itself can only ever validate against the one
+// ran in - Sandbox once builds go out via TestFlight, and Production
+// once live. Rather than guess, try both and use whichever one
+// actually succeeds: the JWS can only ever validate against the
 // environment that really signed it, so this is safe, not permissive.
-const VERIFIER_ENVIRONMENTS = [Environment.PRODUCTION, Environment.SANDBOX, Environment.XCODE];
+//
+// Environment.XCODE IS DELIBERATELY NOT IN THIS LIST, and must never
+// be added to a deployed build. Apple's library does not verify
+// signatures at all for that environment - it early-returns the
+// decoded payload - because Xcode's local StoreKit testing signs with
+// its own throwaway certificate. Including it made this whole
+// function a formality: anyone with an account could hand-craft an
+// unsigned JWS naming premiumPlus, call this once, and hold every
+// paid tier permanently - which also uncaps the Twilio spend that
+// tierRank gates, turning our SMS balance into their budget.
+//
+// Local StoreKit testing against real infrastructure is not worth
+// that. Test purchases through TestFlight/Sandbox instead.
+const VERIFIER_ENVIRONMENTS = [Environment.PRODUCTION, Environment.SANDBOX];
 let cachedVerifiers = null;
 function getVerifiers() {
   if (!cachedVerifiers) {

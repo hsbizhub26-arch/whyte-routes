@@ -29,9 +29,21 @@ struct SubscriptionTierView: View {
         var features: [String] {
             switch self {
             case .premium:
+                // EVERY LINE HERE IS A PROMISE MADE AT THE MOMENT OF
+                // PAYMENT, so it has to name something the app can
+                // actually do today.
+                //
+                // "Before/after proof of work" was removed: the capture
+                // button is never rendered (DriverStopView.photoProofButton
+                // has no call site), so no subscriber on any tier could
+                // reach it. It was being sold at $64.99/mo.
+                //
+                // "Route optimization" stays, and the gate moved to match
+                // it - it was checked against advanced dispatch, so a
+                // Premium subscriber who tapped the button they had just
+                // paid for was shown an ad for Premium Plus.
                 return [
                     "Live fleet map",
-                    "Before/after proof of work",
                     "Route optimization",
                     "Up to 30 customers"
                 ]

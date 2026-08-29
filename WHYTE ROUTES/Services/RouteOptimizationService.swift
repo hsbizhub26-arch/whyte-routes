@@ -72,7 +72,17 @@ enum RouteOptimizationService {
             improved = false
             for i in lowerBound..<(ordered.count - 1) {
                 for j in (i + 1)..<ordered.count {
-                    let a = ordered[i - 1].coordinate!
+                    // The node the reversed segment is entered FROM.
+                    // For i > 0 that's the previous stop; for i == 0 -
+                    // which only happens when an explicit start point
+                    // made the first stop reorderable - it's the depot
+                    // itself. Reading ordered[i - 1] unconditionally
+                    // meant index -1 on the very first iteration, so
+                    // Optimize Route crashed outright for any owner who
+                    // had filled in the start-location field.
+                    let a: CLLocationCoordinate2D = i > 0
+                        ? ordered[i - 1].coordinate!
+                        : (startCoordinate ?? ordered[0].coordinate!)
                     let b = ordered[i].coordinate!
                     let c = ordered[j].coordinate!
                     let isLastSegment = j == ordered.count - 1

@@ -14,6 +14,53 @@ struct SettingsView: View {
     @ObservedObject private var companySession = CompanySession.shared
     private let companyRepo = CompanyRepository()
 
+    // MARK: - Support
+    // This was hardcoded to the PILOT CUSTOMER's own personal hotmail
+    // address, with THEIR username and user id baked into the message
+    // body - so every other company that installed the app mailed
+    // their support requests to a landscaping contractor in Ontario,
+    // introducing themselves as him. It leaked one customer's identity
+    // to all the others and meant real support mail reached nobody.
+    //
+    // Worth moving to a support@ address on an owned domain once one
+    // exists; until then this reaches a real monitored inbox, which is
+    // what Apple's support-contact requirement actually needs.
+    private static let supportEmail = "hopeseneoudom@icloud.com"
+
+    /// Version and build, so a support mail says which build it came
+    /// from without asking the user to go find it.
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
+    }
+
+    /// Prefilled with the identifiers of whoever is actually signed in,
+    /// which is what makes a support mail answerable - and is the whole
+    /// point of not hardcoding somebody else's.
+    private var supportMailtoURL: URL? {
+        let email = Auth.auth().currentUser?.email ?? "(not signed in)"
+        let uid = Auth.auth().currentUser?.uid ?? "(unknown)"
+        let company = companySession.currentCompany?.name ?? "(no company)"
+        let companyId = companySession.currentCompanyId ?? "(none)"
+        let body = """
+            Please describe the problem here.
+
+            ---
+            Account: \(email)
+            User ID: \(uid)
+            Company: \(company) (\(companyId))
+            App: \(Self.appVersion)
+            """
+        var components = URLComponents(string: "mailto:\(Self.supportEmail)")
+        components?.queryItems = [
+            URLQueryItem(name: "subject", value: "WHYTE ROUTES Support"),
+            URLQueryItem(name: "body", value: body)
+        ]
+        return components?.url
+    }
+
     // No NavigationStack here on purpose - every place this view is
     // shown (ManagerTabView's explicit per-tab NavigationStack, and
     // the system "More" screen the owner's 7-tab layout collapses
@@ -141,7 +188,7 @@ struct SettingsView: View {
                 Section {
                     Button("Email Support") {
 #if canImport(UIKit)
-                        if let url = URL(string: "mailto:dwlandscaping@hotmail.com?subject=WHYTE%20ROUTES%20Support&body=Username:%20teamdwlandscaping%0AUserID:%20devonwhyte9954%0A") {
+                        if let url = supportMailtoURL {
                             UIApplication.shared.open(url)
                         }
 #endif

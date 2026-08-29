@@ -209,10 +209,50 @@ service cloud.firestore {
                          isPlatformAdmin()
                          ||
                          // Company owner managing one of their own
-                         // employees' membership/role within the company.
+                         // employees' membership/role WITHIN the company.
+                         //
+                         // Every clause below is load-bearing. This branch
+                         // used to check only resource.data (the row as it
+                         // already stands) and freeze role/isAdmin/
+                         // platformAdmin/subscription - leaving companyId,
+                         // companyRole and the identity of the target all
+                         // unconstrained. That was a full cross-tenant
+                         // takeover, not a theoretical one:
+                         //
+                         //   An owner of company A writes their OWN users
+                         //   doc setting companyId to company B. The branch
+                         //   passes, because it only ever looked at the OLD
+                         //   companyId (A), which they do own. One write
+                         //   later they hold isCompanyStaff on B and can
+                         //   read and write every customer name, address
+                         //   and phone number in it, every route and stop,
+                         //   driver GPS and licence photos, and - since
+                         //   storage.rules resolves myCompanyId() from this
+                         //   same document - every proof-of-work photo of
+                         //   someone else's property.
+                         //
+                         // And company ids are not secret: the customer
+                         // tracking link puts one in plaintext in every SMS
+                         // (?c={companyId}), so anyone who ever received one
+                         // already holds the only input the attack needs.
+                         //
+                         //   companyId frozen  - an owner can manage who is
+                         //     in THEIR company; moving a person into a
+                         //     different tenant is not a feature and is the
+                         //     whole exploit.
+                         //   uid != userId     - self-edits belong to the
+                         //     self-update branch below, which freezes
+                         //     membership. Without this, "managing an
+                         //     employee" includes managing yourself.
+                         //   role restricted   - otherwise an owner mints a
+                         //     second owner, and ownership stops being the
+                         //     thing the company-create rule pinned.
                          (resource.data.companyId is string
                            && isCompanyStaff(resource.data.companyId)
                            && myCompanyRole() == 'owner'
+                           && request.auth.uid != userId
+                           && request.resource.data.companyId == resource.data.companyId
+                           && request.resource.data.companyRole in ['manager', 'driver']
                            && request.resource.data.role == resource.data.role
                            && request.resource.data.isAdmin == resource.data.isAdmin
                            && request.resource.data.platformAdmin == resource.data.platformAdmin
@@ -270,6 +310,18 @@ service cloud.firestore {
                            && request.resource.data.companyId == resource.data.companyId
                            && request.resource.data.companyRole == resource.data.companyRole)
                        );
+
+      // Account deletion (App Store Guideline 5.1.1(v)). Only ever
+      // your own row.
+      //
+      // Its absence was worse than a missing feature: the app already
+      // shipped a Delete Account button that issued this exact write,
+      // caught the denial in an empty catch, deleted the Auth user
+      // anyway, and reported success. So the user was told their
+      // account was gone while their row - email, role, company
+      // membership - stayed in Firestore forever, with no signed-in
+      // identity left that could ever remove it.
+      allow delete: if isSignedIn() && request.auth.uid == userId;
     }
 
     // ── companies/{companyId} ────────────────────────────────
@@ -453,9 +505,14 @@ service cloud.firestore {
       // End-of-shift reports. Any signed-in company member can submit
       // one (same driver-identity caveat as stops above); only staff
       // can read the roll-up or edit/delete after submission.
+      // The {driverId} in the path is bound to the caller, the way the
+      // shifts rule above already does it. Without that, any company
+      // member could file a report under a colleague's id - and these
+      // are end-of-shift incident reports that an owner reads as a
+      // record of who did what.
       match /driverReports/{driverId}/reports/{reportId} {
         allow read: if isCompanyStaff(companyId);
-        allow create: if isCompanyMember(companyId);
+        allow create: if isCompanyMember(companyId) && request.auth.uid == driverId;
         allow update, delete: if isCompanyStaff(companyId);
       }
 

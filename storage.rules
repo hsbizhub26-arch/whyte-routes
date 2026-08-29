@@ -26,6 +26,16 @@ service firebase.storage {
         && (myPermissions().companyRole == 'owner' || myPermissions().companyRole == 'manager');
     }
 
+    // Both upload paths below are images taken in the app and nothing
+    // else. Without this, a member could park arbitrary files of any
+    // size and type under a made-up stopId - our storage bill, our
+    // bandwidth, and content we'd be serving. The path rules say WHO
+    // may write; this says WHAT.
+    function isReasonableImage() {
+      return request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // Photo proof-of-work: companies/{companyId}/photos/{driverId}/{stopId}/{fileName}
     // Same restriction as the license-photo rule just below (which
     // this previously didn't match): staff can read any proof photo
@@ -39,7 +49,8 @@ service firebase.storage {
       allow read: if isSignedIn() && myCompanyId() == companyId
         && (request.auth.uid == driverId || isCompanyStaff(companyId));
       allow write: if isSignedIn() && myCompanyId() == companyId
-        && request.auth.uid == driverId;
+        && request.auth.uid == driverId
+        && isReasonableImage();
     }
 
     // Driver's license photo: companies/{companyId}/licenses/{driverId}/{fileName}
@@ -53,7 +64,8 @@ service firebase.storage {
       allow read: if isSignedIn() && myCompanyId() == companyId
         && (request.auth.uid == driverId || isCompanyStaff(companyId));
       allow write: if isSignedIn() && myCompanyId() == companyId
-        && request.auth.uid == driverId;
+        && request.auth.uid == driverId
+        && isReasonableImage();
     }
 
     match /{allPaths=**} {

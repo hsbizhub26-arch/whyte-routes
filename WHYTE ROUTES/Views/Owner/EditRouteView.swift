@@ -135,7 +135,7 @@ struct EditRouteView: View {
 
                             if stops.count > 2 {
                                 Button {
-                                    if access.canAccessAdvancedDispatch() {
+                                    if access.canAccessRouteOptimization() {
                                         stops = RouteOptimizationService.optimize(
                                             stops,
                                             startCoordinate: startCoordinate,
@@ -192,7 +192,7 @@ struct EditRouteView: View {
                 }
             }
             .sheet(isPresented: $showUpgradePrompt) {
-                UpgradeRequiredView(featureName: "Route Optimization", requiredTier: .premiumPlus)
+                UpgradeRequiredView(featureName: "Route Optimization", requiredTier: .premium)
             }
             .sheet(item: $moveTargetStop) { stop in
                 moveStopSheet(stop)

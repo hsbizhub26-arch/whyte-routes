@@ -62,5 +62,16 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Required for NavigationService's canOpenURL checks. Since iOS 9
+	     canOpenURL returns false for any scheme not listed here, so
+	     without this the Google Maps and Waze branches were dead code:
+	     a crew that had picked Waze in Navigation Settings silently got
+	     the browser fallback every single time, and nothing anywhere
+	     said why. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>comgooglemaps</string>
+		<string>waze</string>
+	</array>
 </dict>
 </plist>

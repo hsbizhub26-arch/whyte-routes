@@ -90,6 +90,13 @@ final class FeatureAccessManager: ObservableObject {
     func canAccessDriverPerformanceReports() -> Bool { tier >= .premiumPlus }
     func canAccessPayroll() -> Bool { tier >= .premiumPlus }
     func canAccessAdvancedDispatch() -> Bool { tier >= .premiumPlus }
+    // Separate from advanced dispatch on purpose. The Premium paywall
+    // sells "Route optimization" by name, and Optimize Route was gated
+    // on canAccessAdvancedDispatch() - so a Premium subscriber tapped
+    // the feature they had just bought and got an upsell for the tier
+    // above. Multi-driver dispatch stays Premium Plus; reordering one
+    // route's stops is what Premium is being paid for.
+    func canAccessRouteOptimization() -> Bool { tier >= .premium }
 
     // No per-tier route-COUNT limit was ever specified (only customer
     // counts had numbers - "unlimited routes" is only ever mentioned
