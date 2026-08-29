@@ -42,6 +42,13 @@ final class TrackingBroadcastService {
     /// stopId -> that stop's active tracking link.
     private var linksByStopId: [String: TrackingLink] = [:]
     private var lastPublishedAt: Date?
+    // Set when the queue changes (a stop completed, links reloaded).
+    // Without it the newly-next customer waits out the 25s throttle -
+    // and, because location updates only fire after 20m of movement,
+    // a driver who finishes a stop and stands at the truck could leave
+    // that customer on a pin-less map for far longer than that. The
+    // moment someone becomes next, they should see the truck.
+    private var forceNextPublish = false
     private var lastEtaComputedAt: Date?
     private var cachedEtaMinutes: Int?
 
@@ -85,14 +92,26 @@ final class TrackingBroadcastService {
     func refreshLinks() {
         let stops = DriverSession.shared.activeStops
         guard !stops.isEmpty else { return }
+        forceNextPublish = true
         for stop in stops {
             linkRepo.activeLink(forStopId: stop.id) { [weak self] link in
                 Task { @MainActor in
                     guard let self, let link else { return }
                     self.linksByStopId[stop.id] = link
+                    self.publishImmediatelyIfQueueChanged()
                 }
             }
         }
+    }
+
+    /// Pushes one publish straight away after a queue change, rather
+    /// than waiting for the throttle and the next GPS fix.
+    private func publishImmediatelyIfQueueChanged() {
+        guard forceNextPublish,
+              let coordinate = LocationService.shared.currentLocation else { return }
+        forceNextPublish = false
+        lastPublishedAt = nil
+        handleLocation(coordinate)
     }
 
     // MARK: - Publishing
