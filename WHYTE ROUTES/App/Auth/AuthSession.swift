@@ -49,6 +49,10 @@ final class AuthSession: ObservableObject {
                     self?.permissionsSyncFailed = false
                     self?.alsoDrives = false
                     CompanySession.shared.clear()
+                    // Drops the tier back to Starter on sign-out, so a
+                    // gated screen can't stay unlocked from the last
+                    // account while a different one signs in.
+                    FeatureAccessManager.shared.unbind()
                     DriverSession.shared.logout()
                     LocationService.shared.stopTracking()
                     return
@@ -258,6 +262,12 @@ final class AuthSession: ObservableObject {
             let company = await CompanyRepository().fetch(companyId: companyId)
             CompanySession.shared.currentCompanyId = companyId
             CompanySession.shared.currentCompany = company
+            // The one-shot fetch above gives resolveRole a value to log
+            // and act on right now; the listener keeps it current for
+            // the rest of the session, so a tier bought mid-session
+            // actually takes effect - see CompanySession.startListening.
+            CompanySession.shared.startListening(companyId: companyId)
+            FeatureAccessManager.shared.bindToCompanySession()
 
             if let company {
                 print("🏢 CompanySession loaded: \(company.name) [\(company.subscriptionTier)/\(company.subscriptionStatus)] role=\(companyRole ?? "owner")")

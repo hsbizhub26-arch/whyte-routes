@@ -569,7 +569,12 @@ struct EditRouteView: View {
                     updated.driverId = selectedDriverId
                     return updated
                 }
-                stopsRepo.saveStops(forRoute: routeId, stops: orderedStops)
+                // saveRouteEdits, not saveStops: this array was frozen
+                // when the form opened (see loadEverything), so writing
+                // it back wholesale reverted every stop the crew had
+                // completed since and deleted their timing data. This
+                // writes only the fields this screen edits.
+                stopsRepo.saveRouteEdits(forRoute: routeId, stops: orderedStops)
 
                 // A stop that now means a different person must not
                 // keep the previous person's tracking links alive.

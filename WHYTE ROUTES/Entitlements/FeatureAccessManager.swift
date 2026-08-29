@@ -57,8 +57,38 @@ final class FeatureAccessManager: ObservableObject {
     // the first place - that combination is a hard compile error.
     private nonisolated init() {}
 
-    var tier: SubscriptionTier {
-        SubscriptionTier.from(CompanySession.shared.currentCompany?.subscriptionTier)
+    // A STORED, PUBLISHED property rather than a computed one.
+    //
+    // It used to compute straight off CompanySession, which meant this
+    // ObservableObject published nothing at all: it has no other
+    // @Published state and never sent objectWillChange. Five screens
+    // bind to it as @ObservedObject, so none of them ever re-rendered
+    // when the tier changed - the value was only ever read once, when
+    // the view happened to be built for some other reason. Combined
+    // with the company doc being fetched once at sign-in, an upgrade
+    // simply did not exist until the app was relaunched.
+    @Published private(set) var tier: SubscriptionTier = .starter
+
+    private var companyCancellable: AnyCancellable?
+
+    /// Starts mirroring the signed-in company's tier. Safe to call
+    /// more than once - a repeat sign-in replaces the subscription
+    /// rather than stacking another one.
+    func bindToCompanySession() {
+        companyCancellable = CompanySession.shared.$currentCompany
+            .map { SubscriptionTier.from($0?.subscriptionTier) }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newTier in
+                MainActor.assumeIsolated {
+                    self?.tier = newTier
+                }
+            }
+    }
+
+    func unbind() {
+        companyCancellable = nil
+        tier = .starter
     }
 
     // MARK: - Customers (the one limit with an explicit number per tier)

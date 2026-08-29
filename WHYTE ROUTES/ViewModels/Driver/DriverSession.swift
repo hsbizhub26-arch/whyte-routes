@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import CoreLocation
+import FirebaseAuth
 
 @MainActor
 final class DriverSession: ObservableObject {
@@ -13,6 +14,13 @@ final class DriverSession: ObservableObject {
     @Published var activeStops: [Stop] = []
     @Published var activeShift: Shift?
     @Published var shiftError: String?
+    /// Set when the route genuinely couldn't be read. Distinct from
+    /// "no stops" - see loadStops.
+    @Published var stopsError: String?
+    /// False until a stops read has actually SUCCEEDED once. An empty
+    /// activeStops means "route finished" only if this is true;
+    /// otherwise it just means nothing has come back yet.
+    @Published var hasLoadedStops = false
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -36,6 +44,8 @@ final class DriverSession: ObservableObject {
         assignedRoute = nil
         activeStops = []
         activeShift = nil
+        stopsError = nil
+        hasLoadedStops = false
     }
 
     // MARK: - Shift start/end
@@ -118,10 +128,30 @@ final class DriverSession: ObservableObject {
 
     // MARK: Load stops
     func loadStops(routeId: String) {
-        stopsRepo.loadStops(forRoute: routeId) { stops in
+        guard let uid = Auth.auth().currentUser?.uid else {
+            stopsError = "You're signed out. Sign in again to load your route."
+            return
+        }
+
+        stopsRepo.loadStops(forRoute: routeId, assignedTo: uid) { result in
             Task { @MainActor in
-                self.activeStops = stops
-                TrackingBroadcastService.shared.refreshLinks()
+                switch result {
+                case .success(let stops):
+                    self.stopsError = nil
+                    self.hasLoadedStops = true
+                    self.activeStops = stops
+                    TrackingBroadcastService.shared.refreshLinks()
+
+                case .failure(let error):
+                    // activeStops is deliberately left ALONE. Blanking
+                    // it on a failed read is what turned a permission
+                    // error into "Route Completed 🎉" - a driver being
+                    // told their morning was done before it started.
+                    // A driver mid-route who loses signal keeps the
+                    // stops they already have, and gets a banner.
+                    self.stopsError = "Couldn't load your route. \(error.localizedDescription)"
+                    print("⚠️ DriverSession.loadStops failed: \(error)")
+                }
             }
         }
     }

@@ -159,17 +159,49 @@ final class RouteRepository {
     }
 
     // MARK: - Assign Driver
+    // Writes the driver onto the route AND onto every one of its stops,
+    // in one batch.
+    //
+    // The stops half is not bookkeeping. A driver's stop list is read
+    // with `whereField("driverId", isEqualTo: uid)`, because the rules
+    // only ever let them read their own - so a stop whose driverId
+    // still names the previous driver (or is empty, on a route built
+    // before anyone was assigned) is invisible to the person who is
+    // supposed to service it. Assigning from the Manager screen used
+    // to update the route alone, and the newly-assigned driver opened
+    // the app to an empty route with nothing anywhere explaining why.
+    //
+    // Done here rather than in the call sites so all three of them -
+    // the manager sheet, RouteService, and RouteViewModel - get it
+    // without each having to remember.
     func assignDriver(routeId: String, driverId: String, completion: ((Bool) -> Void)? = nil) {
         guard let ref = routesRef?.document(routeId) else { completion?(false); return }
-        ref.updateData([
-            "driverId": driverId,
-            "status": "assigned",
-            "updatedAt": FieldValue.serverTimestamp()
-        ]) { error in
+
+        ref.collection("stops").getDocuments { [weak self] snapshot, error in
+            guard let self else { completion?(false); return }
             if let error {
-                print("❌ Failed assigning driver (\(routeId) -> \(driverId)): \(error.localizedDescription)")
+                print("❌ Failed reading stops while assigning driver (\(routeId)): \(error.localizedDescription)")
+                completion?(false)
+                return
             }
-            completion?(error == nil)
+
+            let batch = self.db.batch()
+            batch.updateData([
+                "driverId": driverId,
+                "status": "assigned",
+                "updatedAt": FieldValue.serverTimestamp()
+            ], forDocument: ref)
+
+            for doc in snapshot?.documents ?? [] {
+                batch.updateData(["driverId": driverId], forDocument: doc.reference)
+            }
+
+            batch.commit { error in
+                if let error {
+                    print("❌ Failed assigning driver (\(routeId) -> \(driverId)): \(error.localizedDescription)")
+                }
+                completion?(error == nil)
+            }
         }
     }
 

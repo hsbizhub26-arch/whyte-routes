@@ -109,12 +109,46 @@ struct DriverDashboardView: View {
                         .background(Color.black.opacity(0.25))
                         .cornerRadius(16)
                         .padding(.horizontal)
-                    } else if session.assignedRoute != nil {
+                    } else if let stopsError = session.stopsError {
+                        // A route that couldn't be READ must never be
+                        // reported as a route that's FINISHED. This
+                        // branch has to come first: a failed load leaves
+                        // activeStops empty, which is indistinguishable
+                        // from a completed route without it.
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.title2)
+                                .foregroundColor(Color("WRThemeGold"))
+                            Text("Couldn't load your route")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            Text(stopsError)
+                                .font(.footnote)
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(.white.opacity(0.6))
+                            Button("Try Again") { session.refresh() }
+                                .font(.subheadline.bold())
+                                .foregroundColor(Color("WRThemeGold"))
+                                .padding(.top, 4)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                    } else if session.assignedRoute != nil && session.hasLoadedStops {
                         VStack(spacing: 8) {
                             Text("Route Completed 🎉")
                                 .font(.title2.bold())
                                 .foregroundColor(Color.green)
                             Text("All stops finished.")
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                    } else if session.assignedRoute != nil {
+                        // Assigned, but nothing has come back yet.
+                        VStack(spacing: 8) {
+                            ProgressView()
+                                .tint(Color("WRThemeGold"))
+                            Text("Loading your route…")
                                 .foregroundColor(.white.opacity(0.6))
                         }
                         .frame(maxWidth: .infinity)
