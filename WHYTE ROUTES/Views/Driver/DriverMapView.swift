@@ -5,10 +5,16 @@ import Combine
 @MainActor
 final class DriverMapViewModel: ObservableObject {
 
-    @Published var cameraPosition: MapCameraPosition = .region(
-        MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 43.7, longitude: -79.4),
-            span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04)
+    // Follows the driver natively via MapKit rather than us writing a
+    // new region on every fix - see startLocationUpdates for why that
+    // mattered. The region is only a fallback for before the first fix
+    // arrives.
+    @Published var cameraPosition: MapCameraPosition = .userLocation(
+        fallback: .region(
+            MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 43.7, longitude: -79.4),
+                span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04)
+            )
         )
     )
 
@@ -20,36 +26,51 @@ final class DriverMapViewModel: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
-        loadStops()
+        observeStops()
         startLocationUpdates()
     }
 
-    func loadStops() {
-        stops = session.activeStops
+    /// Keeps the pins LIVE.
+    ///
+    /// This used to be a one-shot `loadStops()` called from init, so
+    /// `stops` froze at whatever activeStops happened to hold the
+    /// instant the map first appeared. A route that finished loading a
+    /// moment later never drew any pins at all, and a stop completed
+    /// mid-shift never turned green - the map just quietly stopped
+    /// being true. Sorting once here rather than in `body` also keeps
+    /// the numbering stable without re-sorting on every render pass.
+    private func observeStops() {
+        session.$activeStops
+            .map { $0.sorted { $0.order < $1.order } }
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.stops, on: self)
+            .store(in: &cancellables)
     }
 
     // Observes whatever LocationService is already publishing - actual
     // tracking start/stop is tied to the shift lifecycle (see
     // DriverSession.startShift/endShift), not to this screen appearing.
+    //
+    // NOTE what this deliberately no longer does: write cameraPosition.
+    // It used to slam the camera back to a fresh region centred on the
+    // driver on every single fix - and with distanceFilter at 20m that
+    // is every 20 metres of driving. The driver could not pan or zoom
+    // the map at all; it snapped back under their finger, which is a
+    // large part of why the screen felt broken. MapKit follows the user
+    // on its own via .userLocation above, and stops following the
+    // moment they pan, which is the behaviour anyone expects.
     func startLocationUpdates() {
         LocationService.shared.$currentLocation
             .compactMap { $0 }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] coordinate in
                 self?.driverCoordinate = coordinate
-                self?.cameraPosition = .region(
-                    MKCoordinateRegion(center: coordinate, span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04))
-                )
             }
             .store(in: &cancellables)
     }
 
     func centerOnDriver() {
-        if let coord = driverCoordinate {
-            cameraPosition = .region(
-                MKCoordinateRegion(center: coord, span: .init(latitudeDelta: 0.04, longitudeDelta: 0.04))
-            )
-        }
+        cameraPosition = .userLocation(fallback: .automatic)
     }
 }
 
@@ -110,9 +131,9 @@ struct DriverMapView: View {
     // this is what the pin numbers and the polyline are both drawn
     // from, so "stop 4" on the map is the same stop 4 the driver sees
     // in the Route list.
-    private var orderedStops: [Stop] {
-        vm.stops.sorted { $0.order < $1.order }
-    }
+    // Sorted once as it arrives (see DriverMapViewModel.observeStops)
+    // rather than re-sorting on every render pass.
+    private var orderedStops: [Stop] { vm.stops }
 
     // MARK: - MAP LAYER
     // Numbered pins + a connecting line - the same inRoute-style

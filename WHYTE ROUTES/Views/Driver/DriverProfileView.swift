@@ -20,6 +20,17 @@ struct DriverProfileView: View {
         ZStack {
             Color("WRBlack").ignoresSafeArea()
 
+            // SCROLLVIEW, not a bare VStack.
+            //
+            // This column is about 1040pt of content - header, info
+            // card, licence section, three buttons and two captions -
+            // in roughly 710pt of usable height on an iPhone inside the
+            // tab bar. With nowhere to scroll, SwiftUI squeezed it: the
+            // "Profile" title rode up underneath the status bar and
+            // collided with the clock, and the caption at the bottom
+            // got clipped mid-sentence. It read as broken because it
+            // was overflowing, not because the header was misplaced.
+            ScrollView {
             VStack(spacing: 24) {
 
                 // MARK: - Header
@@ -121,6 +132,7 @@ struct DriverProfileView: View {
                 Spacer(minLength: 30)
             }
             .padding()
+            }
         }
         .sheet(isPresented: $showReportIssue) {
             ReportIssueView(

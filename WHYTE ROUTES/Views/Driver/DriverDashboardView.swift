@@ -1,11 +1,9 @@
 import SwiftUI
 import MapKit
-import Combine
 
 struct DriverDashboardView: View {
 
     @ObservedObject var session = DriverSession.shared
-    @ObservedObject var nextController = DriverNextStopController.shared
 
     // See DriverTabView.embedded - when true this is hosted as the
     // owner's "My Route" tab, which has no Route-list/Profile tabs of
@@ -14,237 +12,127 @@ struct DriverDashboardView: View {
     // has real tabs for both, so these stay hidden there.
     var embedded: Bool = false
 
-    @State private var now = Date()
     @State private var isTogglingShift = false
-    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var activeSheet: ActiveSheet?
 
-    var elapsedShiftText: String {
-        guard let startedAt = session.activeShift?.startedAt else { return "0:00:00" }
-        let seconds = max(0, Int(now.timeIntervalSince(startedAt)))
-        return String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+    // ONE sheet modifier driven by an enum, rather than three chained
+    // .sheet modifiers on the same view - stacking those silently drops
+    // presentations in SwiftUI.
+    private enum ActiveSheet: Identifiable {
+        case stop(Stop)
+        case route
+        case profile
+
+        var id: String {
+            switch self {
+            case .stop(let s): return "stop-\(s.id)"
+            case .route: return "route"
+            case .profile: return "profile"
+            }
+        }
     }
 
-    var nextStop: Stop? {
-        nextController.nextStop
-    }
+    private var nextStop: Stop? { session.nextStop }
+    private var completedCount: Int { session.activeStops.filter { $0.isCompleted }.count }
+    private var totalStops: Int { session.activeStops.count }
 
-    var completedCount: Int {
-        session.activeStops.filter { $0.isCompleted }.count
-    }
-
-    var totalStops: Int {
-        session.activeStops.count
-    }
-
-    var progressText: String {
-        "\(completedCount) / \(totalStops) stops completed"
-    }
-
-    // Map-first, same pattern as OwnerDashboardView: the live map is
-    // the primary content, everything the driver actually needs to
-    // act on (shift control, route progress, next stop) lives in a
-    // draggable bottom sheet on top of it - map stays visible and
-    // interactive underneath at every sheet detent.
+    // MAP-FIRST, AND ACTUALLY MEANING IT.
+    //
+    // This used to be the map under a DraggableBottomSheet holding a
+    // NavigationStack wrapped around a ScrollView of cards. Three
+    // problems, all of which the driver felt at once:
+    //
+    //  1. STUTTER. The sheet's height was driven by @GestureState, so
+    //     every single touch-move re-evaluated the sheet's entire
+    //     content - NavigationStack, ScrollView and all the cards -
+    //     while compositing a shadow over a live Map.
+    //  2. A SECOND, SLOWER STUTTER. A 1Hz Timer.publish updated a
+    //     @State date on THIS view to drive the shift clock, so the
+    //     whole body, DriverMapView included, was invalidated once a
+    //     second, forever, even with no shift running. The clock now
+    //     lives in its own TimelineView subtree (see shiftLine) where
+    //     ticking redraws a single line of text and nothing else.
+    //  3. THE MAP WAS BARELY VISIBLE. 170pt collapsed, plus the tab
+    //     bar, on a screen whose whole point is the map.
+    //
+    // So: no drag, no scroll, no nested navigation. A short fixed card
+    // pinned to the bottom with the one thing that matters (the next
+    // stop) and a small shift button. Everything longer-form already
+    // has its own tab.
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             DriverMapView()
-            DraggableBottomSheet(collapsedHeight: 170) {
-                widgetSheet
-            }
+                .ignoresSafeArea(edges: .top)
+
+            statusCard
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
         }
-        .onAppear {
-            nextController.updateNextStop()
-        }
-        .onReceive(clock) { now = $0 }
-    }
-
-    // Job-focused, Uber-Driver-style priority: the one thing a driver
-    // actually needs right now (their next stop, one big action
-    // button) leads, visible at the sheet's collapsed height without
-    // dragging. A name/greeting and the full shift-timer readout used
-    // to occupy that entire collapsed space instead - true but not
-    // actionable, so it's compact header info now, not the headline.
-    private var widgetSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-
-                    compactHeader
-
-                    // MARK: - Next Stop (the primary, above-the-fold content)
-                    if let stop = nextStop {
-                        VStack(spacing: 12) {
-                            HStack {
-                                Text("Next Stop")
-                                    .font(.headline)
-                                    .foregroundColor(Color("WRThemeGold"))
-                                Spacer()
-                                Text("Stop \(stop.order + 1) of \(totalStops)")
-                                    .font(.caption)
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-
-                            Text(stop.customerName ?? "Customer")
-                                .font(.title2.bold())
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Text(stop.address)
-                                .foregroundColor(.white.opacity(0.7))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            NavigationLink {
-                                DriverStopView(stop: stop)
-                            } label: {
-                                Text("Open Stop")
-                                    .font(.headline)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color("WRThemeGold"))
-                                    .foregroundColor(.black)
-                                    .cornerRadius(14)
-                            }
-                        }
-                        .padding()
-                        .background(Color.black.opacity(0.25))
-                        .cornerRadius(16)
-                        .padding(.horizontal)
-                    } else if let stopsError = session.stopsError {
-                        // A route that couldn't be READ must never be
-                        // reported as a route that's FINISHED. This
-                        // branch has to come first: a failed load leaves
-                        // activeStops empty, which is indistinguishable
-                        // from a completed route without it.
-                        VStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.title2)
-                                .foregroundColor(Color("WRThemeGold"))
-                            Text("Couldn't load your route")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                            Text(stopsError)
-                                .font(.footnote)
-                                .multilineTextAlignment(.center)
-                                .foregroundColor(.white.opacity(0.6))
-                            Button("Try Again") { session.refresh() }
-                                .font(.subheadline.bold())
-                                .foregroundColor(Color("WRThemeGold"))
-                                .padding(.top, 4)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                    } else if session.assignedRoute != nil && session.hasLoadedStops {
-                        VStack(spacing: 8) {
-                            Text("Route Completed 🎉")
-                                .font(.title2.bold())
-                                .foregroundColor(Color.green)
-                            Text("All stops finished.")
-                                .foregroundColor(.white.opacity(0.6))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                    } else if session.assignedRoute != nil {
-                        // Assigned, but nothing has come back yet.
-                        VStack(spacing: 8) {
-                            ProgressView()
-                                .tint(Color("WRThemeGold"))
-                            Text("Loading your route…")
-                                .foregroundColor(.white.opacity(0.6))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                    } else {
-                        VStack(spacing: 6) {
-                            Image(systemName: "map")
-                                .font(.title2)
-                                .foregroundColor(.white.opacity(0.4))
-                            Text("No route assigned for today")
-                                .font(.headline)
-                                .foregroundColor(.white.opacity(0.7))
-                            Text("Contact your manager if you were expecting one.")
-                                .font(.footnote)
-                                .foregroundColor(.white.opacity(0.5))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                    }
-
-                    Divider().overlay(Color("WRThemeGold")).padding(.horizontal)
-
-                    // MARK: - Shift Start/End (secondary - below the fold)
-                    shiftControl
-
-                    if session.assignedRoute != nil {
-                        Divider().overlay(Color("WRThemeGold")).padding(.horizontal)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(session.assignedRoute?.name ?? "Assigned Route")
-                                .font(.headline)
-                                .foregroundColor(.white.opacity(0.8))
-                            ProgressView(value: Double(completedCount), total: Double(max(1, totalStops)))
-                                .tint(Color("WRThemeGold"))
-                            Text(progressText)
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .padding(.horizontal)
-                    }
-
-                    Spacer(minLength: 16)
-                }
-                .padding(.top, 4)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .stop(let stop): DriverStopView(stop: stop)
+            case .route: DriverRouteView()
+            case .profile: DriverProfileView()
             }
-            .navigationTitle("")
-            .navigationBarHidden(true)
         }
     }
 
-    // Name + on-shift status in one compact line instead of a large
-    // separate greeting block - frees the collapsed sheet's limited
-    // height for the Next Stop card, which is what's actually
-    // actionable.
-    private var compactHeader: some View {
-        HStack {
+    // MARK: - Status Card
+    private var statusCard: some View {
+        VStack(spacing: 10) {
+            header
+
+            routeState
+
+            if session.assignedRoute != nil && totalStops > 0 {
+                ProgressView(value: Double(completedCount), total: Double(max(1, totalStops)))
+                    .tint(Color("WRThemeGold"))
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color("WRThemeGold").opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    // Name, live shift clock, the small shift button, and (only when
+    // embedded in the owner's tab) the two jump-off buttons.
+    private var header: some View {
+        HStack(spacing: 10) {
             if let driver = session.driver {
                 Text(driver.name)
-                    .font(.headline)
+                    .font(.subheadline.bold())
                     .foregroundColor(Color("WRThemeGold"))
                     .lineLimit(1)
             }
 
-            if let shift = session.activeShift, shift.isActive {
-                Text("• \(elapsedShiftText)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundColor(.green)
-            }
+            shiftLine
 
-            Spacer()
+            Spacer(minLength: 4)
 
             if embedded {
-                NavigationLink {
-                    DriverRouteView()
-                } label: {
+                Button { activeSheet = .route } label: {
                     Image(systemName: "list.bullet.rectangle")
                         .foregroundColor(Color("WRThemeGold"))
                 }
-                NavigationLink {
-                    DriverProfileView()
-                } label: {
+                Button { activeSheet = .profile } label: {
                     Image(systemName: "person.crop.circle.fill")
                         .foregroundColor(Color("WRThemeGold"))
                 }
             }
+
+            shiftButton
         }
-        .padding(.horizontal)
     }
 
-    // MARK: - Shift Control
-    // Just the action button - the elapsed time and on-shift status
-    // are already shown once, compactly, in the header above. Showing
-    // the same giant timer a second time here was pure duplication,
-    // not a second piece of information.
-    private var shiftControl: some View {
-        VStack(spacing: 10) {
+    // SMALL. A pill, not a full-width slab - the map is the screen.
+    private var shiftButton: some View {
+        Group {
             if let shift = session.activeShift, shift.isActive {
                 Button {
                     isTogglingShift = true
@@ -253,12 +141,13 @@ struct DriverDashboardView: View {
                         isTogglingShift = false
                     }
                 } label: {
-                    Text(isTogglingShift ? "Ending…" : "End Shift")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red.opacity(0.7))
+                    Text(isTogglingShift ? "Ending…" : "End")
+                        .font(.subheadline.bold())
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 9)
+                        .background(Color.red.opacity(0.85))
                         .foregroundColor(.white)
-                        .cornerRadius(14)
+                        .clipShape(Capsule())
                 }
                 .disabled(isTogglingShift)
             } else {
@@ -270,24 +159,106 @@ struct DriverDashboardView: View {
                     }
                 } label: {
                     Text(isTogglingShift ? "Starting…" : "Start Shift")
-                        .frame(maxWidth: .infinity)
-                        .padding()
+                        .font(.subheadline.bold())
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 9)
                         .background(Color("WRThemeGold"))
                         .foregroundColor(.black)
-                        .fontWeight(.bold)
-                        .cornerRadius(14)
+                        .clipShape(Capsule())
                 }
                 .disabled(isTogglingShift)
             }
+        }
+    }
 
-            if let shiftError = session.shiftError {
-                Text(shiftError)
-                    .font(.footnote)
-                    .foregroundColor(.red)
-                    .multilineTextAlignment(.center)
+    /// The shift clock, isolated in its own TimelineView so that
+    /// ticking once a second redraws THIS TEXT and nothing else. It
+    /// used to be a Timer.publish feeding @State on the parent, which
+    /// invalidated the whole screen - map included - every second.
+    @ViewBuilder
+    private var shiftLine: some View {
+        if let shift = session.activeShift, shift.isActive {
+            TimelineView(.periodic(from: shift.startedAt, by: 1)) { context in
+                let seconds = max(0, Int(context.date.timeIntervalSince(shift.startedAt)))
+                Text(String(format: "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundColor(.green)
             }
         }
-        .padding(.horizontal)
+    }
+
+    // MARK: - Route State
+    // Deliberately at most three short lines. Anything longer belongs
+    // on the Route tab, which exists.
+    @ViewBuilder
+    private var routeState: some View {
+        if let stopsError = session.stopsError {
+            // A route that couldn't be READ must never be reported as a
+            // route that's FINISHED - a failed load leaves activeStops
+            // empty, which is otherwise indistinguishable from done.
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(Color("WRThemeGold"))
+                Text(stopsError)
+                    .font(.footnote)
+                    .foregroundColor(.white.opacity(0.75))
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                Button("Retry") { session.refresh() }
+                    .font(.footnote.bold())
+                    .foregroundColor(Color("WRThemeGold"))
+            }
+        } else if let stop = nextStop {
+            Button {
+                activeSheet = .stop(stop)
+            } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(stop.customerName ?? "Customer")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        Text(stop.address)
+                            .font(.footnote)
+                            .foregroundColor(.white.opacity(0.65))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    Text("\(completedCount)/\(totalStops)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundColor(.white.opacity(0.5))
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.bold())
+                        .foregroundColor(Color("WRThemeGold"))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else if session.assignedRoute != nil && session.hasLoadedStops {
+            Text("Route complete 🎉")
+                .font(.subheadline.bold())
+                .foregroundColor(.green)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if session.assignedRoute != nil {
+            HStack(spacing: 8) {
+                ProgressView().tint(Color("WRThemeGold"))
+                Text("Loading your route…")
+                    .font(.footnote)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text("No route assigned for today")
+                .font(.footnote)
+                .foregroundColor(.white.opacity(0.6))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        if let shiftError = session.shiftError {
+            Text(shiftError)
+                .font(.caption)
+                .foregroundColor(.red)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
-

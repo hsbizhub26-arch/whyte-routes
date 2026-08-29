@@ -517,10 +517,20 @@ extension DriverStopView {
     // MARK: ACTION BUTTONS
     private var actionButtons: some View {
         VStack(spacing: 16) {
-            // In-app nav is the primary action now; the handoff to
-            // Apple/Google/Waze stays available underneath rather than
-            // being removed - those still win on live traffic, and a
-            // driver with a strong preference shouldn't lose it.
+            // IN-APP NAVIGATION IS THE ONLY NAVIGATION.
+            //
+            // There used to be a second "Navigate" button directly
+            // underneath this one that handed off to Apple Maps /
+            // Google Maps / Waze. Two buttons doing what looks like the
+            // same job, and the external one was the one that read
+            // simply "Navigate" - so that is the one drivers pressed,
+            // and the app they ended up in was Apple Maps. The in-app
+            // turn-by-turn engine was never what anyone actually saw.
+            //
+            // Leaving the route inside the app is the point: it keeps
+            // the stop list, the arrival geofence, the customer's
+            // tracking link and the shift timer all live, none of which
+            // survive a bounce out to another app.
             if let coordinate = vm.stop.coordinate {
                 Button {
                     if nav.isNavigating {
@@ -530,7 +540,7 @@ extension DriverStopView {
                     }
                 } label: {
                     Label(
-                        nav.isNavigating ? "End Navigation" : "Start Navigation",
+                        nav.isNavigating ? "End" : "GO",
                         systemImage: nav.isNavigating ? "xmark.circle.fill" : "location.north.circle.fill"
                     )
                     .font(.headline)
@@ -542,7 +552,15 @@ extension DriverStopView {
                 }
             }
 
-            NavigationButton(coordinate: vm.stop.coordinate)
+            // Surfaced here rather than only in the maneuver banner:
+            // without it, tapping GO with no GPS fix yet did nothing
+            // visible at all, which reads as a dead button.
+            if let error = nav.errorMessage, !nav.isNavigating {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if let arrivedAt = vm.stop.arrivedAt {
                 TimerPill(arrivedAt: arrivedAt)

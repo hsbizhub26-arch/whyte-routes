@@ -53,6 +53,20 @@ final class NavigationSession: NSObject, ObservableObject {
     // MARK: - Lifecycle
 
     func start(to destination: CLLocationCoordinate2D) {
+        // Checked BEFORE flipping isNavigating, not inside
+        // calculateRoute. Routing from an unknown origin can't work, so
+        // starting first meant the button flipped to "End", no route
+        // ever drew, and nothing said why - a dead button. The most
+        // common cause is simply not being on shift: GPS tracking is
+        // tied to the shift lifecycle, so say that rather than making
+        // the driver guess.
+        guard LocationService.shared.currentLocation != nil else {
+            errorMessage = DriverSession.shared.activeShift == nil
+                ? "Start your shift first - navigation needs GPS."
+                : "Waiting for GPS…"
+            return
+        }
+
         self.destination = destination
         isNavigating = true
         errorMessage = nil
