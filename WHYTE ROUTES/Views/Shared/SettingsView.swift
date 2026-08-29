@@ -89,7 +89,7 @@ struct SettingsView: View {
                     }
                     .listRowBackground(Color.black.opacity(0.2))
                 } footer: {
-                    Text("Found a bug or something confusing while testing? Tell us right away, not after the fact.")
+                    Text("Something broken or confusing? Tell us right away - it helps more than a review does.")
                         .foregroundColor(.gray)
                 }
                 Section {
@@ -149,6 +149,12 @@ struct SettingsView: View {
                             .foregroundColor(.gray)
                     }
                 }
+                // A raw "send an SMS to an arbitrary number" harness,
+                // built for wiring up Twilio and never intended for
+                // customers. Every owner and manager could see it, and
+                // it bills the real provider on every tap. Kept for our
+                // own diagnostics, hidden from everyone else.
+                if auth.isPlatformAdmin {
                 Section {
                     TextField("+1XXXXXXXXXX", text: $testPhone)
                         .keyboardType(.phonePad)
@@ -173,6 +179,7 @@ struct SettingsView: View {
                 } footer: {
                     Text("Sends a real SMS through the live provider, clearly marked as a test - never to a real customer record. Limited to 10 per day.")
                         .foregroundColor(.gray)
+                }
                 }
                 Section {
                     NavigationLink(destination: PermissionsHelpView()) {

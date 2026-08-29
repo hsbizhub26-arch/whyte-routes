@@ -84,9 +84,15 @@ extension RealtimeLocationManager: CLLocationManagerDelegate {
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         self.authorizationStatus = manager.authorizationStatus
 
-        if authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways {
-            startUpdating(driverId: activeDriverId, routeId: activeRouteId)
-        }
+        // Deliberately does NOT start updating here.
+        //
+        // This fires whenever the delegate is assigned, which happens on
+        // every launch - so simply having granted location once started
+        // a kCLLocationAccuracyBest session on an owner's or manager's
+        // phone that nothing read and nothing ever stopped, for as long
+        // as the app was alive. Real GPS work is tied to the shift
+        // lifecycle in LocationService (see DriverSession.startShift);
+        // this class only ever mirrors it.
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {

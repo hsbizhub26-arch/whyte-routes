@@ -51,6 +51,10 @@ final class ManageEmployeesViewModel: ObservableObject {
         successMessage = nil
         isSending = true
 
+        // Captured before the field is cleared, so the confirmation can
+        // name the address the invitee has to sign up with.
+        let invitedValue = contactValue.trimmingCharacters(in: .whitespaces)
+
         repo.createInvite(
             companyId: companyId,
             companyName: companyName,
@@ -64,7 +68,21 @@ final class ManageEmployeesViewModel: ObservableObject {
                 self.isSending = false
                 switch result {
                 case .success:
-                    self.successMessage = "Invite sent."
+                    // NOT "Invite sent." Nothing is sent: creating an
+                    // invite writes a Firestore document and no email,
+                    // text or link leaves the system - there is no
+                    // invite-delivery function anywhere. An owner who
+                    // read "Invite sent" reasonably waited for a driver
+                    // who was never contacted.
+                    //
+                    // The document is genuinely all that's needed: the
+                    // person downloads the app, signs up with that exact
+                    // address, and AuthSession matches the pending
+                    // invite on their verified email. So say that, and
+                    // name the address, instead of implying we did the
+                    // contacting.
+                    let address = invitedValue
+                    self.successMessage = "Invite created for \(address). Ask them to download WHYTE ROUTES and sign up using that exact email address - they'll join your company automatically."
                     self.contactValue = ""
                 case .failure(let error):
                     self.errorMessage = error.localizedDescription
@@ -175,14 +193,21 @@ struct ManageEmployeesView: View {
                 .font(.headline)
                 .foregroundColor(WRTheme.gold)
 
-            Picker("Contact via", selection: $vm.contactMethod) {
-                Text("Email").tag("email")
-                Text("Phone").tag("phone")
-            }
-            .pickerStyle(.segmented)
-
-            TextField(vm.contactMethod == "email" ? "Email address" : "Phone number", text: $vm.contactValue)
-                .keyboardType(vm.contactMethod == "email" ? .emailAddress : .phonePad)
+            // The Phone option is deliberately not offered. Accepting an
+            // invite requires a matching verified contact on the
+            // accepting account's own auth token, and for phone that
+            // means a phone_number claim - which only phone
+            // authentication produces, and this app has none (no
+            // PhoneAuthProvider anywhere). A phone invite could
+            // therefore be created and displayed as pending, and then
+            // never be acceptable by anybody, forever.
+            //
+            // The rules and AuthSession.findUsableInvite already handle
+            // phone correctly for whenever phone auth does land; this is
+            // only the UI declining to offer a door with no room behind
+            // it.
+            TextField("Email address", text: $vm.contactValue)
+                .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding()

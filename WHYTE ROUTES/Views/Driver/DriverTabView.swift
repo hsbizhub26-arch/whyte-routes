@@ -62,15 +62,15 @@ struct DriverTabView: View {
 private extension DriverTabView {
     /// Makes sure the driver session is synced and active route is loaded
     func setupDriverOnLogin() {
-        // Refresh driver object
+        // refresh() already calls loadAssignedRoute, which looks the
+        // driver's current route up by driverId and attaches the stops
+        // listener. The loadAssignedRoute(routeId:) call that used to
+        // follow it has an identical body - it ignores the routeId it
+        // is handed and performs the same lookup - so this ran the
+        // whole thing twice, attaching two un-removable listeners to
+        // the same collection. Every stop change then delivered twice,
+        // and each delivery re-ran TrackingBroadcastService.refreshLinks,
+        // which issues one query per stop.
         DriverSession.shared.refresh()
-
-        // Restore assigned route if app was closed
-        if let driver = DriverSession.shared.driver,
-           let routeId = driver.activeRoute {
-            Task {
-                await DriverSession.shared.loadAssignedRoute(routeId: routeId)
-            }
-        }
     }
 }

@@ -181,6 +181,21 @@ struct SubscriptionTierView: View {
         }
     }
 
+    /// "per month" / "per year" / "every 2 weeks", read from StoreKit
+    /// rather than from anything we typed by hand.
+    private static func periodLabel(for product: Product) -> String? {
+        guard let period = product.subscription?.subscriptionPeriod else { return nil }
+        let unit: String
+        switch period.unit {
+        case .day: unit = "day"
+        case .week: unit = "week"
+        case .month: unit = "month"
+        case .year: unit = "year"
+        @unknown default: return nil
+        }
+        return period.value == 1 ? "per \(unit)" : "every \(period.value) \(unit)s"
+    }
+
     private func priceButton(product: Product, badge: String?) -> some View {
         Button {
             Task { await purchaseManager.purchase(product) }
@@ -200,8 +215,22 @@ struct SubscriptionTierView: View {
                     }
                 }
                 Spacer()
-                Text(product.displayPrice)
-                    .font(.title3.bold())
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(product.displayPrice)
+                        .font(.title3.bold())
+                    // Guideline 3.1.2 wants the length of the
+                    // subscription on screen at the point of purchase,
+                    // not only the price. This was relying on the App
+                    // Store Connect display name happening to contain
+                    // the word "Monthly" - which is metadata that can
+                    // be edited later, in a different system, without
+                    // anyone noticing the disclosure went with it.
+                    if let period = Self.periodLabel(for: product) {
+                        Text(period)
+                            .font(.caption2)
+                            .opacity(0.75)
+                    }
+                }
             }
             .padding()
             .frame(maxWidth: .infinity)

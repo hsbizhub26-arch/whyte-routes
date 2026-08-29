@@ -201,7 +201,18 @@ final class StopsRepository {
             return
         }
 
-        stopRef.setData(stop.toDict()) { error in
+        // merge: true for the same reason as saveStops - toDict() omits
+        // nil optionals and a plain setData reads absence as deletion.
+        // This is the driver's En Route / Arrived / Completed path, so
+        // it runs several times per stop, every stop, all shift.
+        //
+        // It also keeps the write honest for the rules: the driver
+        // branch now permits only the keys that recording their own
+        // work touches, and that is judged on what actually CHANGED.
+        // Without merge, every field the local Stop happened not to
+        // carry would count as a deletion, and the whole write would be
+        // refused.
+        stopRef.setData(stop.toDict(), merge: true) { error in
             if let error = error {
                 print("❌ Failed updating stop:", error.localizedDescription)
                 completion?(false)

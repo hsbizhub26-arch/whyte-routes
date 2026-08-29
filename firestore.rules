@@ -444,8 +444,23 @@ service cloud.firestore {
           // not just the app's good behavior.
           allow read: if isCompanyStaff(companyId)
                       || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
+          // A driver may only touch the fields that recording their own
+          // work actually needs - the same affectedKeys() shape the
+          // routes rule above already uses. Without it, "can write my
+          // own stop" meant "can rewrite anything on my own stop",
+          // including customerPhone and customerOptedIn: a driver could
+          // point a customer's arrival texts at any number they liked
+          // and flip consent on for someone who had refused it, and the
+          // send path trusts exactly those fields when the stop has no
+          // linked Customer record. Customer identity and the address
+          // belong to staff.
           allow write: if isCompanyStaff(companyId)
-                       || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
+                       || (isCompanyMember(companyId)
+                            && resource.data.driverId == request.auth.uid
+                            && request.resource.data.diff(resource.data).affectedKeys()
+                                 .hasOnly(['status', 'isCompleted', 'isSkipped',
+                                           'enRouteAt', 'arrivedAt', 'completedAt',
+                                           'driverNotes', 'updatedAt']));
 
           // ── .../stops/{stopId}/photos/{photoId} ─────────
           // Proof-of-work photo metadata (the actual image lives in
