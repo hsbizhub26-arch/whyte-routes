@@ -758,6 +758,18 @@ exports.sendTrackingLink = onCall(
     let linkId;
     if (!existing.empty) {
       linkId = existing.docs[0].id;
+      // Refresh the denormalised copy before re-sending. These fields
+      // were a snapshot of the stop at creation time, and the document
+      // was reused verbatim - so if staff corrected the address, or
+      // re-pointed the stop at a different customer, the re-sent link
+      // still rendered the ORIGINAL customer's name, address and map
+      // pin to whoever received it.
+      await linksRef.doc(linkId).set({
+        customerName,
+        address: stopData.address || "",
+        ...(typeof stopData.latitude === "number" ? { stopLatitude: stopData.latitude } : {}),
+        ...(typeof stopData.longitude === "number" ? { stopLongitude: stopData.longitude } : {}),
+      }, { merge: true });
     } else {
       const doc = linksRef.doc();
       await doc.set({

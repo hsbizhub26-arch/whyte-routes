@@ -17,14 +17,26 @@ import Combine
 //   CURRENT (the driver is on the way to them):
 //     - live coordinates, heading and a real ETA.
 //
-// That split is not incidental. An earlier version published
-// coordinates to everyone and relied on the queue position being "just
-// a number" - which an adversarial review broke: the number CHANGING
-// is itself a signal. A customer five stops back watching the count
-// drop knows the truck's coordinates at that instant are the home of
-// whoever was just finished, and can enumerate every address ahead of
-// them that way. Withholding position until a customer is next means
-// the only property their map can ever reveal is their own.
+// That split is not incidental, and it took two rounds of adversarial
+// review to get right. Both are recorded here because each fix looked
+// obviously sufficient until it wasn't:
+//
+//  1. Coordinates once went to everyone, defended on the grounds that
+//     the queue position was "just a number". The number CHANGING is
+//     itself a signal: a customer five stops back watching the count
+//     drop knows the truck's coordinates at that instant are the home
+//     of whoever was just finished, and can enumerate every address
+//     ahead of them that way.
+//  2. Withholding coordinates until a customer is next was then
+//     claimed to mean "the only property their map can reveal is their
+//     own". Also false - the driver taps Completed standing in the
+//     PREVIOUS customer's driveway, so the first fix the newly-next
+//     customer receives pins that neighbour's house, timestamped.
+//
+// Hence the three gates below, none of which is redundant: coordinates
+// require the customer to be next, the driver to have actually started
+// driving to them recently, and the truck not to be sitting on a
+// property that has already been serviced.
 //
 // The queue position is computed here, in the app, which legitimately
 // holds the whole route; only the resulting integer is published, and
@@ -61,6 +73,13 @@ final class TrackingBroadcastService {
     // a write, so the ETA refreshes on its own slower cadence and is
     // reused in between.
     private static let etaRefreshInterval: TimeInterval = 90
+    // No position is published while within this distance of an
+    // already-completed stop - that is someone else's driveway.
+    private static let completedStopShadowRadius: CLLocationDistance = 75
+    // A local drive between stops does not take this long. Past it,
+    // the stop is presumed abandoned rather than genuinely en route,
+    // and its customer stops receiving a position.
+    private static let maxEnRouteDuration: TimeInterval = 90 * 60
 
     // MARK: - Lifecycle (tied to the shift, like GPS tracking itself)
 
@@ -111,12 +130,17 @@ final class TrackingBroadcastService {
               let coordinate = LocationService.shared.currentLocation else { return }
         forceNextPublish = false
         lastPublishedAt = nil
-        handleLocation(coordinate)
+        // Status and queue position only. This fires at the instant a
+        // stop is completed, when the cached fix is the truck standing
+        // at that just-finished property - exactly the coordinate that
+        // must not be handed to the next customer. Their map comes
+        // alive on the next real movement instead.
+        handleLocation(coordinate, allowCoordinates: false)
     }
 
     // MARK: - Publishing
 
-    private func handleLocation(_ coordinate: CLLocationCoordinate2D) {
+    private func handleLocation(_ coordinate: CLLocationCoordinate2D, allowCoordinates: Bool = true) {
         guard isRunning, !linksByStopId.isEmpty else { return }
 
         if let last = lastPublishedAt, Date().timeIntervalSince(last) < Self.publishInterval {
@@ -132,10 +156,46 @@ final class TrackingBroadcastService {
 
         refreshEtaIfStale(to: currentDestination, from: coordinate)
 
+        // Withhold position while the truck is sitting at a property
+        // that has already been serviced. Three separate reviewers
+        // landed on this: the driver taps Completed standing in the
+        // previous customer's driveway, and the very next publish -
+        // the first one the newly-next customer is allowed to see -
+        // would otherwise be a stationary, street-accurate fix on that
+        // neighbour's house, stamped with the moment their service
+        // ended. Withholding until the customer is next fixed the
+        // enumeration attack; it did nothing for the one property the
+        // handoff pins most precisely.
+        let parkedAtCompletedStop = ordered.contains { stop in
+            guard stop.isCompleted, let c = stop.coordinate else { return false }
+            return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                .distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude)) <= Self.completedStopShadowRadius
+        }
+
         for (index, stop) in remaining.enumerated() {
             guard let link = linksByStopId[stop.id] else { continue }
 
+            // Being at the head of the queue is not enough to earn a
+            // live position. The driver must have actually STARTED
+            // DRIVING to this customer, and recently.
+            //
+            // Otherwise a stop the driver silently skips - serviced
+            // but never marked complete, or abandoned at end of shift -
+            // pins the queue head permanently, and that one customer
+            // then watches the truck visit every other property on the
+            // route for the rest of the day. A stale enRouteAt is the
+            // tell, so it is bounded rather than trusted.
+            let status = JobStatus(rawValue: stop.status) ?? .scheduled
+            let enRouteRecently: Bool = {
+                guard status == .enRoute, let since = stop.enRouteAt else { return false }
+                return Date().timeIntervalSince(since) <= Self.maxEnRouteDuration
+            }()
+
             let isCurrent = (index == 0)
+            let mayShareCoordinates = isCurrent
+                && allowCoordinates
+                && enRouteRecently
+                && !parkedAtCompletedStop
 
             // COORDINATES ONLY FOR THE CUSTOMER BEING DRIVEN TO.
             //
@@ -156,9 +216,9 @@ final class TrackingBroadcastService {
             linkRepo.publishLocation(
                 companyId: companyId,
                 linkId: link.id,
-                latitude: isCurrent ? coordinate.latitude : nil,
-                longitude: isCurrent ? coordinate.longitude : nil,
-                heading: isCurrent ? LocationService.shared.currentHeading : nil,
+                latitude: mayShareCoordinates ? coordinate.latitude : nil,
+                longitude: mayShareCoordinates ? coordinate.longitude : nil,
+                heading: mayShareCoordinates ? LocationService.shared.currentHeading : nil,
                 stopsBefore: index,
                 isCurrentDestination: isCurrent,
                 // Only the customer actually being driven to gets an
@@ -166,7 +226,7 @@ final class TrackingBroadcastService {
                 // would be a guess presented as a fact - how long the
                 // driver spends at each property in between is exactly
                 // what can't be known.
-                etaMinutes: isCurrent ? cachedEtaMinutes : nil
+                etaMinutes: mayShareCoordinates ? cachedEtaMinutes : nil
             )
         }
     }
