@@ -239,6 +239,19 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   const stopsBefore = typeof d.stopsBefore === "number" ? d.stopsBefore : null;
   const isNext = d.isCurrentDestination === true || stopsBefore === 0;
 
+  // Driver is physically at this property. Takes precedence over
+  // everything else - an ETA or "on the way" while they're standing in
+  // the driveway reads as broken.
+  if (d.hasArrived === true) {
+    $("statusText").textContent = "Your driver is here";
+    $("queue").hidden = true;
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+    $("stale").hidden = true;
+    updateRouteLine(false);
+    return;
+  }
+
   if (stopsBefore !== null && stopsBefore > 0) {
     $("statusText").textContent = "Driver has a stop on the way";
     $("queue").hidden = false;

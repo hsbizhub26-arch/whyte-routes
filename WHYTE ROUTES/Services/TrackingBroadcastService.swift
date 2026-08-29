@@ -199,6 +199,23 @@ final class TrackingBroadcastService {
                 return Date().timeIntervalSince(since) <= Self.maxEnRouteDuration
             }()
 
+            // Once the driver has arrived, keep the pin alive - but
+            // only while the truck is genuinely at THIS customer's
+            // address, where the only thing its position can reveal is
+            // that customer's own house.
+            //
+            // The proximity test is what makes this safe. A driver who
+            // arrives and then leaves without completing would
+            // otherwise keep this stop at the head of the queue and
+            // stream their position onward to the next property, which
+            // is the abandoned-stop leak in a different disguise.
+            let arrivedAndStillHere: Bool = {
+                guard status == .arrived,
+                      let mine = stop.coordinate else { return false }
+                return here.distance(from: CLLocation(latitude: mine.latitude, longitude: mine.longitude))
+                    <= Self.completedStopShadowRadius
+            }()
+
             let isCurrent = (index == 0)
 
             // NEAREST WINS, rather than a flat exclusion radius.
@@ -227,7 +244,7 @@ final class TrackingBroadcastService {
 
             let mayShareCoordinates = isCurrent
                 && allowCoordinates
-                && enRouteRecently
+                && (enRouteRecently || arrivedAndStillHere)
                 && fixIsTrustworthy
                 && !sittingOnAFinishedProperty
 
@@ -255,6 +272,7 @@ final class TrackingBroadcastService {
                 heading: mayShareCoordinates ? LocationService.shared.currentHeading : nil,
                 stopsBefore: index,
                 isCurrentDestination: isCurrent,
+                hasArrived: status == .arrived,
                 // Only the customer actually being driven to gets an
                 // ETA. Publishing one to somebody four stops back
                 // would be a guess presented as a fact - how long the

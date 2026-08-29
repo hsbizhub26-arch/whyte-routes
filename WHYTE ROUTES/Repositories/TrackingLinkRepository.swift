@@ -82,6 +82,7 @@ final class TrackingLinkRepository {
         heading: Double? = nil,
         stopsBefore: Int? = nil,
         isCurrentDestination: Bool? = nil,
+        hasArrived: Bool? = nil,
         etaMinutes: Int?
     ) {
         var data: [String: Any] = [
@@ -112,6 +113,10 @@ final class TrackingLinkRepository {
         // being able to read another customer's record.
         if let stopsBefore { data["stopsBefore"] = stopsBefore }
         if let isCurrentDestination { data["isCurrentDestination"] = isCurrentDestination }
+        // Purely a status flag - lets the customer's page say "your
+        // driver is here" instead of insisting they're still on the
+        // way while the truck sits in their driveway.
+        if let hasArrived { data["hasArrived"] = hasArrived }
         if let etaMinutes {
             data["etaMinutes"] = etaMinutes
         } else {
