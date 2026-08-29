@@ -76,6 +76,9 @@ final class TrackingBroadcastService {
     // No position is published while within this distance of an
     // already-completed stop - that is someone else's driveway.
     private static let completedStopShadowRadius: CLLocationDistance = 75
+    // Matches the geofence's own threshold. Neighbouring houses are
+    // ~20m apart, so a vaguer fix can rank the wrong property nearest.
+    private static let maxUsableAccuracy: CLLocationAccuracy = 25
     // A local drive between stops does not take this long. Past it,
     // the stop is presumed abandoned rather than genuinely en route,
     // and its customer stops receiving a position.
@@ -156,21 +159,26 @@ final class TrackingBroadcastService {
 
         refreshEtaIfStale(to: currentDestination, from: coordinate)
 
-        // Withhold position while the truck is sitting at a property
-        // that has already been serviced. Three separate reviewers
-        // landed on this: the driver taps Completed standing in the
-        // previous customer's driveway, and the very next publish -
-        // the first one the newly-next customer is allowed to see -
-        // would otherwise be a stationary, street-accurate fix on that
-        // neighbour's house, stamped with the moment their service
-        // ended. Withholding until the customer is next fixed the
-        // enumeration attack; it did nothing for the one property the
-        // handoff pins most precisely.
-        let parkedAtCompletedStop = ordered.contains { stop in
-            guard stop.isCompleted, let c = stop.coordinate else { return false }
-            return CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-                .distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude)) <= Self.completedStopShadowRadius
-        }
+        let here = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+
+        // Distance to the nearest ALREADY-SERVICED property. Position
+        // is withheld while the truck is sitting on one of those - the
+        // driver taps Completed standing in that customer's driveway,
+        // and the first fix the newly-next customer is allowed to see
+        // would otherwise pin their neighbour's house, stamped with
+        // the moment that neighbour's service ended.
+        let nearestCompleted = ordered
+            .filter { $0.isCompleted }
+            .compactMap { $0.coordinate }
+            .map { here.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude)) }
+            .min()
+
+        // A fix too vague to trust must not be published at all. A
+        // reading accurate only to 150m can place the truck outside an
+        // exclusion zone it is physically parked inside, which would
+        // defeat the check above precisely when it matters.
+        let accuracy = LocationService.shared.currentAccuracy
+        let fixIsTrustworthy = (accuracy ?? .greatestFiniteMagnitude) <= Self.maxUsableAccuracy
 
         for (index, stop) in remaining.enumerated() {
             guard let link = linksByStopId[stop.id] else { continue }
@@ -192,10 +200,36 @@ final class TrackingBroadcastService {
             }()
 
             let isCurrent = (index == 0)
+
+            // NEAREST WINS, rather than a flat exclusion radius.
+            //
+            // An absolute "within 75m of any completed stop" test
+            // breaks on exactly the routes this app is for: houses sit
+            // ~20m apart, so once one is done every remaining stop on
+            // the street is inside that radius and the map would go
+            // dead for the rest of the route. Comparing distances
+            // instead means the truck stops being "at" the finished
+            // property the moment it is closer to this customer's own
+            // address - which is also the only address its position
+            // can then reveal.
+            let distanceToThisCustomer = stop.coordinate.map {
+                here.distance(from: CLLocation(latitude: $0.latitude, longitude: $0.longitude))
+            }
+            let sittingOnAFinishedProperty: Bool = {
+                guard let nearestCompleted else { return false }
+                guard nearestCompleted <= Self.completedStopShadowRadius else { return false }
+                // Inside the shadow, but if this customer's own house
+                // is nearer then the truck is arriving here, not
+                // loitering there.
+                guard let distanceToThisCustomer else { return true }
+                return nearestCompleted <= distanceToThisCustomer
+            }()
+
             let mayShareCoordinates = isCurrent
                 && allowCoordinates
                 && enRouteRecently
-                && !parkedAtCompletedStop
+                && fixIsTrustworthy
+                && !sittingOnAFinishedProperty
 
             // COORDINATES ONLY FOR THE CUSTOMER BEING DRIVEN TO.
             //

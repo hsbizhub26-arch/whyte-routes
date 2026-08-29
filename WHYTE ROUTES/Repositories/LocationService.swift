@@ -15,6 +15,12 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     /// travel is known. Used to point the driver pin on the customer's
     /// tracking page the way the truck is actually facing.
     @Published var currentHeading: CLLocationDirection?
+    /// Horizontal accuracy of the latest fix, in metres. Exposed
+    /// because callers deciding whether a coordinate is safe to
+    /// publish need to know how much to trust it - a fix vague to
+    /// 150m can place the truck outside an exclusion zone it is
+    /// physically sitting inside.
+    @Published var currentAccuracy: CLLocationAccuracy?
     // When currentLocation was actually set, not just the last time
     // this object was asked - what ETA-notification staleness checks
     // compare against, so a phone with no signal for the last 20
@@ -134,6 +140,7 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         if location.course >= 0 {
             currentHeading = location.course
         }
+        currentAccuracy = location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil
 
         guard !driverId.isEmpty else { return }
         driverRepo.updateDriverLocation(
