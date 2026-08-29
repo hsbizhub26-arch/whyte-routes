@@ -116,9 +116,26 @@ final class TrackingBroadcastService {
         guard !stops.isEmpty else { return }
         forceNextPublish = true
         for stop in stops {
-            linkRepo.activeLink(forStopId: stop.id) { [weak self] link in
+            // Matched on the CUSTOMER the stop points at now, not on
+            // the stop id. Staff can re-point a stop at somebody else
+            // mid-route without its id changing, and a stopId-only
+            // lookup would keep handing back the previous customer's
+            // link for the rest of the shift - publishing the truck's
+            // position, and eventually its arrival, into a page still
+            // showing that customer their own name and address.
+            linkRepo.activeLink(for: stop) { [weak self] link in
                 Task { @MainActor in
-                    guard let self, let link else { return }
+                    guard let self else { return }
+                    guard let link else {
+                        // Drop any link previously cached for this
+                        // stop. Without this, a link that stops
+                        // matching - because the stop was re-pointed,
+                        // or the link was superseded - would keep
+                        // being published to from the in-memory cache
+                        // for as long as the shift lasted.
+                        self.linksByStopId.removeValue(forKey: stop.id)
+                        return
+                    }
                     self.linksByStopId[stop.id] = link
                     self.publishImmediatelyIfQueueChanged()
                 }
@@ -182,6 +199,18 @@ final class TrackingBroadcastService {
 
         for (index, stop) in remaining.enumerated() {
             guard let link = linksByStopId[stop.id] else { continue }
+
+            // Re-checked here even though refreshLinks already filters
+            // on it, because this cache is filled asynchronously: the
+            // stops listener can deliver a re-pointed stop and publish
+            // against the entry still sitting in memory before the
+            // replacement query comes back. One comparison of two
+            // strings against the risk of streaming a truck's approach
+            // and arrival into the wrong customer's page.
+            guard link.belongsTo(stop) else {
+                linksByStopId.removeValue(forKey: stop.id)
+                continue
+            }
 
             // Being at the head of the queue is not enough to earn a
             // live position. The driver must have actually STARTED
@@ -272,7 +301,18 @@ final class TrackingBroadcastService {
                 heading: mayShareCoordinates ? LocationService.shared.currentHeading : nil,
                 stopsBefore: index,
                 isCurrentDestination: isCurrent,
-                hasArrived: status == .arrived,
+                // The PROXIMITY-CHECKED arrival, not the raw status.
+                //
+                // "Your driver is here" on the strength of the status
+                // alone outlives the thing it describes: a driver who
+                // taps Arrived and then leaves without completing -
+                // wrong house, nobody home, called away - leaves that
+                // customer's page insisting the truck is in their
+                // driveway for the rest of the shift. The pin already
+                // went quiet the moment the truck left the property;
+                // this makes the sentence above it go quiet too,
+                // instead of contradicting it.
+                hasArrived: arrivedAndStillHere,
                 // Only the customer actually being driven to gets an
                 // ETA. Publishing one to somebody four stops back
                 // would be a guess presented as a fact - how long the

@@ -748,25 +748,72 @@ exports.sendTrackingLink = onCall(
     // Reuse an existing active link for this stop so a customer who
     // already has the page open doesn't get a URL that silently stops
     // updating when a second link supersedes it.
+    //
+    // Reuse is only safe for the SAME PERSON, though, and a matching
+    // stopId is not proof of that. The owner's "Change Customer"
+    // picker re-points a stop at somebody else and keeps stop.id, so
+    // "the active link for this stop" can be a link that was minted
+    // for, and texted to, a different customer entirely. Refreshing it
+    // in place then rewrote that customer's open page with the new
+    // customer's name, address and map pin - and left it live to
+    // receive the driver's position on the way to that address.
+    //
+    // So: same customer, refresh in place. Different customer,
+    // SUPERSEDE - the old link goes dark and a new document id is
+    // minted, which is also what makes the already-sent URL stop
+    // working rather than quietly changing meaning.
     const linksRef = admin.firestore().collection(`companies/${companyId}/trackingLinks`);
     const existing = await linksRef
       .where("stopId", "==", stopId)
       .where("active", "==", true)
-      .limit(1)
       .get();
 
+    const stopCustomerId = stopData.customerId || null;
+
+    // Mirrors TrackingLink.belongsTo(_:) in the app - keep the two in
+    // step. Fails closed in both ambiguous cases: a link written
+    // before customerId existed has none recorded and so can never
+    // match a stop that has one, and a one-off stop with no Customer
+    // record falls back to the name and address denormalised onto the
+    // link, which are byte-identical until somebody edits them.
+    const belongsToStop = (linkData) => {
+      const linkCustomerId = linkData.customerId || null;
+      if (linkCustomerId || stopCustomerId) return linkCustomerId === stopCustomerId;
+      return linkData.address === (stopData.address || "")
+        && linkData.customerName === customerName;
+    };
+
+    const reusable = existing.docs.find((d) => belongsToStop(d.data()));
+
+    // Everything active on this stop that is NOT this customer's is
+    // torn down before the new link is handed out. Deliberately no
+    // completedAt: the security rule keeps a link readable for two
+    // hours after completion so a customer's page can show that their
+    // service finished, and a superseded customer is owed no such
+    // window - the page it powers is showing them somebody else's
+    // name and address. active:false with no completedAt denies the
+    // read immediately.
+    for (const stale of existing.docs) {
+      if (reusable && stale.id === reusable.id) continue;
+      await stale.ref.collection("location").doc("current").delete().catch(() => {});
+      await stale.ref.set({
+        active: false,
+        superseded: true,
+        supersededAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
     let linkId;
-    if (!existing.empty) {
-      linkId = existing.docs[0].id;
+    if (reusable) {
+      linkId = reusable.id;
       // Refresh the denormalised copy before re-sending. These fields
-      // were a snapshot of the stop at creation time, and the document
-      // was reused verbatim - so if staff corrected the address, or
-      // re-pointed the stop at a different customer, the re-sent link
-      // still rendered the ORIGINAL customer's name, address and map
-      // pin to whoever received it.
+      // were a snapshot of the stop at creation time and the document
+      // was reused verbatim, so a corrected address left the re-sent
+      // link still drawing the map pin at the old one.
       await linksRef.doc(linkId).set({
         customerName,
         address: stopData.address || "",
+        ...(stopCustomerId ? { customerId: stopCustomerId } : {}),
         ...(typeof stopData.latitude === "number" ? { stopLatitude: stopData.latitude } : {}),
         ...(typeof stopData.longitude === "number" ? { stopLongitude: stopData.longitude } : {}),
       }, { merge: true });
@@ -776,12 +823,17 @@ exports.sendTrackingLink = onCall(
         customerName,
         address: stopData.address || "",
         stopId,
+        // WHO this link is for, so nothing downstream has to infer it
+        // from the stop. Safe on a world-readable document in a way
+        // driverId was not: it identifies the person holding the link
+        // rather than a third party, and the customers collection
+        // stays unreadable without a login either way.
+        ...(stopCustomerId ? { customerId: stopCustomerId } : {}),
         // driverId and routeId are deliberately NOT written here.
         // This document is world-readable to anyone holding the link,
         // and an adversarial review flagged both as internal
         // identifiers published unauthenticated for no functional
-        // reason - the page never reads them, and the app associates
-        // links to stops by stopId alone.
+        // reason - the page never reads them.
         active: true,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         ...(typeof stopData.latitude === "number" ? { stopLatitude: stopData.latitude } : {}),

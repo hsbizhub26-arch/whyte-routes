@@ -196,7 +196,16 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId), (snap) => {
     else stopMarker.setLatLng(pos);
     fitIfPossible();
   }
-}, () => {
+}, (err) => {
+  // A link that has gone dark - superseded, or simply aged past the
+  // window the security rule allows - fails as permission-denied, not
+  // as a network error. Telling that customer to check their
+  // connection would send them retrying something that is never
+  // coming back; the rule is the revocation, so say so.
+  if (err && err.code === "permission-denied") {
+    showMessage("This tracking link is no longer available. If your service is still scheduled, your contractor can send a new link.");
+    return;
+  }
   showMessage("Couldn't load this tracking link. Please check your connection and try again.");
 });
 

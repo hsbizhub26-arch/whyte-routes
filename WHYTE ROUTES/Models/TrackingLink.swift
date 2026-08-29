@@ -16,6 +16,27 @@ struct TrackingLink: Identifiable {
     /// still parse.
     var driverId: String?
     var stopId: String
+    /// WHICH CUSTOMER this link belongs to, as opposed to which stop.
+    ///
+    /// Links used to be identified by stopId alone, which quietly
+    /// assumed a stop always means the same person. It doesn't: the
+    /// owner's "Change Customer" picker re-points an existing stop at
+    /// somebody else and keeps the same stop.id. A link minted for
+    /// customer A therefore stayed "the active link for this stop"
+    /// after the stop became customer B's, and the driver's app kept
+    /// publishing live position into it - A's page still showing A's
+    /// own name and address while the coordinates drove to, and then
+    /// parked at, B's house.
+    ///
+    /// nil for a one-off stop typed in by hand with no standing
+    /// Customer record, and for links written before this field
+    /// existed - see `belongsTo(_:)` for how both are handled.
+    ///
+    /// Safe on a world-readable document in a way driverId was not:
+    /// this identifies the person holding the link, not a third
+    /// party, and the customers collection stays unreadable without a
+    /// login either way.
+    var customerId: String?
     var active: Bool
     var createdAt: Date?
     /// The destination itself, denormalised onto the link so the
@@ -42,6 +63,7 @@ extension TrackingLink {
         self.address = address
         self.driverId = driverId
         self.stopId = stopId
+        self.customerId = dict["customerId"] as? String
         self.active = dict["active"] as? Bool ?? true
 
         if let ts = dict["createdAt"] as? Timestamp {
@@ -62,6 +84,7 @@ extension TrackingLink {
             "active": active
         ]
 
+        if let customerId { d["customerId"] = customerId }
         if let createdAt {
             d["createdAt"] = Timestamp(date: createdAt)
         }
@@ -69,6 +92,35 @@ extension TrackingLink {
         if let stopLongitude { d["stopLongitude"] = stopLongitude }
 
         return d
+    }
+
+    /// Whether this link still belongs to the person the stop points
+    /// at right now. Anything that publishes a live position must ask
+    /// this first: matching stopId is NOT proof the recipient is the
+    /// same customer the link was minted for.
+    ///
+    /// Deliberately fails closed in the ambiguous cases:
+    ///
+    ///  - A link written before customerId existed has none recorded,
+    ///    so a stop that has one can never match it. The link is
+    ///    treated as somebody else's and superseded. Cheap: staff
+    ///    re-send and the customer gets a fresh URL.
+    ///  - A one-off stop with no Customer record has nothing stable to
+    ///    compare, so it falls back to the name and address that were
+    ///    denormalised onto the link. Those are byte-identical for an
+    ///    untouched stop, and any edit to either supersedes - which is
+    ///    also the right call, since a changed address means the pin
+    ///    on the customer's map has moved.
+    ///
+    /// The name fallback mirrors the Cloud Function's `|| "Customer"`
+    /// exactly; without that an unnamed one-off stop would compare
+    /// "Customer" against "" and supersede its own link on every send.
+    func belongsTo(_ stop: Stop) -> Bool {
+        if customerId != nil || stop.customerId != nil {
+            return customerId == stop.customerId
+        }
+        let expectedName = (stop.customerName?.isEmpty == false) ? stop.customerName! : "Customer"
+        return address == stop.address && customerName == expectedName
     }
 
     /// Encodes both the company and the link itself - the customer's

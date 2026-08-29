@@ -120,6 +120,11 @@ final class RouteService: ObservableObject {
             address: stop.address,
             driverId: driverId,
             stopId: stop.id,
+            // Binds the link to the person, not just the stop. Without
+            // it the link can't be told apart from one belonging to a
+            // customer this stop used to point at, and everything
+            // downstream has to assume the worst and supersede it.
+            customerId: stop.customerId,
             completion: completion
         )
     }

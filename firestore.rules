@@ -76,14 +76,35 @@ service cloud.firestore {
     // Bounded from creation as well, so a link on a job that is never
     // formally closed out doesn't stay readable forever.
     //
+    // A SUPERSEDED link is excluded outright, with no grace window of
+    // any kind. That is the state a link is put into when its stop
+    // stops meaning the person the link was minted for - staff
+    // re-pointed the stop at a different customer, or removed it.
+    // The completion window exists so somebody can see their own job
+    // finish; a superseded link's holder would instead be looking at a
+    // page for a job that is now somebody else's, so it goes dark on
+    // the spot.
+    //
+    // Every field is read with an explicit presence check rather than
+    // bare `link.completedAt`. A missing key in Firestore rules raises
+    // an evaluation error, which does deny - but by accident rather
+    // than by decision, and it means an unrelated future write that
+    // happens to drop a field changes who can read what. Stated
+    // outright instead, and defaulting to closed.
+    //
     // Reads the PARENT link document by path rather than `resource`,
     // so the same condition works for the location subcollection.
     function isLiveTrackingLink(companyId, linkId) {
       let link = get(/databases/$(database)/documents/companies/$(companyId)/trackingLinks/$(linkId)).data;
-      return (link.active == true
+      return link.get('superseded', false) != true
+        && (
+             (link.get('active', false) == true
+               && 'createdAt' in link
                && request.time < link.createdAt + duration.value(24, 'h'))
-          || (link.completedAt != null
-               && request.time < link.completedAt + duration.value(2, 'h'));
+          || ('completedAt' in link
+               && link.completedAt != null
+               && request.time < link.completedAt + duration.value(2, 'h'))
+        );
     }
 
     function canAccessCompany(companyId) {

@@ -27,6 +27,10 @@ struct EditRouteView: View {
     @State private var endLongitude: Double?
 
     @State private var originalStopIds: Set<String> = []
+    // Who each stop belonged to when this screen opened. Compared on
+    // save so a stop re-pointed at a different customer can have the
+    // previous customer's tracking links torn down - see save().
+    @State private var originalStopCustomers: [String: String] = [:]
     @State private var originalDriverId: String?
     @State private var hasLoadedStopsOnce = false
 
@@ -44,7 +48,17 @@ struct EditRouteView: View {
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
     private let driverRepo = FirestoreDriverRepository()
+    private let trackingRepo = TrackingLinkRepository()
     private let access = FeatureAccessManager.shared
+
+    /// A stable stand-in for "which person is this stop", used only to
+    /// notice that it changed. Falls back to the cached name and
+    /// address for a one-off stop with no Customer record, the same
+    /// way TrackingLink.belongsTo(_:) does.
+    private func customerIdentity(of stop: Stop) -> String {
+        if let customerId = stop.customerId { return "cid:\(customerId)" }
+        return "adhoc:\(stop.customerName ?? "")|\(stop.address)"
+    }
 
     private var startCoordinate: CLLocationCoordinate2D? {
         guard let startLatitude, let startLongitude else { return nil }
@@ -498,6 +512,10 @@ struct EditRouteView: View {
                 hasLoadedStopsOnce = true
                 stops = fetched.sorted { $0.order < $1.order }
                 originalStopIds = Set(fetched.map { $0.id })
+                originalStopCustomers = Dictionary(
+                    fetched.map { ($0.id, customerIdentity(of: $0)) },
+                    uniquingKeysWith: { first, _ in first }
+                )
                 isLoading = false
             }
         }
@@ -553,8 +571,30 @@ struct EditRouteView: View {
                 }
                 stopsRepo.saveStops(forRoute: routeId, stops: orderedStops)
 
+                // A stop that now means a different person must not
+                // keep the previous person's tracking links alive.
+                // Those links carry that customer's own name and
+                // address, so nothing on their page looks wrong - but
+                // the stop underneath is somebody else's now, and the
+                // driver would go on publishing position into it right
+                // up to parking in the new customer's driveway.
+                //
+                // Done here rather than in apply() because a re-point
+                // isn't real until it's saved; an owner who opens the
+                // picker, changes their mind and taps Cancel should
+                // not have knocked a live customer's link offline.
+                for stop in orderedStops {
+                    guard let original = originalStopCustomers[stop.id] else { continue }
+                    if original != customerIdentity(of: stop) {
+                        trackingRepo.supersedeLinks(forStopId: stop.id)
+                    }
+                }
+
+                // Removing a stop outright ends its tracking for the
+                // same reason - there is no longer a job to watch.
                 let currentIds = Set(orderedStops.map { $0.id })
                 for removedId in originalStopIds.subtracting(currentIds) {
+                    trackingRepo.supersedeLinks(forStopId: removedId)
                     stopsRepo.deleteStop(routeId: routeId, stopId: removedId)
                 }
 
