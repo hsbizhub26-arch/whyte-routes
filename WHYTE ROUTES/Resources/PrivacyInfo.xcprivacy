@@ -70,24 +70,17 @@
 				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
 			</array>
 		</dict>
-		<!-- Driver's licence images (PhotoUploader.uploadLicensePhoto).
-		     Government photo ID is a category App Review actively probes
-		     for, and it was declared nowhere: not here, not in the App
-		     Store privacy labels, not in the published policy. -->
-		<dict>
-			<key>NSPrivacyCollectedDataType</key>
-			<string>NSPrivacyCollectedDataTypeSensitiveInfo</string>
-			<key>NSPrivacyCollectedDataTypeLinked</key>
-			<true/>
-			<key>NSPrivacyCollectedDataTypeTracking</key>
-			<false/>
-			<key>NSPrivacyCollectedDataTypePurposes</key>
-			<array>
-				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
-			</array>
-		</dict>
-		<!-- The camera and photo-library pickers, covering both the
-		     licence upload and proof-of-work capture. -->
+		<!-- The camera and photo-library pickers. This is also where
+		     DRIVER'S LICENCE IMAGES are declared.
+		     They were briefly declared as SensitiveInfo as well, which
+		     was wrong: Apple defines that category explicitly as racial
+		     or ethnic data, sexual orientation, pregnancy, disability,
+		     religious or philosophical belief, trade union membership,
+		     political opinion, genetic or biometric data. A photo of a
+		     licence is none of those - it is a photo the user provides.
+		     Over-declaring is not free: the manifest has to match the
+		     App Store privacy labels exactly, and the labels can only
+		     say what Apple's own taxonomy allows. -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>
 			<string>NSPrivacyCollectedDataTypePhotosorVideos</string>
