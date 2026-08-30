@@ -55,6 +55,14 @@ struct OwnerDashboardView: View {
                 if isPanelOpen {
                     widgetSheet
                         .frame(maxHeight: 380)
+                        // CLIPPED, then backgrounded. Without the clip
+                        // the ScrollView's content drew straight past
+                        // the rounded corners of its own panel, so the
+                        // card at the bottom appeared to spill out and
+                        // then vanish under the tab bar - which read as
+                        // "it won't scroll" when it was scrolling into
+                        // a region nothing could see or touch.
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .background(
                             RoundedRectangle(cornerRadius: 20, style: .continuous)
                                 .fill(Color.black)
@@ -65,6 +73,11 @@ struct OwnerDashboardView: View {
                 }
             }
             .padding(.bottom, 6)
+            // The map underneath deliberately bleeds past the bottom
+            // safe area; this overlay must not. Without it the panel
+            // ran under the tab bar and lost its last 80-odd points to
+            // something the finger can't reach.
+            .safeAreaPadding(.bottom)
         }
         .onAppear {
             driverVM.startLiveUpdates()
