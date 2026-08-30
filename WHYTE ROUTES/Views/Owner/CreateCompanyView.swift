@@ -19,12 +19,12 @@ struct CreateCompanyView: View {
 
         var subtitle: String {
             switch self {
-            case .starter: return "Free - up to 10 customers"
+            case .starter: return "Free - 1 route, 1 driver, 5 stops"
             // Keep in step with SubscriptionTierView.Tier.features -
             // this is the same promise, made on a different screen.
             // "proof of work" was dropped from both: the capture button
             // has no call site, so the feature is unreachable on every tier.
-            case .premium: return "Customer texts & tracking, live fleet map, route optimization"
+            case .premium: return "Customer texts & tracking, unlimited stops, your whole crew"
             case .premiumPlus: return "Everything in Premium, plus driver reports & unlimited customers"
             }
         }

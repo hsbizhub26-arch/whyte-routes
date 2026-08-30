@@ -60,12 +60,22 @@ struct LiveFleetMapView: View {
     private let driverRepo: DriverRepository = FirestoreDriverRepository()
     private let locationAuthorizer = OwnerLocationAuthorizer()
 
+    // THE MAP IS NOT THE PAID FEATURE. The FLEET is.
+    //
+    // This used to replace the entire map with an upgrade wall on
+    // Starter, which made a padlock the first thing a free owner saw
+    // every time they opened the app - as their home screen. It was
+    // also pointless as a gate: Starter is one driver on one route, and
+    // a "fleet map" of one truck is just a map. There was nothing being
+    // withheld except the ability to see your own morning.
+    //
+    // So everyone gets the map. What Premium buys is the fleet: the
+    // driver filter pills, and the ability to have more than one truck
+    // on it in the first place (see driverLimit). A solo operator sees
+    // their own route and their own position; an owner with a crew sees
+    // all of them and can isolate one.
     var body: some View {
-        if access.canAccessLiveFleetMap() {
-            map
-        } else {
-            UpgradeRequiredView(featureName: "Live Fleet Map", requiredTier: access.requiredTierForLiveFleetMap)
-        }
+        map
     }
 
     private var visibleDrivers: [Driver] {
@@ -136,7 +146,16 @@ struct LiveFleetMapView: View {
                 MapUserLocationButton()
             }
 
-            driverLegend
+            // The pills are the actual fleet feature - picking one
+            // truck out of several. With a single driver there is
+            // nothing to pick between, so on Starter they would be an
+            // "All" chip next to one name: clutter over the map rather
+            // than a capability. Hidden rather than locked, because a
+            // padlock over a control that would do nothing anyway
+            // reads as a smaller app, not a bigger upsell.
+            if access.canAccessLiveFleetMap() {
+                driverLegend
+            }
 
             if let selectedDriverId, let driver = visibleDrivers.first(where: { $0.id == selectedDriverId }) {
                 driverDetailCard(driver: driver)

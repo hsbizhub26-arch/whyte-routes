@@ -56,12 +56,23 @@ struct SubscriptionTierView: View {
                 // bullet removed earlier today: that advertised
                 // something the app could not do, this did something it
                 // never advertised.
+                // "Live fleet map" is gone from this list because the
+                // map is no longer withheld - Starter sees its own
+                // route and its own truck. What Premium sells is having
+                // a CREW on that map, which is why the drivers line
+                // carries it now.
+                //
+                // Framed against the per-seat pricing this category
+                // charges: a five-truck operation is $745-995/month on
+                // a per-user plan and $64.99 here. That is the argument,
+                // and it only became sayable once Starter stopped
+                // handing out unlimited drivers for free.
                 return [
                     "Automatic customer arrival texts",
                     "Live tracking link for customers",
-                    "Live fleet map",
-                    "Route optimization",
-                    "Up to 30 customers"
+                    "Your whole crew on one map - no per-driver fees",
+                    "Unlimited stops and routes",
+                    "Route optimization"
                 ]
             case .premiumPlus:
                 return [

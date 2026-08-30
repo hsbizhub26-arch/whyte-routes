@@ -23,8 +23,10 @@ struct CreateRouteView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var pickerTargetId: UUID?
+    @State private var showStopLimitPrompt = false
 
     private let driverRepo = FirestoreDriverRepository()
+    private let access = FeatureAccessManager.shared
 
     struct StopDraft: Identifiable {
         let id = UUID()
@@ -62,11 +64,21 @@ struct CreateRouteView: View {
                     .onDelete { stops.remove(atOffsets: $0) }
 
                     Button {
+                        guard access.canAddStop(currentCount: stops.count) else {
+                            showStopLimitPrompt = true
+                            return
+                        }
                         let draft = StopDraft()
                         stops.append(draft)
                         pickerTargetId = draft.id
                     } label: {
                         Label("Add Stop", systemImage: "plus.circle")
+                    }
+
+                    if let limit = access.stopsPerRouteLimit {
+                        Text("\(stops.count) of \(limit) stops used (\(access.tier.displayName) plan)")
+                            .font(.caption)
+                            .foregroundColor(stops.count >= limit ? .orange : .secondary)
                     }
                 }
 
@@ -77,6 +89,9 @@ struct CreateRouteView: View {
                 }
             }
             .navigationTitle("New Route")
+            .sheet(isPresented: $showStopLimitPrompt) {
+                UpgradeRequiredView(featureName: "More Stops Per Route", requiredTier: .premium)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

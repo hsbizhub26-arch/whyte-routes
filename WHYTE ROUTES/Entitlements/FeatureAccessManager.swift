@@ -91,13 +91,59 @@ final class FeatureAccessManager: ObservableObject {
         tier = .starter
     }
 
-    // MARK: - Customers (the one limit with an explicit number per tier)
+    // MARK: - What Starter actually is
+    //
+    // A trial of the real thing at a size that cannot run a business:
+    // one route, one driver, five stops. That is the shape competitors
+    // in this category use (inRoute caps free at 8 stops), and it is
+    // the shape that makes the free tier honest - a solo operator can
+    // plan a real morning and see exactly how the app behaves, but
+    // nobody dispatches a crew on it.
+    //
+    // It replaces a customer-count-only limit that let a free company
+    // run UNLIMITED routes and UNLIMITED drivers forever. That was the
+    // whole dispatch engine given away, with a ceiling in the one place
+    // that didn't stop anyone: someone with eight commercial contracts
+    // and five trucks never paid.
+    //
+    // nil at any tier means unlimited.
 
     private static let customerLimits: [SubscriptionTier: Int] = [
-        .starter: 10,
+        .starter: 5,
         .premium: 30
         // premiumPlus/enterprise intentionally absent - unlimited
     ]
+
+    private static let routeLimits: [SubscriptionTier: Int] = [
+        .starter: 1
+    ]
+
+    private static let driverLimits: [SubscriptionTier: Int] = [
+        .starter: 1
+    ]
+
+    private static let stopsPerRouteLimits: [SubscriptionTier: Int] = [
+        .starter: 5
+    ]
+
+    var routeLimit: Int? { Self.routeLimits[tier] }
+    var driverLimit: Int? { Self.driverLimits[tier] }
+    var stopsPerRouteLimit: Int? { Self.stopsPerRouteLimits[tier] }
+
+    func canAddRoute(currentCount: Int) -> Bool {
+        guard let limit = routeLimit else { return true }
+        return currentCount < limit
+    }
+
+    func canAddDriver(currentCount: Int) -> Bool {
+        guard let limit = driverLimit else { return true }
+        return currentCount < limit
+    }
+
+    func canAddStop(currentCount: Int) -> Bool {
+        guard let limit = stopsPerRouteLimit else { return true }
+        return currentCount < limit
+    }
 
     var customerLimit: Int? {
         Self.customerLimits[tier]

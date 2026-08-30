@@ -42,6 +42,10 @@ struct EditRouteView: View {
     @State private var trackingLinkResults: [String: String] = [:]
     @State private var pickerTargetId: String?
     @State private var showUpgradePrompt = false
+    // Which limit opened the upgrade sheet - it was hardcoded to
+    // "Route Optimization", so hitting the stop cap advertised the
+    // wrong feature.
+    @State private var upgradeReason = "Route Optimization"
     @State private var moveTargetStop: Stop?
     @State private var otherRoutes: [Route] = []
 
@@ -126,11 +130,22 @@ struct EditRouteView: View {
                             .onMove { stops.move(fromOffsets: $0, toOffset: $1) }
 
                             Button {
+                                guard access.canAddStop(currentCount: stops.count) else {
+                                    upgradeReason = "More Stops Per Route"
+                                    showUpgradePrompt = true
+                                    return
+                                }
                                 let newStop = Stop(address: "")
                                 stops.append(newStop)
                                 pickerTargetId = newStop.id
                             } label: {
                                 Label("Add Stop", systemImage: "plus.circle")
+                            }
+
+                            if let limit = access.stopsPerRouteLimit {
+                                Text("\(stops.count) of \(limit) stops used (\(access.tier.displayName) plan)")
+                                    .font(.caption)
+                                    .foregroundColor(stops.count >= limit ? .orange : .secondary)
                             }
 
                             if stops.count > 2 {
@@ -142,6 +157,7 @@ struct EditRouteView: View {
                                             endCoordinate: endCoordinate
                                         )
                                     } else {
+                                        upgradeReason = "Route Optimization"
                                         showUpgradePrompt = true
                                     }
                                 } label: {
@@ -192,7 +208,7 @@ struct EditRouteView: View {
                 }
             }
             .sheet(isPresented: $showUpgradePrompt) {
-                UpgradeRequiredView(featureName: "Route Optimization", requiredTier: .premium)
+                UpgradeRequiredView(featureName: upgradeReason, requiredTier: .premium)
             }
             .sheet(item: $moveTargetStop) { stop in
                 moveStopSheet(stop)
