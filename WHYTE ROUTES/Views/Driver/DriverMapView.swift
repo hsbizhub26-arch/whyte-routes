@@ -111,8 +111,20 @@ struct DriverMapView: View {
     // real CLError - partway through a shift (a real problem, red, so
     // it reads as different from "just starting up").
     private func gpsBanner(text: String, color: Color) -> some View {
+        // TOP-anchored, not bottom.
+        //
+        // The banner used to sit at the bottom of the map with 40pt of
+        // padding, which was fine when the map was the whole screen.
+        // The driver dashboard now lays a status card over the bottom
+        // of that same map, so the two were drawing on top of each
+        // other - "Start your shift to begin live tracking" printed
+        // straight through the next stop's name and address.
+        //
+        // The top is genuinely free: the only thing up here is the
+        // locate button in the corner, which this clears with a 56pt
+        // offset. safeAreaPadding keeps it out of the status bar, since
+        // the map itself is deliberately full-bleed.
         VStack {
-            Spacer()
             Text(text)
                 .font(.footnote.bold())
                 .foregroundColor(.black)
@@ -123,8 +135,10 @@ struct DriverMapView: View {
                 .clipShape(Capsule())
                 .shadow(radius: 6)
                 .padding(.horizontal, 24)
-                .padding(.bottom, 40)
+                .padding(.top, 56)
+            Spacer()
         }
+        .safeAreaPadding(.top)
     }
 
     // Route order, not whatever order Firestore happened to return -
