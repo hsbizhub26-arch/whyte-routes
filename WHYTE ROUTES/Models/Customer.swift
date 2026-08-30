@@ -34,8 +34,18 @@ struct Customer: Identifiable {
     // first as the master gate, then these for which channel/type.
     var smsEnabled: Bool = true
     var emailEnabled: Bool = true
-    var notifyEta15: Bool = true
-    var notifyEta10: Bool = true
+    // The two ETA pings default OFF; enRoute/arrived/completed already
+    // cover the journey. With all five on, one stop sends five texts -
+    // "on the way", "15 min", "10 min", "arrived", "completed" - which
+    // is both more than anyone needs at 3am and a real cost: at
+    // $0.0079 a segment, a busy Premium company running 150 stops a day
+    // spends more on Twilio than the $64.99 they pay us. Three texts
+    // per stop keeps the useful ones and the margin.
+    //
+    // Still per-customer toggles in Add Customer, so an owner who wants
+    // the countdown for a particular client can switch it back on.
+    var notifyEta15: Bool = false
+    var notifyEta10: Bool = false
     var notifyCompleted: Bool = true
 }
 
@@ -61,8 +71,11 @@ extension Customer {
         self.consentTimestamp = (dict["consentTimestamp"] as? Timestamp)?.dateValue()
         self.smsEnabled = dict["smsEnabled"] as? Bool ?? true
         self.emailEnabled = dict["emailEnabled"] as? Bool ?? true
-        self.notifyEta15 = dict["notifyEta15"] as? Bool ?? true
-        self.notifyEta10 = dict["notifyEta10"] as? Bool ?? true
+        // Existing customers who explicitly have these set to true keep
+        // them - this only changes what a customer created from now on,
+        // and what a document missing the field decodes to.
+        self.notifyEta15 = dict["notifyEta15"] as? Bool ?? false
+        self.notifyEta10 = dict["notifyEta10"] as? Bool ?? false
         self.notifyCompleted = dict["notifyCompleted"] as? Bool ?? true
     }
 

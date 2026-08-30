@@ -21,8 +21,8 @@ struct AddCustomerView: View {
     @State private var consentTimestamp: Date? = nil
     @State private var smsEnabled = true
     @State private var emailEnabled = true
-    @State private var notifyEta15 = true
-    @State private var notifyEta10 = true
+    @State private var notifyEta15 = false
+    @State private var notifyEta10 = false
     @State private var notifyCompleted = true
     @State private var isSaving = false
     @State private var errorMessage: String?
