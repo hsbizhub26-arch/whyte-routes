@@ -54,9 +54,21 @@ final class CustomerRepository {
 
         customersRef
             .document(customer.id)
-            .setData(customer.toDict()) { [weak self] error in
+            // Strong capture, same reasoning as
+            // TrackingLinkRepository.closeOut: this is a final class
+            // whose only stored property is the Firestore handle, so
+            // closure -> repo -> nothing and no cycle exists. The
+            // owner here is a `private let repo` on a SwiftUI View
+            // STRUCT, which SwiftUI is free to tear down as soon as
+            // the sheet dismisses - and the dismiss is triggered from
+            // inside this very callback. A nil self would skip
+            // propagateToOpenStops silently, which is the difference
+            // between "I fixed the address" and "I fixed the address
+            // and the driver's stop still has no coordinates to
+            // navigate to."
+            .setData(customer.toDict()) { error in
                 if error == nil {
-                    self?.propagateToOpenStops(customer)
+                    self.propagateToOpenStops(customer)
                 }
                 completion?(error == nil)
             }

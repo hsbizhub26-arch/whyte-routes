@@ -41,7 +41,9 @@ final class ActiveTrackingLinksViewModel: ObservableObject {
 
     func deactivate(_ link: TrackingLink) {
         guard let id = link.id else { return }
-        TrackingLinkRepository().deactivate(id: id)
+        // Uses the stored repo rather than a temporary, for the same
+        // reason as DriverStopViewModel.trackingRepo.
+        repo.deactivate(id: id)
     }
 }
 

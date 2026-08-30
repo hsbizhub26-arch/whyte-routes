@@ -16,6 +16,18 @@ final class DriverStopViewModel: ObservableObject {
 
     private let routeService = RouteService.shared
     private let session = DriverSession.shared
+    // STORED, not constructed at the call site. closeOut() does its
+    // work inside a Firestore completion handler that captures
+    // [weak self], so a `TrackingLinkRepository().closeOut(...)`
+    // temporary was already deallocated by the time the callback ran -
+    // self was nil, the loop never executed, and the link was never
+    // closed. The compiler says so outright ("weak reference will
+    // always be nil because the referenced object is deallocated
+    // here"), and the consequence was the exact thing that must not
+    // happen: a customer whose service is finished keeps watching the
+    // truck drive on to everybody else's homes for the rest of the
+    // shift.
+    private let trackingRepo = TrackingLinkRepository()
 
     // GPS older than this is treated as unusable for an ETA
     // notification - better to send nothing than tell a customer
@@ -195,7 +207,7 @@ final class DriverStopViewModel: ObservableObject {
         // here: the position document is deleted and the link marked
         // complete. Without this they could keep watching the truck
         // drive on to other people's homes for the rest of the shift.
-        TrackingLinkRepository().closeOut(stopId: stop.id)
+        trackingRepo.closeOut(stopId: stop.id)
 
         // Real bug found during a full-workday audit: nothing anywhere
         // ever marked a Route itself "completed" once every stop on it

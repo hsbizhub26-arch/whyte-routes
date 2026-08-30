@@ -79,7 +79,6 @@ final class UserPermissionsService {
     /// write succeeds. Returns whether the document is confirmed to exist
     /// in Firestore (already there, or just created) so the caller can
     /// surface a real warning instead of failing silently.
-    @discardableResult
     /// Polls users/{uid} from the SERVER (never the local cache -
     /// the cache would answer instantly and prove nothing) until it is
     /// readable, so callers know Security Rules can resolve this
@@ -97,6 +96,7 @@ final class UserPermissionsService {
         print("⚠️ users/\(docRef.documentID) not server-visible yet - first queries may need a retry")
     }
 
+    @discardableResult
     func createIfNeeded(
         uid: String,
         email: String,

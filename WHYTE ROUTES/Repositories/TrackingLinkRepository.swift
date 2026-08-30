@@ -153,6 +153,14 @@ final class TrackingLinkRepository {
             .whereField("active", isEqualTo: true)
             .getDocuments { snap, error in
                 guard error == nil, let docs = snap?.documents else {
+                    // Distinguishable in the log from a genuine empty
+                    // result. Both still yield [], because retrying a
+                    // teardown automatically risks racing a re-mint,
+                    // but a failure to close a customer's live tracking
+                    // must not be silent.
+                    if let error {
+                        print("❌ activeLinks(stop \(stopId)) failed - links may still be live: \(error.localizedDescription)")
+                    }
                     completion([])
                     return
                 }
@@ -210,8 +218,23 @@ final class TrackingLinkRepository {
     func closeOut(stopId: String) {
         guard let companyId = CompanySession.shared.currentCompanyId else { return }
 
-        activeLinks(forStopId: stopId) { [weak self] links in
-            guard let self else { return }
+        // STRONG capture, deliberately, and not a retain cycle.
+        //
+        // A cycle needs repo -> closure -> repo. This class is a final
+        // class with NO stored properties: it never holds a listener,
+        // a closure or any other reference. activeLinks hands the
+        // closure to Firestore's one-shot getDocuments, Firestore owns
+        // it until it fires, and releases it afterwards - so the only
+        // reference chain is Firestore -> closure -> repo, which
+        // unwinds on its own the moment the callback returns.
+        //
+        // [weak self] here was therefore protecting against nothing
+        // while creating a real failure: the caller's repository could
+        // die before the query came back, self would be nil, and the
+        // links were left ACTIVE. Whether a customer stops seeing the
+        // driver must not depend on whether the driver happened to
+        // stay on the stop screen long enough.
+        activeLinks(forStopId: stopId) { links in
             for link in links {
                 self.goDark(
                     companyId: companyId,
@@ -243,8 +266,23 @@ final class TrackingLinkRepository {
     func supersedeLinks(forStopId stopId: String) {
         guard let companyId = CompanySession.shared.currentCompanyId else { return }
 
-        activeLinks(forStopId: stopId) { [weak self] links in
-            guard let self else { return }
+        // STRONG capture, deliberately, and not a retain cycle.
+        //
+        // A cycle needs repo -> closure -> repo. This class is a final
+        // class with NO stored properties: it never holds a listener,
+        // a closure or any other reference. activeLinks hands the
+        // closure to Firestore's one-shot getDocuments, Firestore owns
+        // it until it fires, and releases it afterwards - so the only
+        // reference chain is Firestore -> closure -> repo, which
+        // unwinds on its own the moment the callback returns.
+        //
+        // [weak self] here was therefore protecting against nothing
+        // while creating a real failure: the caller's repository could
+        // die before the query came back, self would be nil, and the
+        // links were left ACTIVE. Whether a customer stops seeing the
+        // driver must not depend on whether the driver happened to
+        // stay on the stop screen long enough.
+        activeLinks(forStopId: stopId) { links in
             for link in links {
                 self.goDark(
                     companyId: companyId,
