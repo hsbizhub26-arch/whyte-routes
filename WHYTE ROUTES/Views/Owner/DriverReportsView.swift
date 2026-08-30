@@ -2,6 +2,10 @@ import SwiftUI
 
 struct DriverReportsView: View {
 
+    // Presented as a sheet from the owner dashboard with no way back -
+    // it has a NavigationStack but never put anything in its toolbar.
+    @Environment(\.dismiss) private var dismiss
+
     @StateObject private var routeService = RouteService.shared
     @StateObject private var driverVM = DriverViewModel()
     @ObservedObject private var access = FeatureAccessManager.shared
@@ -44,6 +48,15 @@ struct DriverReportsView: View {
                 }
             }
             .onAppear { routeService.loadRoutesOnce() }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Label("Close", systemImage: "chevron.down")
+                            .font(.body.weight(.semibold))
+                    }
+                    .tint(WRTheme.gold)
+                }
+            }
         }
     }
 }
