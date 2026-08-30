@@ -24,7 +24,7 @@ struct CreateCompanyView: View {
             // this is the same promise, made on a different screen.
             // "proof of work" was dropped from both: the capture button
             // has no call site, so the feature is unreachable on every tier.
-            case .premium: return "Live fleet map, route optimization"
+            case .premium: return "Customer texts & tracking, live fleet map, route optimization"
             case .premiumPlus: return "Everything in Premium, plus driver reports & unlimited customers"
             }
         }

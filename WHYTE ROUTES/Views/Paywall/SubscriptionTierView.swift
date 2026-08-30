@@ -42,7 +42,23 @@ struct SubscriptionTierView: View {
                 // it - it was checked against advanced dispatch, so a
                 // Premium subscriber who tapped the button they had just
                 // paid for was shown an ad for Premium Plus.
+                // The two customer-facing lines lead, because they are
+                // what Premium is actually selling. Starter already
+                // includes unlimited routes and unlimited drivers - the
+                // entire dispatch engine - so "a fleet map and twenty
+                // more customers" was not a description of the gap.
+                //
+                // Both are gated server-side at tierRank >= 1
+                // (functions/index.js: sendCustomerNotification and
+                // sendTrackingLink), and were being enforced, paid for
+                // in Twilio charges, and never mentioned at the point
+                // of sale. The exact inverse of the proof-of-work
+                // bullet removed earlier today: that advertised
+                // something the app could not do, this did something it
+                // never advertised.
                 return [
+                    "Automatic customer arrival texts",
+                    "Live tracking link for customers",
                     "Live fleet map",
                     "Route optimization",
                     "Up to 30 customers"

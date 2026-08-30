@@ -77,11 +77,26 @@ final class DriverStopViewModel: ObservableObject {
     func startETARefreshTimer() {
         stopETARefreshTimer()
         etaRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            // self is unwrapped OUT HERE, before the Task, rather than
-            // inside it. Unwrapping within the Task left the weak
-            // optional itself being read from concurrently-executing
-            // code, which Swift 6 makes a hard error - and the second
-            // `self?.` in the else branch was reading it twice.
+            // self is unwrapped HERE, outside the Task, and jobStatus is
+            // read INSIDE it. Both placements matter:
+            //
+            //  - unwrapping outside means the weak optional is never
+            //    read from concurrently-executing code, which is the
+            //    original Swift 6 error;
+            //  - reading jobStatus inside means a MainActor-isolated
+            //    property is only touched on the MainActor. Reading it
+            //    out here, in the timer's non-isolated closure, is what
+            //    produced "main actor-isolated property 'jobStatus'
+            //    can not be referenced from a Sendable closure".
+            //
+            // The capture stays WEAK. A strong [self] silences both
+            // warnings, but the Timer retains the closure, the closure
+            // retains the view model, and the view model retains the
+            // Timer - so deinit never runs, invalidate() is never
+            // called, and every stop screen a driver opens leaves a
+            // timer firing loadETA() every 60s for the life of the app.
+            // Forty stops on an overnight route means forty live timers
+            // and forty recurring directions requests.
             guard let self else { return }
             Task { @MainActor in
                 guard self.jobStatus == .enRoute else {
