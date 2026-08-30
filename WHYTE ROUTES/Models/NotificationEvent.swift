@@ -16,14 +16,17 @@ struct NotificationEvent: Identifiable {
     var stopId: String
     var routeId: String
     var customerName: String
-    var type: String            // "enRoute" | "arrived" | "completed" | "eta15" | "eta10"
+    var type: String            // "shiftStart" | "eta10" | "completed"
+                                // (plus "trackingLink", and the retired
+                                // "enRoute"/"arrived"/"eta15" still present
+                                // in history written before they were removed)
     var message: String
     var contactMethod: String   // "sms" | "email" | "none" | "pending"
     var contactValue: String
     // "sending" (transaction wrote this, real send in flight) |
     // "accepted" (provider took it - not proof of final delivery) |
     // "failed" | "not_opted_in" | "type_disabled" (customer turned
-    // off this specific eta15/eta10/completed update) |
+    // off this specific eta10/completed update) |
     // "channel_disabled" (contact info exists but customer turned off
     // that channel) | "no_contact_on_file" | "not_entitled" (company's
     // plan doesn't include live notifications) | "queued_for_morning"
@@ -32,7 +35,7 @@ struct NotificationEvent: Identifiable {
     // "skipped_quiet_hours" (a live-only ping during Quiet Hours -
     // never written to a document, same as gps_stale) | "gps_stale" (backend
     // independently verified the driver's last GPS update was too old
-    // to trust for an eta15/eta10 trigger - never written to a
+    // to trust for an eta10 trigger - never written to a
     // document, returned before one exists) | "duplicate_skipped" |
     // "debug_skipped" (DEBUG build, no real send attempted) |
     // "logged" (legacy records from before a real provider existed)

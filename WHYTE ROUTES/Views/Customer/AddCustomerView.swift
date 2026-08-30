@@ -21,8 +21,7 @@ struct AddCustomerView: View {
     @State private var consentTimestamp: Date? = nil
     @State private var smsEnabled = true
     @State private var emailEnabled = true
-    @State private var notifyEta15 = false
-    @State private var notifyEta10 = false
+    @State private var notifyEta = true
     @State private var notifyCompleted = true
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -98,8 +97,7 @@ struct AddCustomerView: View {
                         Toggle("Email", isOn: $emailEnabled)
                     }
                     Section {
-                        Toggle("Driver ~15 min away", isOn: $notifyEta15)
-                        Toggle("Driver ~10 min away", isOn: $notifyEta10)
+                        Toggle("Driver ~10 min away", isOn: $notifyEta)
                         Toggle("Service completed", isOn: $notifyCompleted)
                     } header: {
                         Text("Which updates")
@@ -142,8 +140,7 @@ struct AddCustomerView: View {
                 consentTimestamp = existingCustomer.consentTimestamp
                 smsEnabled = existingCustomer.smsEnabled
                 emailEnabled = existingCustomer.emailEnabled
-                notifyEta15 = existingCustomer.notifyEta15
-                notifyEta10 = existingCustomer.notifyEta10
+                notifyEta = existingCustomer.notifyEta
                 notifyCompleted = existingCustomer.notifyCompleted
             }
         }
@@ -175,8 +172,7 @@ struct AddCustomerView: View {
             consentTimestamp: consentTimestamp,
             smsEnabled: smsEnabled,
             emailEnabled: emailEnabled,
-            notifyEta15: notifyEta15,
-            notifyEta10: notifyEta10,
+            notifyEta: notifyEta,
             notifyCompleted: notifyCompleted
         )
 

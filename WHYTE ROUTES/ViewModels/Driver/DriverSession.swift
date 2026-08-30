@@ -83,6 +83,19 @@ final class DriverSession: ObservableObject {
             activeShift = try await shiftRepo.startShift(driverId: driverId)
             LocationService.shared.startTracking(driverId: driverId)
             TrackingBroadcastService.shared.start()
+
+            // Tell this route's customers the crew is out, and hand
+            // each of them their tracking link. Deliberately detached:
+            // Start Shift returns the moment the shift exists, because
+            // a driver tapping it is already pulling away and must not
+            // wait on a few dozen sequential SMS sends - nor see them
+            // fail. Tracking has started above, so by the time the
+            // first text lands the link it carries is already live.
+            if let routeId = assignedRoute?.id {
+                Task.detached {
+                    await NotificationService.shared.notifyShiftStart(routeId: routeId)
+                }
+            }
             return true
         } catch {
             shiftError = error.localizedDescription

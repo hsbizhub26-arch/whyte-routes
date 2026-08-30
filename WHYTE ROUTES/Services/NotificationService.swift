@@ -31,8 +31,12 @@ final class NotificationService {
     }
 
     /// Fires a customer notification for a stop. `type` matches what
-    /// sendCustomerNotification recognizes: "enRoute", "arrived",
-    /// "completed", "eta15", or "eta10". Returns the real delivery
+    /// sendCustomerNotification recognizes, which is now exactly three
+    /// events: "shiftStart", "eta10" and "completed". The server still
+    /// ACCEPTS the retired "enRoute"/"arrived"/"eta15" from older
+    /// builds and drops them silently, so this app never needs to
+    /// guess which server version it is talking to. Returns the real
+    /// delivery
     /// status ("accepted", "failed", "not_entitled", "not_opted_in",
     /// "no_contact_on_file", "duplicate_skipped", or "debug_skipped"
     /// in DEBUG builds) - callers that just fire-and-forget can ignore
@@ -58,12 +62,34 @@ final class NotificationService {
         }
     }
 
-    /// Convenience overload for the three job-status transitions,
-    /// so DriverStopViewModel's existing call sites don't need to
-    /// know the exact string types.
+    /// Announces the start of a shift to every customer still waiting
+    /// on this route. Fire-and-forget by design: the driver is already
+    /// moving, and a failed text must never block Start Shift or put an
+    /// error in front of someone about to drive. Returns how many were
+    /// accepted so the caller can log it.
+    ///
+    /// Guarded by the same DEBUG switch as every other send here, which
+    /// is what keeps a simulator run from texting real customers.
     @discardableResult
-    func notify(stop: Stop, routeId: String, status: JobStatus) async -> String {
-        await notify(stop: stop, routeId: routeId, type: status.rawValue)
+    func notifyShiftStart(routeId: String) async -> Int {
+        guard isRealSendEnabled else {
+            print("📋 [DEBUG build - no real notification sent] shiftStart for route \(routeId)")
+            return 0
+        }
+
+        do {
+            let result = try await functions.httpsCallable("sendShiftStartNotifications").call([
+                "routeId": routeId
+            ])
+            let data = result.data as? [String: Any]
+            let sent = data?["sent"] as? Int ?? 0
+            let considered = data?["considered"] as? Int ?? 0
+            print("📣 shiftStart: \(sent)/\(considered) customers texted for route \(routeId)")
+            return sent
+        } catch {
+            print("⚠️ sendShiftStartNotifications failed for route \(routeId): \(error.localizedDescription)")
+            return 0
+        }
     }
 
     func history(routeId: String, stopId: String) async -> [NotificationEvent] {

@@ -34,18 +34,22 @@ struct Customer: Identifiable {
     // first as the master gate, then these for which channel/type.
     var smsEnabled: Bool = true
     var emailEnabled: Bool = true
-    // The two ETA pings default OFF; enRoute/arrived/completed already
-    // cover the journey. With all five on, one stop sends five texts -
-    // "on the way", "15 min", "10 min", "arrived", "completed" - which
-    // is both more than anyone needs at 3am and a real cost: at
-    // $0.0079 a segment, a busy Premium company running 150 stops a day
-    // spends more on Twilio than the $64.99 they pay us. Three texts
-    // per stop keeps the useful ones and the margin.
+    // A NEW KEY, NOT A FLIPPED DEFAULT, and that is the whole point.
     //
-    // Still per-customer toggles in Add Customer, so an owner who wants
-    // the countdown for a particular client can switch it back on.
-    var notifyEta15: Bool = false
-    var notifyEta10: Bool = false
+    // The lifecycle is now three texts - shift start, ~10 minutes out,
+    // completed - so the 10-minute ETA is wanted by default. But every
+    // customer record already in Firestore carries `notifyEta10: false`
+    // from the earlier five-texts-was-too-many pass, and the server
+    // reads these as opt-OUT (`!== false`). Simply changing this
+    // default to `true` would have compiled, shipped, and sent nothing:
+    // the stored `false` wins over any default for every customer that
+    // already exists, which is all of them.
+    //
+    // Writing to a key that has never existed sidesteps that with no
+    // migration and no rewriting of anyone's stored preferences. The
+    // old keys are left in place, unread, rather than deleted - they
+    // are a record of what an owner chose under the old scheme.
+    var notifyEta: Bool = true
     var notifyCompleted: Bool = true
 }
 
@@ -74,8 +78,7 @@ extension Customer {
         // Existing customers who explicitly have these set to true keep
         // them - this only changes what a customer created from now on,
         // and what a document missing the field decodes to.
-        self.notifyEta15 = dict["notifyEta15"] as? Bool ?? false
-        self.notifyEta10 = dict["notifyEta10"] as? Bool ?? false
+        self.notifyEta = dict["notifyEta"] as? Bool ?? true
         self.notifyCompleted = dict["notifyCompleted"] as? Bool ?? true
     }
 
@@ -89,8 +92,7 @@ extension Customer {
             "notificationsOptIn": notificationsOptIn,
             "smsEnabled": smsEnabled,
             "emailEnabled": emailEnabled,
-            "notifyEta15": notifyEta15,
-            "notifyEta10": notifyEta10,
+            "notifyEta": notifyEta,
             "notifyCompleted": notifyCompleted
         ]
         if let phone { d["phone"] = phone }

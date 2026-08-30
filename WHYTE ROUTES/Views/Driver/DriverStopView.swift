@@ -21,7 +21,6 @@ final class DriverStopViewModel: ObservableObject {
     // sendCustomerNotification's server-side idempotency check, so a
     // second device or a relaunch can never cause a duplicate.
     private static let maxLocationAge: TimeInterval = 5 * 60
-    private var eta15Notified = false
     private var eta10Notified = false
     private var etaRefreshTimer: Timer?
 
@@ -141,7 +140,12 @@ final class DriverStopViewModel: ObservableObject {
         stop.status = JobStatus.enRoute.rawValue
         stop.enRouteAt = Date()
         routeService.updateStop(routeId: route.id, stop: stop)
-        await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .enRoute)
+        // No customer text here. "On the way" was retired along with
+        // the 15-minute ETA and "arrived" - three of the five texts a
+        // customer used to get per stop, for a stop they might still
+        // be ninth in line for. The status still moves, the owner's
+        // board and the tracking page both still update live; what
+        // stopped is the phone buzzing about it.
     }
 
     func markArrived() async {
@@ -149,7 +153,9 @@ final class DriverStopViewModel: ObservableObject {
         stop.status = JobStatus.arrived.rawValue
         stop.arrivedAt = Date()
         routeService.updateStop(routeId: route.id, stop: stop)
-        await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .arrived)
+        // Retired, same as enRoute above. "Arrived" landed seconds
+        // before "completed" on a driveway that takes four minutes,
+        // so the customer got two texts for one visit.
     }
 
     // MARK: - MARK STOP COMPLETED
@@ -162,7 +168,7 @@ final class DriverStopViewModel: ObservableObject {
         stop.completedAt = Date()
 
         routeService.updateStop(routeId: route.id, stop: stop)
-        await NotificationService.shared.notify(stop: stop, routeId: route.id, status: .completed)
+        await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "completed")
 
         // This customer's service is done, so their live tracking ends
         // here: the position document is deleted and the link marked
@@ -220,7 +226,7 @@ final class DriverStopViewModel: ObservableObject {
         }
 
         // Stale GPS must never produce a customer-facing ETA claim -
-        // this only gates the eta15/eta10 notification triggers below,
+        // this only gates the eta10 notification trigger below,
         // not the driver's own on-screen ETA display, which stays
         // useful even with slightly old location data.
         let locationIsFresh: Bool
@@ -253,23 +259,24 @@ final class DriverStopViewModel: ObservableObject {
         }
     }
 
-    // Only meaningful while actually driving to this stop - once
-    // arrived/completed, "how far away is the driver" no longer
-    // applies. Threshold crossing only (>15 -> <=15), not "is
-    // currently under 15", so a fluctuating ETA bouncing around 14-16
-    // minutes doesn't matter once it's crossed once - see the
-    // eta15Notified/eta10Notified guards.
+    // The one remaining ETA text. Only meaningful while actually
+    // driving to this stop - once arrived/completed, "how far away is
+    // the driver" no longer applies. Threshold CROSSING only, not "is
+    // currently under 10", so an ETA bouncing around 9-11 minutes
+    // can't fire twice - that's what eta10Notified is for.
+    //
+    // The lower bound matters as much as the upper one. Without it,
+    // the first ETA the app ever computes for a stop can already be
+    // 3 minutes - the driver is around the corner, or the previous
+    // stop was next door - and the customer gets told "approximately
+    // 10 minutes away" as the truck pulls up. Under 5 minutes there
+    // is no useful warning left to give, so nothing is sent.
     private func checkETAThresholds(_ minutes: Int) {
         guard jobStatus == .enRoute, let route else { return }
+        guard !eta10Notified, minutes <= 10, minutes > 5 else { return }
 
-        if !eta10Notified, minutes <= 10 {
-            eta10Notified = true
-            eta15Notified = true // 10 implies 15 already happened/is moot
-            Task { await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "eta10") }
-        } else if !eta15Notified, minutes <= 15 {
-            eta15Notified = true
-            Task { await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "eta15") }
-        }
+        eta10Notified = true
+        Task { await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "eta10") }
     }
 }
 
