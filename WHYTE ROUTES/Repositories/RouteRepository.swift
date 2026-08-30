@@ -64,24 +64,41 @@ final class RouteRepository {
     func fetchRouteForDriver(driverId: String, completion: @escaping (Route?) -> Void) {
         guard let routesRef else { completion(nil); return }
 
+        // Equality on driverId ONLY, with "not completed" applied in
+        // Swift afterwards.
+        //
+        // This previously combined the equality with
+        // .whereField("status", isNotEqualTo: "completed"), and an
+        // equality plus an inequality on two different fields requires
+        // a COMPOSITE INDEX. This project has no firestore.indexes.json
+        // and never declared one, so the query failed with "the query
+        // requires an index" - which was logged to the console and then
+        // turned into completion(nil), which the dashboard renders as
+        // "No route assigned for today". A driver with a route sitting
+        // right there in Firestore was told they had none, and the only
+        // trace was a print nobody reads on a phone.
+        //
+        // Firestore's != has a second trap worth recording: it matches
+        // only documents where the field EXISTS. Any route written
+        // without a status - by an older build, or a hand-edit in the
+        // console - would have been invisible here even with the index
+        // in place. Filtering in Swift avoids both problems, and a
+        // driver has a handful of routes, not thousands.
         routesRef
             .whereField("driverId", isEqualTo: driverId)
-            .whereField("status", isNotEqualTo: "completed")
-            .limit(to: 1)
             .getDocuments { snapshot, error in
 
-                guard error == nil else {
-                    print("❌ Failed to fetch route for driver:", error?.localizedDescription ?? "")
+                if let error {
+                    print("❌ Failed to fetch route for driver:", error.localizedDescription)
                     completion(nil)
                     return
                 }
 
-                guard let doc = snapshot?.documents.first else {
-                    completion(nil)
-                    return
-                }
+                let route = (snapshot?.documents ?? [])
+                    .compactMap { Route(from: $0.data(), id: $0.documentID) }
+                    .first { $0.status != "completed" }
 
-                completion(Route(from: doc.data(), id: doc.documentID))
+                completion(route)
             }
     }
 
