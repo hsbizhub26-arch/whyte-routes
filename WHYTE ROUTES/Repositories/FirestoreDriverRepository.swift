@@ -8,6 +8,7 @@ protocol DriverRepository {
     func listenToDrivers(_ handler: @escaping ([Driver]) -> Void)
     func updateDriverLocation(driverId: String, latitude: Double, longitude: Double)
     func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)?)
+    func updateDriverVehicle(driverId: String, vehicle: String, completion: ((Bool) -> Void)?)
     func updateLicensePhotoPath(driverId: String, path: String, completion: ((Bool) -> Void)?)
     func assignRoute(driverId: String, routeId: String)
     func fetchActiveShift(driverId: String, completion: @escaping (Shift?) -> Void)
@@ -143,6 +144,18 @@ final class FirestoreDriverRepository: DriverRepository {
     func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)? = nil) {
         guard let ref = driversRef?.document(driverId) else { completion?(false); return }
         ref.updateData(["name": name]) { error in
+            completion?(error == nil)
+        }
+    }
+
+    // MARK: - Update Vehicle
+    // The profile has always DISPLAYED a Vehicle row and never offered
+    // any way to fill it, so every driver saw a permanently blank
+    // field. It matters on a multi-truck crew - "which one is Devon
+    // in" - so it is editable now rather than removed.
+    func updateDriverVehicle(driverId: String, vehicle: String, completion: ((Bool) -> Void)? = nil) {
+        guard let ref = driversRef?.document(driverId) else { completion?(false); return }
+        ref.updateData(["vehicle": vehicle]) { error in
             completion?(error == nil)
         }
     }

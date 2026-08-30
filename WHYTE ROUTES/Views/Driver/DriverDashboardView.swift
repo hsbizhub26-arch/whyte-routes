@@ -68,12 +68,62 @@ struct DriverDashboardView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
         }
+        // EVERY ONE OF THESE WAS A DEAD END.
+        //
+        // All three are full-bleed ScrollViews with no navigation bar,
+        // no Close button and no dismiss of their own. A sheet is
+        // normally swipe-down dismissible, but the swipe lands on the
+        // ScrollView and scrolls it instead - so a driver who opened
+        // their route, a stop, or their profile could not get back out
+        // of it. Force-quitting the app was the only exit.
+        //
+        // Wrapping the presentation (rather than editing each view)
+        // fixes all three in one place and leaves DriverTabView, which
+        // shows the same views as real tabs and must NOT gain a Close
+        // button, completely untouched.
+        //
+        // The navigation bar also gives these screens a real safe-area
+        // inset. DriverProfileView draws its own "Profile" title at the
+        // very top, which was colliding with the status bar clock -
+        // that title now sits below the bar instead of under it.
         .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .stop(let stop): DriverStopView(stop: stop)
-            case .route: DriverRouteView()
-            case .profile: DriverProfileView()
+            NavigationStack {
+                Group {
+                    switch sheet {
+                    case .stop(let stop): DriverStopView(stop: stop)
+                    case .route: DriverRouteView()
+                    case .profile: DriverProfileView()
+                    }
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            activeSheet = nil
+                        } label: {
+                            // Gloves, cold, 3am: a labelled control
+                            // with a full-size hit area, not a small
+                            // grey X in a corner.
+                            Label("Close", systemImage: "chevron.down")
+                                .font(.body.weight(.semibold))
+                        }
+                        .tint(Color("WRThemeGold"))
+                    }
+                }
             }
+            // The grabber, which is the "little tab for up and down"
+            // and the reason these sheets can be pulled closed while
+            // the content inside them still scrolls normally. iOS
+            // routes a drag that starts on the grabber to the sheet
+            // and a drag that starts anywhere else to the ScrollView,
+            // so the two never compete - the same separation the
+            // custom bottom sheet needed, except here the system
+            // already implements it.
+            //
+            // Kept ALONGSIDE the Close button rather than instead of
+            // it: a grabber is discoverable if you already know sheets,
+            // and invisible if you don't, which is not a bet worth
+            // making on someone wearing gloves at 3am.
+            .presentationDragIndicator(.visible)
         }
     }
 

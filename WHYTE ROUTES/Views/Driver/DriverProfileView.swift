@@ -15,6 +15,9 @@ struct DriverProfileView: View {
     @State private var isEditingName = false
     @State private var nameInput = ""
     @State private var isSavingName = false
+    @State private var isEditingVehicle = false
+    @State private var vehicleInput = ""
+    @State private var isSavingVehicle = false
 
     var body: some View {
         ZStack {
@@ -52,7 +55,7 @@ struct DriverProfileView: View {
                     VStack(spacing: 16) {
 
                         editableNameRow(driver: driver)
-                        infoRow(title: "Vehicle", value: driver.vehicle)
+                        editableVehicleRow(driver: driver)
                         infoRow(title: "Phone", value: driver.phone ?? "N/A")
 
                         if let updated = driver.lastUpdated {
@@ -208,6 +211,71 @@ struct DriverProfileView: View {
                 }
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    // Mirrors editableNameRow. The Vehicle row used to be read-only
+    // with nothing anywhere in the app that could write it, so it
+    // showed every driver a blank field forever.
+    @ViewBuilder
+    private func editableVehicleRow(driver: Driver) -> some View {
+        if isEditingVehicle {
+            HStack {
+                Text("Vehicle")
+                    .foregroundColor(Color("WRThemeGold"))
+                    .font(.headline)
+
+                TextField("e.g. Truck 2, F-250", text: $vehicleInput)
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.trailing)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
+                    .onSubmit { saveVehicle(driverId: driver.id) }
+
+                Button {
+                    saveVehicle(driverId: driver.id)
+                } label: {
+                    if isSavingVehicle {
+                        ProgressView().tint(Color("WRThemeGold"))
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(Color("WRThemeGold"))
+                    }
+                }
+                .disabled(isSavingVehicle)
+            }
+            .padding(.vertical, 4)
+        } else {
+            HStack {
+                Text("Vehicle")
+                    .foregroundColor(Color("WRThemeGold"))
+                    .font(.headline)
+                Spacer()
+                Text(driver.vehicle.isEmpty ? "Not set" : driver.vehicle)
+                    .foregroundColor(driver.vehicle.isEmpty ? .white.opacity(0.4) : .white)
+                Button {
+                    vehicleInput = driver.vehicle
+                    isEditingVehicle = true
+                } label: {
+                    Image(systemName: "pencil.circle")
+                        .foregroundColor(Color("WRThemeGold"))
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func saveVehicle(driverId: String) {
+        let trimmed = vehicleInput.trimmingCharacters(in: .whitespaces)
+        isSavingVehicle = true
+        driverRepo.updateDriverVehicle(driverId: driverId, vehicle: trimmed) { success in
+            Task { @MainActor in
+                isSavingVehicle = false
+                if success {
+                    session.driver?.vehicle = trimmed
+                    isEditingVehicle = false
+                }
+            }
         }
     }
 

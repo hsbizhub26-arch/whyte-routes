@@ -183,6 +183,12 @@ struct DriverMapView: View {
 
     // MARK: - BUTTONS (top-right)
     private var topButtons: some View {
+        // The MAP is deliberately full-bleed (ignoresSafeArea(.top) at
+        // the call site) so it fills the screen behind the status bar.
+        // These controls inherited that and ended up UNDER the clock
+        // and the Dynamic Island - visible but unreachable, because the
+        // island swallows the touch. safeAreaPadding puts the buttons
+        // back inside the readable area without un-bleeding the map.
         VStack {
             HStack {
                 Spacer()
@@ -201,6 +207,7 @@ struct DriverMapView: View {
             }
             Spacer()
         }
+        .safeAreaPadding(.top)
     }
 
     // MARK: - STOP DETAIL SHEET
