@@ -72,6 +72,34 @@ final class DriverMapViewModel: ObservableObject {
     func centerOnDriver() {
         cameraPosition = .userLocation(fallback: .automatic)
     }
+
+    /// The region the map is actually showing, kept current by
+    /// onMapCameraChange. Needed because cameraPosition is usually
+    /// .userLocation(...) rather than a region, so there is nothing to
+    /// read a span off when the driver asks to zoom - MapKit knows
+    /// where the camera is, this is how we find out.
+    var visibleRegion: MKCoordinateRegion?
+
+    /// Zoom by a factor around whatever is on screen right now.
+    /// Switching to an explicit .region also stops the camera following
+    /// the driver, which is the right behaviour: someone who just
+    /// pinched out to see the rest of their route does not want the map
+    /// snapping back to their own dot on the next GPS fix. The locate
+    /// button puts them back.
+    func zoom(by factor: Double) {
+        guard let region = visibleRegion else { return }
+        // Clamped so repeated taps can't invert the span or zoom out
+        // past the whole world, both of which MapKit renders as a
+        // blank grey rectangle.
+        let latitudeDelta = min(max(region.span.latitudeDelta * factor, 0.0008), 120)
+        let longitudeDelta = min(max(region.span.longitudeDelta * factor, 0.0008), 120)
+        cameraPosition = .region(
+            MKCoordinateRegion(
+                center: region.center,
+                span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
+            )
+        )
+    }
 }
 
 struct DriverMapView: View {
@@ -193,35 +221,81 @@ struct DriverMapView: View {
                 }
             }
         }
+        // Feeds DriverMapViewModel.visibleRegion so the zoom buttons
+        // have a span to scale. cameraPosition is normally
+        // .userLocation(...), which carries no region of its own -
+        // without this the buttons would have nothing to work from.
+        .onMapCameraChange { context in
+            vm.visibleRegion = context.region
+        }
     }
 
-    // MARK: - BUTTONS (top-right)
+    // MARK: - MAP CONTROLS (right edge)
+    // A control column on the right edge rather than a single button in
+    // the corner.
+    //
+    // The corner was wrong twice over: it sat level with the Dynamic
+    // Island, which swallows touches there, and it put the one control
+    // a driver uses while moving at the furthest point from their
+    // thumb. Vertically centred on the right is where a hand already
+    // is, and it leaves the top of the map clear for the GPS banner.
+    //
+    // Zoom buttons sit with it because pinching is a two-handed gesture
+    // and this is used from a truck. They are not a replacement for
+    // pinch - that still works - they are the one-handed version.
+    private var mapControls: some View {
+        VStack(spacing: 0) {
+            Button {
+                vm.zoom(by: 0.5)
+            } label: {
+                controlGlyph("plus")
+            }
+
+            Divider()
+                .frame(width: 30)
+                .overlay(Color.black.opacity(0.15))
+
+            Button {
+                vm.zoom(by: 2.0)
+            } label: {
+                controlGlyph("minus")
+            }
+        }
+        .background(Color("WRThemeGold"))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(radius: 6)
+    }
+
+    private func controlGlyph(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 17, weight: .bold))
+            .foregroundColor(.black)
+            .frame(width: 46, height: 44)
+            .contentShape(Rectangle())
+    }
+
     private var topButtons: some View {
-        // The MAP is deliberately full-bleed (ignoresSafeArea(.top) at
-        // the call site) so it fills the screen behind the status bar.
-        // These controls inherited that and ended up UNDER the clock
-        // and the Dynamic Island - visible but unreachable, because the
-        // island swallows the touch. safeAreaPadding puts the buttons
-        // back inside the readable area without un-bleeding the map.
-        VStack {
-            HStack {
-                Spacer()
+        // Right edge, vertically centred - see mapControls for why the
+        // top corner was the wrong place for both of these.
+        HStack {
+            Spacer()
+            VStack(spacing: 12) {
+                mapControls
 
                 Button {
                     vm.centerOnDriver()
                 } label: {
                     Image(systemName: "location.fill")
+                        .font(.system(size: 17, weight: .bold))
                         .foregroundColor(.black)
-                        .padding(10)
+                        .frame(width: 46, height: 46)
                         .background(Color("WRThemeGold"))
                         .clipShape(Circle())
                         .shadow(radius: 6)
                 }
-                .padding()
             }
-            Spacer()
+            .padding(.trailing, 14)
         }
-        .safeAreaPadding(.top)
     }
 
     // MARK: - STOP DETAIL SHEET

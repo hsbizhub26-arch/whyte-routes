@@ -52,6 +52,13 @@
     border-radius: 10px;
     font-size: 14px;
   }
+  .queue #queueClose {
+    margin-left: auto; flex: 0 0 auto;
+    background: none; border: 0; cursor: pointer;
+    color: var(--muted); font-size: 20px; line-height: 1;
+    padding: 4px 6px; border-radius: 6px;
+  }
+  .queue #queueClose:hover, .queue #queueClose:focus-visible { color: #fff; }
   .queue #queueBadge {
     background: var(--gold); color: #000;
     font-weight: 800; font-size: 14px;
@@ -84,7 +91,7 @@
   <p class="status" id="status"><span class="dot"></span><span id="statusText">On the way</span></p>
   <div class="eta" id="eta" hidden></div>
   <p class="sub" id="etaSub" hidden>estimated arrival</p>
-  <div class="queue" id="queue" hidden><span id="queueBadge">2</span><span id="queueText">stops before yours</span></div>
+  <div class="queue" id="queue" hidden><span id="queueBadge">2</span><span id="queueText">stops before yours</span><button id="queueClose" type="button" aria-label="Hide queue position">&times;</button></div>
   <div class="addr"><span>Service address</span><div id="address">—</div></div>
   <p class="stale" id="stale" hidden></p>
 </div>
@@ -123,12 +130,47 @@ function showMessage(text) {
   $("panel").hidden = true;
   $("map").hidden = true;
 }
+// ── Queue widget dismissal
+//
+// Comfort, not privacy. The count reveals nothing about anyone - it is
+// a bare integer, and no other customer's name, address or position is
+// in any document this page can read. Hiding it changes what the
+// customer looks at, not what reached their browser.
+//
+// Remembered per link so it stays closed on that person's own device
+// across reloads, and scoped by link id so a different job starts
+// fresh. localStorage is wrapped because Safari throws on access in
+// private browsing rather than returning null - an unguarded read here
+// would take the whole page down with it.
+const queueDismissKey = "wr-queue-dismissed-" + linkId;
+
+function queueDismissed() {
+  try { return localStorage.getItem(queueDismissKey) === "1"; }
+  catch { return false; }
+}
+function dismissQueue() {
+  try { localStorage.setItem(queueDismissKey, "1"); } catch {}
+  $("queue").hidden = true;
+}
+
+/// The ONLY place the queue widget is shown, so a remembered dismissal
+/// can't be undone by the next snapshot. Every other site sets
+/// hidden = true directly, which is always safe.
+function showQueue(count) {
+  if (queueDismissed()) { $("queue").hidden = true; return; }
+  $("queue").hidden = false;
+  $("queueBadge").textContent = count;
+  $("queueText").textContent = count === 1 ? "stop before yours" : "stops before yours";
+}
+
 function showTracking() {
   $("message").hidden = true;
   $("panel").hidden = false;
   $("map").hidden = false;
   if (map) setTimeout(() => map.invalidateSize(), 0);
 }
+
+$("queueClose").addEventListener("click", dismissQueue);
 
 if (!companyId || !linkId) {
   showMessage("This tracking link looks incomplete. Please use the full link from your text message.");
@@ -263,10 +305,7 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
 
   if (stopsBefore !== null && stopsBefore > 0) {
     $("statusText").textContent = "Driver has a stop on the way";
-    $("queue").hidden = false;
-    $("queueBadge").textContent = stopsBefore;
-    $("queueText").textContent =
-      stopsBefore === 1 ? "stop before yours" : "stops before yours";
+    showQueue(stopsBefore);
     $("stale").hidden = false;
     $("stale").textContent = "Your driver's live location appears once they're on the way to you.";
   } else {

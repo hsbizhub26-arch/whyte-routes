@@ -284,6 +284,34 @@ struct DriverDashboardView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            // Navigation, one tap from the dashboard.
+            //
+            // The only way to start navigating used to be: tap the row
+            // above, wait for the stop screen, find the button. That is
+            // three deliberate actions for the thing a driver does at
+            // every single stop, all day, in the cold - and the button
+            // at the end of it was labelled "GO", which is why it took
+            // this long for anyone to find it.
+            //
+            // Opens the stop screen rather than starting navigation
+            // straight from here on purpose: navigating is not the only
+            // thing that happens at a stop. The driver still needs the
+            // gate code, the arrival and completion buttons, and the
+            // customer's notes - so the stop screen is where they
+            // belong, and this is a shortcut into it, not a bypass.
+            Button {
+                activeSheet = .stop(stop)
+            } label: {
+                Label("Start Navigation", systemImage: "location.north.circle.fill")
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Color("WRThemeGold"))
+                    .foregroundColor(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
         } else if session.assignedRoute != nil && session.hasLoadedStops {
             Text("Route complete 🎉")
                 .font(.subheadline.bold())

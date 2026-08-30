@@ -617,8 +617,18 @@ extension DriverStopView {
                         nav.start(to: coordinate)
                     }
                 } label: {
+                    // "Start Navigation", not "GO".
+                    //
+                    // GO was a leftover from when this sat directly
+                    // above a second button that said "Navigate" and
+                    // opened Apple Maps - the short label existed to
+                    // tell them apart. That button is gone, and what
+                    // remained was a two-letter label on the single
+                    // most important control a driver touches. The
+                    // person who built this app could not find it; a
+                    // driver at 5am has no chance.
                     Label(
-                        nav.isNavigating ? "End" : "GO",
+                        nav.isNavigating ? "End Navigation" : "Start Navigation",
                         systemImage: nav.isNavigating ? "xmark.circle.fill" : "location.north.circle.fill"
                     )
                     .font(.headline)
