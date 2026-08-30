@@ -1,36 +1,34 @@
 import Foundation
 
-// Company-level navigation preferences. Honest limitation, not
-// glossed over: of the three providers NavigationService supports,
-// only Google Maps' URL scheme actually accepts avoid-tolls/
-// avoid-highways parameters. Apple Maps' and Waze's external launch
-// APIs expose no such option - there is no way to force that from
-// outside those apps without building a custom navigation engine,
-// which was explicitly out of scope. avoidHOV isn't supported by any
-// of the three providers' external URL schemes at all. These settings
-// are still stored and applied wherever a provider actually honors
-// them, and are ready for a future provider (or paid routing API)
-// that supports more of them - see NavigationService.
+// VESTIGIAL. Navigation is now entirely in-app (NavigationSession),
+// and nothing reads these values any more.
+//
+// The struct stays because companies/{id}.navigationSettings exists on
+// every company document already written, and Company decodes it on
+// every read. Deleting the type a week before submission would mean
+// touching the model every screen depends on, to remove a field that
+// costs nothing to keep decoding. It should go in a later cleanup,
+// together with the stored field.
+//
+// What it used to do: configure which external map app a driver was
+// handed off to, and pass avoid-tolls/highways hints to it. All three
+// providers are gone, along with the handoff itself.
 struct NavigationSettings {
     var avoidTolls: Bool
     var avoidHOV: Bool
     var avoidHighways: Bool
     var preferredProvider: String
 
-    // Explicit nonisolated init, not the synthesized memberwise one -
-    // the default value NavigationService.MapApp.appleMaps.rawValue
-    // resolves through @MainActor NavigationService, which otherwise
-    // makes the synthesized init MainActor-isolated too. That's fine
-    // for callers already on MainActor, but NavigationService.navigate
-    // uses NavigationSettings() as a default parameter value, and
-    // default-argument expressions are evaluated in a nonisolated
-    // context regardless of the calling function's own isolation -
-    // hence the warning this fixes.
+    // nonisolated is now belt-and-braces rather than load-bearing -
+    // the default used to resolve through a @MainActor type, which
+    // made the synthesized memberwise init MainActor-isolated and
+    // warned wherever NavigationSettings() was used as a default
+    // argument. Kept explicit so that can't silently come back.
     nonisolated init(
         avoidTolls: Bool = true,
         avoidHOV: Bool = true,
         avoidHighways: Bool = false,
-        preferredProvider: String = NavigationService.MapApp.appleMaps.rawValue
+        preferredProvider: String = ""
     ) {
         self.avoidTolls = avoidTolls
         self.avoidHOV = avoidHOV
@@ -45,7 +43,7 @@ extension NavigationSettings {
         self.avoidHOV = dict?["avoidHOV"] as? Bool ?? true
         self.avoidHighways = dict?["avoidHighways"] as? Bool ?? false
         self.preferredProvider = dict?["preferredProvider"] as? String
-            ?? NavigationService.MapApp.appleMaps.rawValue
+            ?? ""
     }
 
     func toDict() -> [String: Any] {

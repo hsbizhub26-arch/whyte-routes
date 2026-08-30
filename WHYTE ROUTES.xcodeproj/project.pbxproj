@@ -68,7 +68,6 @@
 				Resources/LaunchScreen.storyboard,
 				Resources/PrivacyInfo.xcprivacy,
 				Services/AddressSearchService.swift,
-				Services/NavigationService.swift,
 				Services/NavigationSession.swift,
 				Services/NotificationService.swift,
 				Services/RealtimeLocationManager.swift,
@@ -90,7 +89,6 @@
 				Views/Driver/DriverRouteView.swift,
 				Views/Driver/DriverStopView.swift,
 				Views/Driver/DriverTabView.swift,
-				Views/Driver/NavigationButton.swift,
 				Views/Driver/TimerPill.swift,
 				Views/Manager/ManagerAssignDriverSheet.swift,
 				Views/Manager/ManagerDashboardView.swift,
@@ -109,7 +107,6 @@
 				Views/Owner/EditRouteView.swift,
 				Views/Owner/LiveFleetMapView.swift,
 				Views/Owner/ManageEmployeesView.swift,
-				Views/Owner/NavigationSettingsView.swift,
 				Views/Owner/NotificationHistoryView.swift,
 				Views/Owner/OwnerDashboardView.swift,
 				Views/Owner/OwnerLoginView.swift,
@@ -418,7 +415,7 @@
 				CODE_SIGN_ENTITLEMENTS = "WHYTE ROUTES/WHYTE-ROUTES.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = FW57G974CG;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -479,7 +476,7 @@
 				CODE_SIGN_ENTITLEMENTS = "WHYTE ROUTES/WHYTE-ROUTES.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 19;
+				CURRENT_PROJECT_VERSION = 20;
 				DEVELOPMENT_TEAM = FW57G974CG;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

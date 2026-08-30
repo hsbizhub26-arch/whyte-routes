@@ -92,17 +92,6 @@ struct SettingsView: View {
                     Text("Something broken or confusing? Tell us right away - it helps more than a review does.")
                         .foregroundColor(.gray)
                 }
-                Section {
-                    NavigationLink(destination: NavigationSettingsView()) {
-                        Text("Navigation Settings")
-                    }
-                    .listRowBackground(Color.black.opacity(0.2))
-                } header: {
-                    Text("Driver Navigation")
-                } footer: {
-                    Text("Applied automatically whenever a driver taps Navigate on a stop.")
-                        .foregroundColor(.gray)
-                }
                 // Owner-operators (one person, one truck) and managers
                 // who also drive are real WHYTE ROUTES customers, not
                 // an edge case - roles are permissions, not exclusive
