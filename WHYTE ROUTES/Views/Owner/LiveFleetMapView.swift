@@ -54,6 +54,9 @@ struct LiveFleetMapView: View {
     @State private var subscribedDriverIds: Set<String> = []
     @State private var selectedDriverId: String?
     @State private var selectedDriverShift: Shift?
+    /// What the map is actually showing, so the zoom buttons have a
+    /// span to scale - cameraPosition is often not a plain region.
+    @State private var visibleRegion: MKCoordinateRegion?
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -89,7 +92,12 @@ struct LiveFleetMapView: View {
 
                 ForEach(visibleDrivers) { driver in
                     if selectedDriverId == nil || selectedDriverId == driver.id {
-                        Annotation(driver.name, coordinate: driver.coordinate!) {
+                        // Title deliberately EMPTY, like every other annotation on
+                        // this map. driverPin draws the driver's name itself,
+                        // in a capsule under the dot - passing it here as well
+                        // made MapKit render its own label underneath that one,
+                        // so every truck on the fleet map was labelled twice.
+                        Annotation("", coordinate: driver.coordinate!) {
                             driverPin(driver)
                                 .onTapGesture {
                                     selectDriver(driver.id)
@@ -140,11 +148,19 @@ struct LiveFleetMapView: View {
             // top too (even with .mapControls applied afterward) still
             // let those controls creep up into the battery/wifi icons.
             .ignoresSafeArea(edges: [.horizontal, .bottom])
+            .onMapCameraChange { context in
+                visibleRegion = context.region
+            }
+            // MapUserLocationButton is gone from here on purpose - the
+            // control column below replaces it, so the owner map works
+            // exactly like the driver map instead of having Apple's
+            // button in one place and ours in another. Compass and
+            // scale stay; they place themselves and don't overlap.
             .mapControls {
                 MapCompass()
                 MapScaleView()
-                MapUserLocationButton()
             }
+            .overlay(alignment: .trailing) { mapControlColumn }
 
             // The pills are the actual fleet feature - picking one
             // truck out of several. With a single driver there is
@@ -208,6 +224,60 @@ struct LiveFleetMapView: View {
     }
 
     // MARK: - Driver pin (live GPS position)
+    // Same control column as the driver map, for the same reasons:
+    // right edge and vertically centred rather than a top corner level
+    // with the Dynamic Island, and zoom buttons because pinching needs
+    // two hands. Pinch still works; these are the one-handed version.
+    private var mapControlColumn: some View {
+        VStack(spacing: 12) {
+            VStack(spacing: 0) {
+                Button { zoom(by: 0.5) } label: { controlGlyph("plus") }
+                Divider().frame(width: 30).overlay(Color.black.opacity(0.15))
+                Button { zoom(by: 2.0) } label: { controlGlyph("minus") }
+            }
+            .background(Color("WRThemeGold"))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(radius: 6)
+
+            Button {
+                cameraPosition = .userLocation(fallback: .automatic)
+            } label: {
+                Image(systemName: "location.fill")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(.black)
+                    .frame(width: 46, height: 46)
+                    .background(Color("WRThemeGold"))
+                    .clipShape(Circle())
+                    .shadow(radius: 6)
+            }
+        }
+        .padding(.trailing, 14)
+    }
+
+    private func controlGlyph(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 17, weight: .bold))
+            .foregroundColor(.black)
+            .frame(width: 46, height: 44)
+            .contentShape(Rectangle())
+    }
+
+    /// Clamped so repeated taps can't invert the span or pass world
+    /// scale, both of which MapKit draws as a grey rectangle.
+    private func zoom(by factor: Double) {
+        guard let region = visibleRegion else { return }
+        let latitudeDelta = min(max(region.span.latitudeDelta * factor, 0.0008), 120)
+        let longitudeDelta = min(max(region.span.longitudeDelta * factor, 0.0008), 120)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            cameraPosition = .region(
+                MKCoordinateRegion(
+                    center: region.center,
+                    span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
+                )
+            )
+        }
+    }
+
     private func driverPin(_ driver: Driver) -> some View {
         VStack(spacing: 2) {
             Circle()

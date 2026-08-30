@@ -9,6 +9,9 @@ struct OwnerDashboardView: View {
     @State private var showReports = false
     @State private var customerCount = 0
     @State private var showUpgradePrompt = false
+    /// Closed by default. The map is the screen; the panel is something
+    /// you ask for.
+    @State private var isPanelOpen = false
 
     private var totalCompletedStops: Int {
         driverVM.drivers.reduce(0) { $0 + routeService.reportFor($1).completedStops }
@@ -24,11 +27,44 @@ struct OwnerDashboardView: View {
     }
 
     var body: some View {
-        ZStack {
+        // NO DRAG. A tab you tap.
+        //
+        // The draggable sheet was hard to move and permanently in the
+        // way: 150pt of panel sitting over the map whether or not
+        // anyone wanted it, and a drag that competed with the list
+        // scrolling inside it. Dragging is also the wrong gesture for
+        // something used one-handed - it demands a sustained, accurate
+        // movement to do what a single tap can.
+        //
+        // So the panel is closed by default and opens on a tap. The tab
+        // sits bottom-LEFT, directly above the tab bar, where a thumb
+        // already is and where it cannot collide with the map controls
+        // on the right.
+        ZStack(alignment: .bottom) {
             LiveFleetMapView(driverVM: driverVM)
-            DraggableBottomSheet(collapsedHeight: 150) {
-                widgetSheet
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+
+                HStack {
+                    panelTab
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 14)
+
+                if isPanelOpen {
+                    widgetSheet
+                        .frame(maxHeight: 380)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Color.black)
+                        )
+                        .shadow(color: .black.opacity(0.35), radius: 12, y: -4)
+                        .padding(.horizontal, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
             }
+            .padding(.bottom, 6)
         }
         .onAppear {
             driverVM.startLiveUpdates()
@@ -48,6 +84,31 @@ struct OwnerDashboardView: View {
                 requiredTier: SubscriptionTier(rawValue: access.tier.rawValue + 1) ?? .enterprise
             )
         }
+    }
+
+    /// Small, labelled, and it says which way it will go. A bare
+    /// chevron makes someone guess what it does; "Dashboard" with an
+    /// arrow does not.
+    private var panelTab: some View {
+        Button {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                isPanelOpen.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isPanelOpen ? "chevron.down" : "chevron.up")
+                    .font(.caption.bold())
+                Text("Dashboard")
+                    .font(.subheadline.bold())
+            }
+            .foregroundColor(.black)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(Color("WRThemeGold"))
+            .clipShape(Capsule())
+            .shadow(radius: 6)
+        }
+        .buttonStyle(.plain)
     }
 
     var widgetSheet: some View {
