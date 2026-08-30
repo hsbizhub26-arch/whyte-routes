@@ -32,6 +32,23 @@ final class CustomerListViewModel: ObservableObject {
             $0.address.lowercased().contains(search.lowercased())
         }
     }
+
+    /// Removes the customer locally first so the row disappears under
+    /// the finger, then writes. On failure the row comes back and the
+    /// caller is told - better than a row that vanishes and silently
+    /// returns on the next load.
+    func delete(_ customer: Customer, onFailure: @escaping () -> Void) {
+        let previous = customers
+        customers.removeAll { $0.id == customer.id }
+
+        repo.deleteCustomer(id: customer.id) { ok in
+            Task { @MainActor in
+                guard !ok else { return }
+                self.customers = previous
+                onFailure()
+            }
+        }
+    }
 }
 
 struct CustomerListView: View {
@@ -41,6 +58,11 @@ struct CustomerListView: View {
     @State private var showAddCustomer = false
     @State private var showUpgradePrompt = false
     @State private var editingCustomer: Customer?
+    /// Set by the swipe action; drives the confirmation. Deleting a
+    /// customer is not undoable, so it does not happen on the swipe
+    /// alone.
+    @State private var pendingDelete: Customer?
+    @State private var deleteFailed = false
 
     var body: some View {
         NavigationStack {
@@ -88,6 +110,21 @@ struct CustomerListView: View {
                             }
                             .foregroundColor(.primary)
                         }
+                        // Swipe to delete. Not `.onDelete`, because this
+                        // List is built from `filtered` - onDelete hands
+                        // back an IndexSet into the FILTERED array, so
+                        // deleting while a search is active would remove
+                        // whichever customer happened to sit at that
+                        // index of the unfiltered list instead. Binding
+                        // the action to this row's own customer removes
+                        // the one actually swiped.
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                pendingDelete = customer
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -110,6 +147,28 @@ struct CustomerListView: View {
             }
             .sheet(isPresented: $showAddCustomer) {
                 AddCustomerView { _ in vm.load() }
+            }
+            .confirmationDialog(
+                pendingDelete.map { "Delete \($0.name)?" } ?? "Delete customer?",
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Customer", role: .destructive) {
+                    guard let customer = pendingDelete else { return }
+                    pendingDelete = nil
+                    vm.delete(customer) { deleteFailed = true }
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: {
+                Text("This removes them from your customer list and stops any further notifications. Routes already built keep the stop.")
+            }
+            .alert("Couldn't delete that customer", isPresented: $deleteFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Check your connection and try again.")
             }
             .sheet(item: $editingCustomer) { customer in
                 AddCustomerView(existingCustomer: customer) { _ in vm.load() }

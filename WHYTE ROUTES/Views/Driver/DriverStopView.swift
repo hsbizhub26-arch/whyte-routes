@@ -77,9 +77,15 @@ final class DriverStopViewModel: ObservableObject {
     func startETARefreshTimer() {
         stopETARefreshTimer()
         etaRefreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            // self is unwrapped OUT HERE, before the Task, rather than
+            // inside it. Unwrapping within the Task left the weak
+            // optional itself being read from concurrently-executing
+            // code, which Swift 6 makes a hard error - and the second
+            // `self?.` in the else branch was reading it twice.
+            guard let self else { return }
             Task { @MainActor in
-                guard let self, self.jobStatus == .enRoute else {
-                    self?.stopETARefreshTimer()
+                guard self.jobStatus == .enRoute else {
+                    self.stopETARefreshTimer()
                     return
                 }
                 self.loadETA()

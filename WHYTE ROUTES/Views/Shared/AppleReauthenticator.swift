@@ -130,10 +130,26 @@ extension AppleReauthenticator: ASAuthorizationControllerDelegate {
 extension AppleReauthenticator: ASAuthorizationControllerPresentationContextProviding {
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first { $0.isKeyWindow }
-            ?? ASPresentationAnchor()
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+
+        if let key = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) {
+            return key
+        }
+        // Fallback only for the case where nothing is key yet. Built
+        // against a scene rather than the bare ASPresentationAnchor()
+        // initialiser, which is deprecated in iOS 26 - a window with no
+        // scene has nowhere to present from, so the sheet would simply
+        // never appear and account deletion would hang on a silent
+        // failure rather than an error.
+        if let scene = scenes.first {
+            return ASPresentationAnchor(windowScene: scene)
+        }
+        // No scene at all means the app is not on screen, so there is
+        // nothing to present from. Returning a detached window here
+        // (the old ASPresentationAnchor() / init(frame:), both
+        // deprecated in iOS 26) would hand Apple a window it cannot
+        // show, and the sheet would silently never appear. Better to
+        // fail loudly than to hang account deletion forever.
+        preconditionFailure("Apple re-authentication was requested with no active window scene.")
     }
 }

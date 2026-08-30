@@ -58,4 +58,28 @@ final class CustomerRepository {
                 completion?(error == nil)
             }
     }
+
+    // MARK: - Delete Customer
+    // There was no way to remove a customer from inside the app at all
+    // - not a broken swipe, simply never built. Which meant a customer
+    // entered by mistake, or one who has left, stayed in the list and
+    // kept counting against the plan's customer limit forever.
+    //
+    // This removes the customer RECORD only. Stops already built from
+    // that customer keep their own cached copy of the name and address,
+    // deliberately: deleting a customer must not silently blank out a
+    // route the crew is part-way through driving. What it does stop is
+    // any further contact - the send paths treat a stop whose named
+    // customer no longer exists as having no consent, rather than
+    // falling back to the phone number frozen on the stop.
+    func deleteCustomer(id: String, completion: ((Bool) -> Void)? = nil) {
+        guard let customersRef else { completion?(false); return }
+
+        customersRef.document(id).delete { error in
+            if let error {
+                print("❌ Failed to delete customer \(id): \(error.localizedDescription)")
+            }
+            completion?(error == nil)
+        }
+    }
 }
