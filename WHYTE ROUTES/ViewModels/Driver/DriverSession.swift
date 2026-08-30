@@ -22,6 +22,14 @@ final class DriverSession: ObservableObject {
     /// otherwise it just means nothing has come back yet.
     @Published var hasLoadedStops = false
 
+    /// Bounded first-load retries for permission-denied only. See
+    /// loadStops - this covers the window where a just-created
+    /// users/{uid} is not yet visible to the rules engine. Reset on
+    /// every successful load and on logout, so it can never leak into
+    /// a later genuine denial.
+    private var permissionRetries = 0
+    private static let maxPermissionRetries = 3
+
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
     private let shiftRepo = ShiftRepository()
@@ -46,6 +54,7 @@ final class DriverSession: ObservableObject {
         activeShift = nil
         stopsError = nil
         hasLoadedStops = false
+        permissionRetries = 0
     }
 
     // MARK: - Shift start/end
@@ -137,19 +146,44 @@ final class DriverSession: ObservableObject {
             Task { @MainActor in
                 switch result {
                 case .success(let stops):
+                    self.permissionRetries = 0
                     self.stopsError = nil
                     self.hasLoadedStops = true
                     self.activeStops = stops
                     TrackingBroadcastService.shared.refreshLinks()
 
                 case .failure(let error):
+                    // A just-invited driver can reach this before the
+                    // rules engine can see their users/{uid} document -
+                    // UserPermissionsService waits for that, and this is
+                    // the belt to its braces. Retry ONLY on
+                    // permission-denied, only a few times, and only
+                    // before anything has ever loaded: a denial after a
+                    // successful load is a real one and must surface.
+                    let isPermissionDenied = (error as? StopsRepository.StopsError) == .permissionDenied
+
+                    if isPermissionDenied,
+                       self.permissionRetries < Self.maxPermissionRetries,
+                       !self.hasLoadedStops {
+                        self.permissionRetries += 1
+                        let attempt = self.permissionRetries
+                        print("⚠️ stops denied on first load - retry \(attempt)/\(Self.maxPermissionRetries)")
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: UInt64(400_000_000) * UInt64(attempt))
+                            self.loadStops(routeId: routeId)
+                        }
+                        return
+                    }
+
                     // activeStops is deliberately left ALONE. Blanking
                     // it on a failed read is what turned a permission
                     // error into "Route Completed 🎉" - a driver being
                     // told their morning was done before it started.
                     // A driver mid-route who loses signal keeps the
                     // stops they already have, and gets a banner.
-                    self.stopsError = "Couldn't load your route. \(error.localizedDescription)"
+                    self.stopsError = isPermissionDenied
+                        ? "Couldn't load your route. Pull down to retry, or sign out and back in."
+                        : "Couldn't load your route. \(error.localizedDescription)"
                     print("⚠️ DriverSession.loadStops failed: \(error)")
                 }
             }

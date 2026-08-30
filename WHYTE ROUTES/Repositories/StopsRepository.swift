@@ -58,7 +58,10 @@ final class StopsRepository {
                     // finished" are opposite messages, and this used to
                     // send the second one.
                     print("❌ Failed to load driver stops:", error.localizedDescription)
-                    completion(.failure(error))
+                    let nsError = error as NSError
+                    let denied = nsError.domain == FirestoreErrorDomain
+                        && nsError.code == FirestoreErrorCode.permissionDenied.rawValue
+                    completion(.failure(denied ? StopsError.permissionDenied : error))
                     return
                 }
 
@@ -129,11 +132,18 @@ final class StopsRepository {
 
     enum StopsError: LocalizedError {
         case noCompanySelected
+        /// Firestore refused the read. Classified HERE rather than in
+        /// the view model so that Firestore stays behind the
+        /// repository boundary - DriverSession needs to know a denial
+        /// happened, not which SDK reported it.
+        case permissionDenied
 
         var errorDescription: String? {
             switch self {
             case .noCompanySelected:
                 return "No company is selected for this account."
+            case .permissionDenied:
+                return "You don't have permission to read this route yet."
             }
         }
     }

@@ -80,6 +80,23 @@ final class UserPermissionsService {
     /// in Firestore (already there, or just created) so the caller can
     /// surface a real warning instead of failing silently.
     @discardableResult
+    /// Polls users/{uid} from the SERVER (never the local cache -
+    /// the cache would answer instantly and prove nothing) until it is
+    /// readable, so callers know Security Rules can resolve this
+    /// account's company membership before any company-scoped query.
+    private func confirmServerVisible(_ docRef: DocumentReference) async {
+        for attempt in 0..<4 {
+            if let snapshot = try? await docRef.getDocument(source: .server), snapshot.exists {
+                return
+            }
+            // 150ms, 300ms, 600ms, 1.2s - short enough not to be felt
+            // on a normal sign-in, long enough to cover a slow one.
+            let delay = UInt64(150_000_000) << attempt
+            try? await Task.sleep(nanoseconds: delay)
+        }
+        print("⚠️ users/\(docRef.documentID) not server-visible yet - first queries may need a retry")
+    }
+
     func createIfNeeded(
         uid: String,
         email: String,
@@ -109,6 +126,29 @@ final class UserPermissionsService {
 
             try await docRef.setData(data)
             print("✅ Created users/\(uid) permissions document for \(email)")
+
+            // The write is server-acknowledged by the line above, but
+            // that is NOT the same as the Security Rules engine being
+            // able to read it. Every company-scoped rule in this project
+            // resolves membership with
+            //   get(/databases/$(db)/documents/users/$(request.auth.uid))
+            // and on the very first sign-in after an invite, the next
+            // query can reach rule evaluation before that get() returns
+            // the new document - which denies, because a missing key in
+            // a rule is an evaluation error, not a false.
+            //
+            // The driver saw "Couldn't load your route. Missing or
+            // insufficient permissions." on their first launch and a
+            // clean load on the second. Confirmed by relaunching the
+            // same account.
+            //
+            // So: don't return until a SERVER read succeeds. That is
+            // the same path the rules engine takes, so once it answers,
+            // membership is genuinely visible. Bounded - four tries over
+            // roughly two seconds - and the write itself already
+            // succeeded, so exhausting them still returns true rather
+            // than failing a signup over a slow read.
+            await confirmServerVisible(docRef)
             return true
         } catch {
             print("⚠️ Failed to create users/\(uid) permissions document: \(error.localizedDescription)")
