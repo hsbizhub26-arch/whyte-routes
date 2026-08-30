@@ -888,7 +888,17 @@ exports.sendTrackingLink = onCall(
       linkId = doc.id;
     }
 
-    const url = `${TRACKING_BASE_URL}?c=${companyId}&t=${linkId}`;
+    // ENCODED. Both of these go into a query string that is then sent
+    // as an SMS, and a company id is not guaranteed to be URL-safe:
+    // companies created before ids were auto-generated have
+    // human-readable document ids, and Firestore allows spaces in
+    // them. "DW Landscaping" produced
+    //   ...track?c=DW Landscaping&t=K4Ww...
+    // which every SMS client truncates at the space, so the customer
+    // received a link that resolved to a company id of "DW" - a tenant
+    // that does not exist - and a page that could never load. The link
+    // had been sending successfully and arriving broken.
+    const url = `${TRACKING_BASE_URL}?c=${encodeURIComponent(companyId)}&t=${encodeURIComponent(linkId)}`;
     const companyName = companyData.name || "Your service crew";
     const message = `${companyName}: track your service in real time here - ${url}`;
 

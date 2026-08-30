@@ -54,9 +54,71 @@ final class CustomerRepository {
 
         customersRef
             .document(customer.id)
-            .setData(customer.toDict()) { error in
+            .setData(customer.toDict()) { [weak self] error in
+                if error == nil {
+                    self?.propagateToOpenStops(customer)
+                }
                 completion?(error == nil)
             }
+    }
+
+    // MARK: - Push a corrected customer down onto their open stops
+    //
+    // Stops keep their OWN copy of the customer's name, address and
+    // coordinates - denormalised so a driver's stop list works without
+    // a join, and so a route stays intact if a customer is later
+    // deleted. Nothing ever updated that copy, which made correcting a
+    // customer feel broken in the worst way: the customer record got
+    // fixed, the route the driver was actually looking at did not, and
+    // there was nothing on screen to explain the difference.
+    //
+    // It bites hardest on exactly the case that needs it. An address
+    // typed by hand rather than picked from the suggestions is stored
+    // with no coordinates, so navigation cannot start; the owner
+    // re-enters it properly, and the driver's stop still has no map
+    // location, because the fix never travelled.
+    //
+    // ONLY open stops, and ONLY the customer-derived fields. A
+    // completed stop is a record of what happened and must not be
+    // rewritten afterwards, and status, timestamps, order and driverId
+    // belong to the driver - the same line drawn in
+    // StopsRepository.saveRouteEdits, for the same reason.
+    private func propagateToOpenStops(_ customer: Customer) {
+        guard let companyId = CompanySession.shared.currentCompanyId else { return }
+        let routesRef = db.collection("companies").document(companyId).collection("routes")
+
+        routesRef.getDocuments { snapshot, error in
+            guard error == nil, let routes = snapshot?.documents else { return }
+
+            for route in routes {
+                route.reference.collection("stops")
+                    .whereField("customerId", isEqualTo: customer.id)
+                    .getDocuments { stopSnap, stopError in
+                        guard stopError == nil, let stops = stopSnap?.documents else { return }
+
+                        for stop in stops {
+                            let isCompleted = stop.data()["isCompleted"] as? Bool ?? false
+                            guard !isCompleted else { continue }
+
+                            var data: [String: Any] = [
+                                "address": customer.address,
+                                "customerOptedIn": customer.notificationsOptIn
+                            ]
+                            func put(_ key: String, _ value: Any?) {
+                                data[key] = value ?? FieldValue.delete()
+                            }
+                            put("customerName", customer.name)
+                            put("customerPhone", customer.phone)
+                            put("customerEmail", customer.email)
+                            put("driverNotes", customer.notes)
+                            put("latitude", customer.latitude)
+                            put("longitude", customer.longitude)
+
+                            stop.reference.setData(data, merge: true)
+                        }
+                    }
+            }
+        }
     }
 
     // MARK: - Delete Customer

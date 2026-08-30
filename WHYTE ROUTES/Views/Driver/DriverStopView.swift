@@ -508,6 +508,38 @@ extension DriverStopView {
             .overlay(alignment: .top) {
                 if nav.isNavigating { maneuverBanner }
             }
+        } else {
+            // A stop with no coordinates used to render NOTHING here,
+            // and the Start Navigation button below vanished with it -
+            // so a driver who tapped Start Navigation arrived at a
+            // screen with an address, an "I've Arrived" button, and no
+            // explanation of where the map went. Silence reads as a
+            // broken app; it is actually missing data.
+            //
+            // It happens when a customer's address was typed by hand
+            // instead of picked from the suggestions - Add Customer
+            // warns about exactly this, and the warning is easy to
+            // click past.
+            VStack(spacing: 10) {
+                Image(systemName: "mappin.slash")
+                    .font(.title2)
+                    .foregroundColor(Color("WRThemeGold"))
+                Text("No map location for this stop")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Text("This customer's address was saved without a map location, so navigation can't start. Ask your dispatcher to re-enter it and pick the address from the suggestions.")
+                    .font(.footnote)
+                    .foregroundColor(.white.opacity(0.65))
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .background(Color.black.opacity(0.3))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color("WRThemeGold").opacity(0.4), lineWidth: 1)
+            )
         }
     }
 

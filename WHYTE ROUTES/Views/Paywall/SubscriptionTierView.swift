@@ -31,46 +31,35 @@ struct SubscriptionTierView: View {
             case .premium:
                 // EVERY LINE HERE IS A PROMISE MADE AT THE MOMENT OF
                 // PAYMENT, so it has to name something the app can
-                // actually do today.
+                // actually do today. Two rounds of correction got it
+                // here:
                 //
-                // "Before/after proof of work" was removed: the capture
-                // button is never rendered (DriverStopView.photoProofButton
-                // has no call site), so no subscriber on any tier could
-                // reach it. It was being sold at $64.99/mo.
+                //  - "Before/after proof of work" was REMOVED. The
+                //    capture button has no call site, so no subscriber
+                //    on any tier could reach it, and it was being sold
+                //    at $64.99/mo.
+                //  - The customer texts and tracking link were ADDED.
+                //    Both are gated server-side at tierRank >= 1 and
+                //    were already being enforced and paid for in Twilio
+                //    charges - delivered, never advertised. The exact
+                //    inverse of the proof-of-work line.
+                //  - "Live fleet map" went, because the map is no
+                //    longer withheld. Starter sees its own route and
+                //    its own truck; what Premium sells is having a CREW
+                //    on that map.
                 //
-                // "Route optimization" stays, and the gate moved to match
-                // it - it was checked against advanced dispatch, so a
-                // Premium subscriber who tapped the button they had just
-                // paid for was shown an ad for Premium Plus.
-                // The two customer-facing lines lead, because they are
-                // what Premium is actually selling. Starter already
-                // includes unlimited routes and unlimited drivers - the
-                // entire dispatch engine - so "a fleet map and twenty
-                // more customers" was not a description of the gap.
-                //
-                // Both are gated server-side at tierRank >= 1
-                // (functions/index.js: sendCustomerNotification and
-                // sendTrackingLink), and were being enforced, paid for
-                // in Twilio charges, and never mentioned at the point
-                // of sale. The exact inverse of the proof-of-work
-                // bullet removed earlier today: that advertised
-                // something the app could not do, this did something it
-                // never advertised.
-                // "Live fleet map" is gone from this list because the
-                // map is no longer withheld - Starter sees its own
-                // route and its own truck. What Premium sells is having
-                // a CREW on that map, which is why the drivers line
-                // carries it now.
-                //
-                // Framed against the per-seat pricing this category
-                // charges: a five-truck operation is $745-995/month on
-                // a per-user plan and $64.99 here. That is the argument,
-                // and it only became sayable once Starter stopped
-                // handing out unlimited drivers for free.
+                // The per-driver line LEADS. Everything a contractor
+                // compares this against is priced per user: $149-199
+                // each on the fleet tools, $7.99 on the consumer route
+                // planners. At five trucks that is $745-995 a month, or
+                // five subscriptions that cannot see each other's work.
+                // This is one price at any crew size - the strongest
+                // sentence on the screen, and it was sitting at
+                // position three reading like a feature note.
                 return [
+                    "One price for your whole crew - no per-driver fees",
                     "Automatic customer arrival texts",
                     "Live tracking link for customers",
-                    "Your whole crew on one map - no per-driver fees",
                     "Unlimited stops and routes",
                     "Route optimization"
                 ]
@@ -155,6 +144,15 @@ struct SubscriptionTierView: View {
             Text("Unlock full dispatch tools")
                 .font(.largeTitle.bold())
                 .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+
+            // Said outright, not left to be inferred from a bullet.
+            // A route planner is bought per person; dispatch software
+            // is bought per company, and that difference is the whole
+            // argument at any crew size above one.
+            Text("Add every truck you run. The price doesn't change.")
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
         }
         .padding(.top, 12)
