@@ -7,6 +7,10 @@ final class DriverStopViewModel: ObservableObject {
 
     @Published var stop: Stop
     @Published var isCompleting = false
+    /// Set when marking the stop completed failed to reach Firestore.
+    /// Shown under the button - completing a stop is the one action a
+    /// driver cannot verify by looking out of the window.
+    @Published var completionError: String?
     @Published var routeCompleted = false
     @Published var etaMinutes: Int?
 
@@ -139,7 +143,7 @@ final class DriverStopViewModel: ObservableObject {
         guard let route else { return }
         stop.status = JobStatus.enRoute.rawValue
         stop.enRouteAt = Date()
-        routeService.updateStop(routeId: route.id, stop: stop)
+        await routeService.updateStop(routeId: route.id, stop: stop)
         // No customer text here. "On the way" was retired along with
         // the 15-minute ETA and "arrived" - three of the five texts a
         // customer used to get per stop, for a stop they might still
@@ -152,7 +156,7 @@ final class DriverStopViewModel: ObservableObject {
         guard let route else { return }
         stop.status = JobStatus.arrived.rawValue
         stop.arrivedAt = Date()
-        routeService.updateStop(routeId: route.id, stop: stop)
+        await routeService.updateStop(routeId: route.id, stop: stop)
         // Retired, same as enRoute above. "Arrived" landed seconds
         // before "completed" on a driveway that takes four minutes,
         // so the customer got two texts for one visit.
@@ -163,11 +167,28 @@ final class DriverStopViewModel: ObservableObject {
         guard let route else { return }
 
         isCompleting = true
-        stop.isCompleted = true
-        stop.status = JobStatus.completed.rawValue
-        stop.completedAt = Date()
+        completionError = nil
 
-        routeService.updateStop(routeId: route.id, stop: stop)
+        // Built as a COPY and only committed to `stop` once the write
+        // succeeds. Mutating self.stop first made the row render as
+        // completed the instant it was tapped, so a failed write left
+        // a stop that looked done to the driver, was still scheduled
+        // in Firestore, and would be silently re-served or skipped.
+        var updated = stop
+        updated.isCompleted = true
+        updated.status = JobStatus.completed.rawValue
+        updated.completedAt = Date()
+
+        let saved = await routeService.updateStop(routeId: route.id, stop: updated)
+        guard saved else {
+            isCompleting = false
+            completionError = "Couldn't mark this stop completed - check your connection and tap again."
+            return
+        }
+        stop = updated
+
+        // Only now, with the completion actually persisted: the text
+        // says the service is finished, and there is no unsending it.
         await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "completed")
 
         // This customer's service is done, so their live tracking ends
@@ -340,6 +361,7 @@ struct DriverStopView: View {
                         // texts along with the steps themselves.
                         if vm.jobStatus == .arrived || vm.jobStatus == .completed {
                             completeButton
+                            completionErrorBanner
                         }
 
                         Spacer(minLength: 40)
@@ -792,6 +814,16 @@ extension DriverStopView {
         .disabled(vm.isCompleting || vm.stop.isCompleted)
         .opacity(vm.stop.isCompleted ? 0.4 : 1)
         .padding(.top, 10)
+    }
+
+    @ViewBuilder
+    private var completionErrorBanner: some View {
+        if let message = vm.completionError {
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .foregroundColor(.orange)
+                .padding(.top, 6)
+        }
     }
 
     // MARK: ROUTE COMPLETED

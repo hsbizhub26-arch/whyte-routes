@@ -200,7 +200,7 @@ function tierRank(subscriptionTier) {
 // flag, removed - because a flag is a thing someone turns back on by
 // accident. Five texts per stop is more than anyone wants at 3am, and
 // at $0.0079 a segment a busy company spent more on Twilio than they
-// paid us in subscription. These three describe the arc a customer
+// paid in subscription. These three describe the arc a customer
 // actually cares about: it started, you're next, it's done.
 //
 // Each template takes the whole context object rather than positional
@@ -208,19 +208,21 @@ function tierRank(subscriptionTier) {
 // old (companyName, time) shape silently passed a clock time into a
 // slot that now holds an address.
 //
-// COMPANY NAME, NOT "WHYTE ROUTES". The spec for these messages said
-// "your WHYTE ROUTES driver", and that is written here as the tenant's
-// own name deliberately: the customer receiving this hired DW
-// Landscaping, has never heard of us, and a text naming their
-// contractor's software vendor reads like a wrong number. Every other
-// customer-facing string in this file already resolves the same way.
+// "WHYTE ROUTES" IS LITERAL HERE, AND DELIBERATELY SO.
+//
+// It is not a placeholder for the tenant's company name and must not
+// be turned into one. WHYTE ROUTES is the product sending the message;
+// the company operating the route is a separate, independently owned
+// business, and interpolating its name here would put words in that
+// business's mouth to its own customers. If white-labelling is ever
+// wanted it will be asked for explicitly - until then, no substitution.
 const MESSAGE_TEMPLATES = {
   shiftStart: (c) =>
-    `Hi ${c.customerName}, your ${c.companyName} driver has started their route today! Track live progress here: ${c.trackingUrl}`,
+    `Hi ${c.customerName}, your WHYTE ROUTES driver has started their route today! Track live progress here: ${c.trackingUrl}`,
   eta10: (c) =>
-    `Hi ${c.customerName}, your ${c.companyName} driver is approximately 10 minutes away from ${c.address}!`,
+    `Hi ${c.customerName}, your WHYTE ROUTES driver is approximately 10 minutes away from ${c.address}!`,
   completed: (c) =>
-    `Hi ${c.customerName}, your service at ${c.address} has been completed! Thank you for choosing ${c.companyName}.`,
+    `Hi ${c.customerName}, your service at ${c.address} has been completed! Thank you for choosing WHYTE ROUTES.`,
 };
 
 function buildMessage(type, ctx) {

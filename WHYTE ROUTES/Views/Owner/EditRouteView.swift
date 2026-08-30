@@ -165,7 +165,20 @@ struct EditRouteView: View {
                                 }
                             }
                         } header: {
-                            Text("Stops")
+                            // Edit/Done lives here rather than in the
+                            // navigation bar. Up there it sat beside
+                            // Cancel as a second, unlabelled control
+                            // that looked like it applied to the whole
+                            // screen, when all it does is put THIS list
+                            // into reorder/delete mode. Next to the
+                            // list it governs, it reads as what it is.
+                            HStack {
+                                Text("Stops")
+                                Spacer()
+                                EditButton()
+                                    .font(.body)
+                                    .textCase(nil)
+                            }
                         } footer: {
                             if approximateDistanceKM > 0 {
                                 Text("Drag to reorder - the driver sees stops in this order. Approx. \(approximateDistanceKM, specifier: "%.1f") km straight-line (not actual driving distance).")
@@ -190,9 +203,6 @@ struct EditRouteView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "Saving…" : "Save") { save() }
                         .disabled(isSaving || routeName.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    EditButton()
                 }
             }
             .onAppear(perform: loadEverything)
@@ -590,7 +600,22 @@ struct EditRouteView: View {
                 // it back wholesale reverted every stop the crew had
                 // completed since and deleted their timing data. This
                 // writes only the fields this screen edits.
-                stopsRepo.saveRouteEdits(forRoute: routeId, stops: orderedStops)
+                let stopsSaved = await withCheckedContinuation { continuation in
+                    stopsRepo.saveRouteEdits(forRoute: routeId, stops: orderedStops) { success in
+                        continuation.resume(returning: success)
+                    }
+                }
+                guard stopsSaved else {
+                    // The route document itself saved; the stops did
+                    // not. Staying open with `stops` untouched is the
+                    // point - the owner's reordering and deletions are
+                    // still on screen and Save can simply be tapped
+                    // again. Dismissing here is what used to throw the
+                    // whole edit away while looking like it worked.
+                    isSaving = false
+                    errorMessage = "Saved the route, but couldn't save the stops - check your connection and tap Save again."
+                    return
+                }
 
                 // A stop that now means a different person must not
                 // keep the previous person's tracking links alive.
@@ -613,10 +638,38 @@ struct EditRouteView: View {
 
                 // Removing a stop outright ends its tracking for the
                 // same reason - there is no longer a job to watch.
+                //
+                // Deletions are awaited individually and the failures
+                // counted. A stop whose delete fails is still on the
+                // route in Firestore, so it must stay in
+                // originalStopIds - otherwise the retry would think it
+                // had never been asked to delete it, and the stop would
+                // quietly come back on the next screen that reads the
+                // route.
                 let currentIds = Set(orderedStops.map { $0.id })
+                var stillPresent: Set<String> = []
                 for removedId in originalStopIds.subtracting(currentIds) {
                     trackingRepo.supersedeLinks(forStopId: removedId)
-                    stopsRepo.deleteStop(routeId: routeId, stopId: removedId)
+                    let deleted = await withCheckedContinuation { continuation in
+                        stopsRepo.deleteStop(routeId: routeId, stopId: removedId) { success in
+                            continuation.resume(returning: success)
+                        }
+                    }
+                    if !deleted { stillPresent.insert(removedId) }
+                }
+
+                guard stillPresent.isEmpty else {
+                    // Everything that DID delete is now genuinely gone,
+                    // so drop those from the baseline and leave only
+                    // the stragglers. Tapping Save again retries just
+                    // those, instead of re-issuing deletes that have
+                    // already succeeded.
+                    originalStopIds = currentIds.union(stillPresent)
+                    isSaving = false
+                    errorMessage = stillPresent.count == 1
+                        ? "Couldn't remove one stop - check your connection and tap Save again."
+                        : "Couldn't remove \(stillPresent.count) stops - check your connection and tap Save again."
+                    return
                 }
 
                 isSaving = false

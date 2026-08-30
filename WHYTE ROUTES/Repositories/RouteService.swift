@@ -100,7 +100,24 @@ final class RouteService: ObservableObject {
         }
     }
 
-    // MARK: - Update a Single Stop
+    // MARK: - Update a Single Stop (awaitable)
+    //
+    // The fire-and-forget version below reports failure to the console
+    // and nowhere else, which is fine for a background touch-up and
+    // wrong for anything a customer hears about. Completing a stop
+    // texts somebody "your service has been completed", ends their
+    // live tracking and advances the driver to the next address - all
+    // of which have to be downstream of the write actually landing.
+    @discardableResult
+    func updateStop(routeId: String, stop: Stop) async -> Bool {
+        await withCheckedContinuation { continuation in
+            stopsRepo.updateStop(routeId: routeId, stop: stop) { success in
+                continuation.resume(returning: success)
+            }
+        }
+    }
+
+    // MARK: - Update a Single Stop (fire-and-forget)
     func updateStop(routeId: String, stop: Stop) {
         stopsRepo.updateStop(routeId: routeId, stop: stop) { success in
             if !success {
