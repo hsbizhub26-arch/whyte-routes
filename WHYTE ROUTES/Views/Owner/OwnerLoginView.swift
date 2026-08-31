@@ -189,10 +189,10 @@ extension OwnerLoginView {
                                 case 17011:
                                     resetInfo = "No account found with that email address."
                                 default:
-                                    resetInfo = err.localizedDescription
+                                    resetInfo = "Couldn't send the reset email. Please try again."
                                 }
                             } else {
-                                resetInfo = err.localizedDescription
+                                resetInfo = "Couldn't send the reset email. Please try again."
                             }
                         } else {
                             resetInfo = "Password reset email sent to \(email)."
@@ -300,8 +300,45 @@ extension OwnerLoginView {
                 if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
                     print("⛔️ underlying: domain=\(underlying.domain) code=\(underlying.code) userInfo=\(underlying.userInfo)")
                 }
-                self.error = authError.localizedDescription
+                self.error = friendlyAuthMessage(authError)
             }
+        }
+    }
+
+    // Firebase's own error strings are written for developers, and
+    // they were going straight onto the sign-in screen. Typing your
+    // password wrong produced "The supplied auth credential is
+    // malformed or has expired." - which tells a contractor standing
+    // in a driveway at 5am nothing at all, and reads like the app is
+    // broken rather than like they made a typo.
+    //
+    // wrongPassword, userNotFound and invalidCredential deliberately
+    // collapse into ONE message. Distinguishing them would turn the
+    // login form into an oracle for which email addresses have
+    // accounts, which is worth more to someone probing the app than
+    // the small convenience is worth to a real user.
+    private func friendlyAuthMessage(_ error: Error) -> String {
+        let nsError = error as NSError
+        guard nsError.domain == AuthErrorDomain,
+              let code = AuthErrorCode(rawValue: nsError.code) else {
+            return "Something went wrong. Please try again."
+        }
+
+        switch code {
+        case .wrongPassword, .userNotFound, .invalidCredential, .invalidEmail:
+            return "Incorrect email or password."
+        case .userDisabled:
+            return "This account has been disabled. Contact your company owner."
+        case .emailAlreadyInUse:
+            return "That email already has an account - try signing in instead."
+        case .weakPassword:
+            return "Choose a password at least 6 characters long."
+        case .networkError:
+            return "Can't reach the server - check your connection and try again."
+        case .tooManyRequests:
+            return "Too many attempts. Wait a minute and try again."
+        default:
+            return "Something went wrong. Please try again."
         }
     }
 
@@ -330,7 +367,7 @@ extension OwnerLoginView {
             } catch let authError {
                 let nsError = authError as NSError
                 print("⛔️ Account creation failed: domain=\(nsError.domain) code=\(nsError.code)")
-                self.error = authError.localizedDescription
+                self.error = friendlyAuthMessage(authError)
             }
         }
     }
@@ -359,7 +396,7 @@ extension OwnerLoginView {
                 do {
                     _ = try await Auth.auth().signIn(with: firebaseCredential)
                 } catch let authError {
-                    self.error = authError.localizedDescription
+                    self.error = friendlyAuthMessage(authError)
                 }
             }
 
@@ -367,7 +404,7 @@ extension OwnerLoginView {
             // User cancelling the Apple sign-in sheet isn't a real error.
             let nsError = authError as NSError
             if nsError.code != ASAuthorizationError.canceled.rawValue {
-                error = authError.localizedDescription
+                error = "Couldn't finish signing in with Apple. Please try again."
             }
         }
     }
@@ -417,7 +454,7 @@ extension OwnerLoginView {
                 if nsError.domain == "com.google.GIDSignIn", nsError.code == GIDSignInError.canceled.rawValue {
                     return
                 }
-                self.error = signInError.localizedDescription
+                self.error = self.friendlyAuthMessage(signInError)
             }
         }
     }

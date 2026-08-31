@@ -5,3 +5,5 @@ functions/node_modules/
 functions/.env
 firebase-debug.log
 .firebase/
+firestore-tests/node_modules/
+firestore-tests/firestore.rules
