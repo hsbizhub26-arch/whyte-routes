@@ -9,6 +9,7 @@ protocol DriverRepository {
     func updateDriverLocation(driverId: String, latitude: Double, longitude: Double)
     func updateDriverName(driverId: String, name: String, completion: ((Bool) -> Void)?)
     func updateDriverVehicle(driverId: String, vehicle: String, completion: ((Bool) -> Void)?)
+    func updateDriverPhone(driverId: String, phone: String, completion: ((Bool) -> Void)?)
     func updateLicensePhotoPath(driverId: String, path: String, completion: ((Bool) -> Void)?)
     func assignRoute(driverId: String, routeId: String)
     func fetchActiveShift(driverId: String, completion: @escaping (Shift?) -> Void)
@@ -156,6 +157,24 @@ final class FirestoreDriverRepository: DriverRepository {
     func updateDriverVehicle(driverId: String, vehicle: String, completion: ((Bool) -> Void)? = nil) {
         guard let ref = driversRef?.document(driverId) else { completion?(false); return }
         ref.updateData(["vehicle": vehicle]) { error in
+            completion?(error == nil)
+        }
+    }
+
+    // MARK: - Update Phone
+    // Exactly the same omission the Vehicle row had: the profile
+    // DISPLAYED a Phone row and offered no way to fill it, so every
+    // driver saw a permanent "N/A" beside a label that looked like it
+    // should be editable. An owner needs a way to reach the person
+    // driving their truck.
+    //
+    // An empty string DELETES the field rather than storing "", so
+    // clearing the box actually clears the number instead of leaving
+    // an empty string that reads as "set" to everything downstream.
+    func updateDriverPhone(driverId: String, phone: String, completion: ((Bool) -> Void)? = nil) {
+        guard let ref = driversRef?.document(driverId) else { completion?(false); return }
+        let trimmed = phone.trimmingCharacters(in: .whitespaces)
+        ref.updateData(["phone": trimmed.isEmpty ? FieldValue.delete() : trimmed]) { error in
             completion?(error == nil)
         }
     }

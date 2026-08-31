@@ -18,6 +18,9 @@ struct DriverProfileView: View {
     @State private var isEditingVehicle = false
     @State private var vehicleInput = ""
     @State private var isSavingVehicle = false
+    @State private var isEditingPhone = false
+    @State private var phoneInput = ""
+    @State private var isSavingPhone = false
 
     var body: some View {
         ZStack {
@@ -56,7 +59,7 @@ struct DriverProfileView: View {
 
                         editableNameRow(driver: driver)
                         editableVehicleRow(driver: driver)
-                        infoRow(title: "Phone", value: driver.phone ?? "N/A")
+                        editablePhoneRow(driver: driver)
 
                         if let updated = driver.lastUpdated {
                             infoRow(
@@ -262,6 +265,74 @@ struct DriverProfileView: View {
                 }
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func editablePhoneRow(driver: Driver) -> some View {
+        if isEditingPhone {
+            HStack {
+                Text("Phone")
+                    .foregroundColor(Color("WRThemeGold"))
+                    .font(.headline)
+
+                TextField("e.g. 647-222-5239", text: $phoneInput)
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.trailing)
+                    .keyboardType(.phonePad)
+                    .textContentType(.telephoneNumber)
+                    .submitLabel(.done)
+                    .onSubmit { savePhone(driverId: driver.id) }
+
+                Button {
+                    savePhone(driverId: driver.id)
+                } label: {
+                    if isSavingPhone {
+                        ProgressView().tint(Color("WRThemeGold"))
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(Color("WRThemeGold"))
+                    }
+                }
+                .disabled(isSavingPhone)
+            }
+            .padding(.vertical, 4)
+        } else {
+            HStack {
+                Text("Phone")
+                    .foregroundColor(Color("WRThemeGold"))
+                    .font(.headline)
+                Spacer()
+                Text((driver.phone?.isEmpty == false) ? driver.phone! : "Not set")
+                    .foregroundColor((driver.phone?.isEmpty == false) ? .white : .white.opacity(0.4))
+                Button {
+                    phoneInput = driver.phone ?? ""
+                    isEditingPhone = true
+                } label: {
+                    Image(systemName: "pencil.circle")
+                        .foregroundColor(Color("WRThemeGold"))
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func savePhone(driverId: String) {
+        let trimmed = phoneInput.trimmingCharacters(in: .whitespaces)
+        isSavingPhone = true
+        driverRepo.updateDriverPhone(driverId: driverId, phone: trimmed) { success in
+            Task { @MainActor in
+                isSavingPhone = false
+                if success {
+                    // The local copy has to move too. Without this the
+                    // write lands in Firestore and the row snaps back to
+                    // "Not set" until the app is relaunched - which reads
+                    // exactly like the save failed, and is why nobody
+                    // would trust the field a second time.
+                    session.driver?.phone = trimmed.isEmpty ? nil : trimmed
+                    isEditingPhone = false
+                }
+            }
         }
     }
 
