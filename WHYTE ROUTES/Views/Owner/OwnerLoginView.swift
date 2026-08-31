@@ -319,9 +319,30 @@ extension OwnerLoginView {
     // the small convenience is worth to a real user.
     private func friendlyAuthMessage(_ error: Error) -> String {
         let nsError = error as NSError
+
+        // Firebase's backend collapses "no such account" and "wrong
+        // password" into one INVALID_LOGIN_CREDENTIALS response - that
+        // is email-enumeration protection doing its job - and the SDK
+        // does not reliably surface it as a code this switch knows.
+        // Matched on the MESSAGE before the code lookup, because when
+        // it arrives as .internalError the code tells us nothing and
+        // the message tells us everything.
+        let raw = "\(nsError.userInfo[NSLocalizedFailureReasonErrorKey] ?? "") \(nsError.localizedDescription)"
+        if raw.contains("INVALID_LOGIN_CREDENTIALS")
+            || raw.contains("INVALID_PASSWORD")
+            || raw.contains("EMAIL_NOT_FOUND") {
+            return "Incorrect email or password."
+        }
+
         guard nsError.domain == AuthErrorDomain,
               let code = AuthErrorCode(rawValue: nsError.code) else {
-            return "Something went wrong. Please try again."
+            // The code goes ON SCREEN for anything genuinely unmapped.
+            // The first version of this function swallowed it, which
+            // turned a diagnosable failure into "Something went wrong"
+            // and cost an afternoon of guessing. A short code in
+            // brackets means nothing to a customer and is decisive to
+            // whoever they show the screen to.
+            return "Something went wrong. Please try again. (\(nsError.domain) \(nsError.code))"
         }
 
         switch code {
@@ -338,7 +359,7 @@ extension OwnerLoginView {
         case .tooManyRequests:
             return "Too many attempts. Wait a minute and try again."
         default:
-            return "Something went wrong. Please try again."
+            return "Something went wrong. Please try again. (code \(nsError.code))"
         }
     }
 
