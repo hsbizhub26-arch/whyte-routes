@@ -1015,10 +1015,16 @@ exports.sendTestNotification = onCall(
       // "undelivered", error 30007) - the test passed and the product
       // did not. A diagnostic that cannot fail the way production
       // fails is not a diagnostic.
+      // The link must be the SAME SHAPE production sends, or the test
+      // proves nothing about the thing that is actually failing. It
+      // points at a token that does not resolve, which is exactly what
+      // a customer sees for an expired link - harmless, and still a
+      // real URL on the real host, so the carrier judges it the way it
+      // judges the real ones.
       result = await sendSms(
         phone,
         "WHYTE ROUTES test: if you received this, SMS with links is working. " +
-        `${TRACKING_BASE_URL}?c=test&t=test\n\nReply STOP to opt out.`
+        `${TRACKING_SHORT_URL}/${newTrackingToken()}\n\nReply STOP to opt out.`
       );
     } catch (err) {
       result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
