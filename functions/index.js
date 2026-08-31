@@ -1053,6 +1053,28 @@ exports.sendTestNotification = onCall(
 // one the customer already has open.
 const TRACKING_BASE_URL = "https://whyte-routes.web.app/track";
 
+// SHORT, OPAQUE LINKS.
+//
+// The old URL was ...track?c=DW%20Landscaping&t=K4Ww4j0uhg9sZM6Eg884 -
+// 78 characters, two query parameters, and the operating company's
+// real business name sitting in the address bar of a page sent to
+// their own customers. Both halves of that are a problem: long
+// query-string URLs are a well-known carrier spam signal on exactly
+// the unregistered long-code traffic these texts ride on, and the
+// company id was never the customer's business to see.
+//
+// A token is 12 characters of crypto-random base62 - 62^12, far past
+// guessing - and resolves to the company/link pair server-side. The
+// URL now carries no meaning at all, which is the point.
+const TRACKING_SHORT_URL = "https://whyte-routes.web.app/t";
+const TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+function newTrackingToken() {
+  const bytes = require("crypto").randomBytes(12);
+  let out = "";
+  for (const b of bytes) out += TOKEN_ALPHABET[b % TOKEN_ALPHABET.length];
+  return out;
+}
+
 // Mints - or safely reuses - the tracking link for one stop, and
 // returns the URL to text.
 //
@@ -1154,8 +1176,26 @@ async function ensureTrackingLink({ companyId, stopId, stopData, customerName })
   // received a link that resolved to a company id of "DW" - a tenant
   // that does not exist - and a page that could never load. The link
   // had been sending successfully and arriving broken.
-  const url = `${TRACKING_BASE_URL}?c=${encodeURIComponent(companyId)}&t=${encodeURIComponent(linkId)}`;
-  return { linkId, url };
+  // The token is stored ON the link, so re-sending reuses it and a
+  // customer's existing URL keeps working rather than being orphaned -
+  // the same reasoning as reusing the link document itself.
+  const linkDoc = await linksRef.doc(linkId).get();
+  let token = linkDoc.exists && linkDoc.data().token;
+  if (!token) {
+    token = newTrackingToken();
+    await linksRef.doc(linkId).set({ token }, { merge: true });
+  }
+  // The lookup document. Deliberately holds nothing but the pointer -
+  // no name, no address, no coordinates - so the token resolves the
+  // link without becoming a second copy of the customer's data.
+  await admin.firestore().doc(`trackingTokens/${token}`).set({
+    companyId,
+    linkId,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, { merge: true });
+
+  const url = `${TRACKING_SHORT_URL}/${token}`;
+  return { linkId, url, token };
 }
 
 exports.sendTrackingLink = onCall(

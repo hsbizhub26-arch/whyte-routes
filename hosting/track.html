@@ -111,7 +111,7 @@
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, doc, onSnapshot }
+import { getFirestore, doc, getDoc, onSnapshot }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Public web config. Firebase web API keys are identifiers, not
@@ -131,8 +131,30 @@ const app = initializeApp({
 const db = getFirestore(app);
 
 const params = new URLSearchParams(location.search);
-const companyId = params.get("c");
-const linkId = params.get("t");
+// Two link shapes, on purpose. New texts carry /t/<token>; the old
+// ?c=&t= form is still honoured because links already sitting in
+// customers' message threads must not stop working the day we
+// shorten the URL.
+let companyId = params.get("c");
+let linkId = params.get("t");
+
+const tokenMatch = location.pathname.match(/^\/t\/([A-Za-z0-9]{6,})$/);
+let tokenFailed = false;
+if (tokenMatch) {
+  try {
+    const tokenSnap = await getDoc(doc(db, "trackingTokens", tokenMatch[1]));
+    if (tokenSnap.exists()) {
+      companyId = tokenSnap.data().companyId;
+      linkId = tokenSnap.data().linkId;
+    } else {
+      tokenFailed = true;
+    }
+  } catch (e) {
+    // A denied read means the rule refused it - the link is finished
+    // or superseded - which is the same outcome as an unknown token.
+    tokenFailed = true;
+  }
+}
 
 const $ = (id) => document.getElementById(id);
 function showMessage(text) {
@@ -184,7 +206,9 @@ function showTracking() {
 $("queueClose").addEventListener("click", dismissQueue);
 
 if (!companyId || !linkId) {
-  showMessage("This tracking link looks incomplete. Please use the full link from your text message.");
+  showMessage(tokenFailed
+    ? "This tracking link is no longer available. If your service is still scheduled, your contractor can send a new link."
+    : "This tracking link looks incomplete. Please use the full link from your text message.");
   throw new Error("missing params");
 }
 

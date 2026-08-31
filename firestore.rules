@@ -640,6 +640,27 @@ service cloud.firestore {
     // Function's Admin SDK access - never by a client write to its
     // own document, which is exactly the hole this collection was.
 
+    // ── trackingTokens/{token} ───────────────────────────────
+    // The short-link lookup: 12 random characters -> the company and
+    // link they stand for. Read by the customer's tracking page with
+    // no login, exactly like the link document it points at.
+    //
+    // NOT a bare public read. It is gated on the SAME condition as the
+    // link itself, so the token stops resolving the moment the link
+    // goes dark - the instant a job is completed and its grace window
+    // passes, or the moment staff supersede it. Without that, the
+    // token would have quietly become the permanent bearer credential
+    // that the link rule above was rewritten to stop being.
+    //
+    // `list` is denied: tokens are only ever reachable by knowing one.
+    // Writes are Cloud Functions only, via the Admin SDK, which
+    // bypasses rules - so no client can mint or repoint a token.
+    match /trackingTokens/{token} {
+      allow get: if isLiveTrackingLink(resource.data.companyId, resource.data.linkId);
+      allow list: if false;
+      allow write: if false;
+    }
+
     // ── Everything else: locked ──────────────────────────────
     // No implicit access to anything not explicitly listed above.
 
