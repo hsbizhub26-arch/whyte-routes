@@ -64,10 +64,18 @@ struct SubscriptionTierView: View {
                     "Route optimization"
                 ]
             case .premiumPlus:
+                // "Advanced multi-driver dispatch" was REMOVED for
+                // exactly the reason proof-of-work was: the gate written
+                // for it, canAccessAdvancedDispatch(), has zero call
+                // sites, so buying Premium Plus unlocked nothing by that
+                // name. Charging $99.99/mo against $64.99 for a bullet
+                // that does nothing is the difference the customer is
+                // paying for. What remains is true today: the reports
+                // are real and Premium-Plus-gated, and the customer cap
+                // genuinely lifts.
                 return [
                     "Everything in Premium",
                     "Driver performance & time reports",
-                    "Advanced multi-driver dispatch",
                     "Unlimited customers"
                 ]
             }

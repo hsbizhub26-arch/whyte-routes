@@ -51,7 +51,7 @@ struct CreateCompanyView: View {
                             .font(.headline)
                             .foregroundColor(WRTheme.gold)
 
-                        TextField("e.g. DW Landscaping", text: $companyName)
+                        TextField("Your company name", text: $companyName)
                             .textInputAutocapitalization(.words)
                             .padding()
                             .background(Color.gray.opacity(0.4))

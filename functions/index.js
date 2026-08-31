@@ -990,6 +990,16 @@ exports.sendTestNotification = onCall(
     if (!userData || !userData.companyId) {
       throw new HttpsError("failed-precondition", "No company associated with this account.");
     }
+
+    // THE UI GATE WAS THE ONLY GATE. Settings hides this diagnostic
+    // behind isPlatformAdmin, but a callable is a public HTTPS endpoint
+    // - hiding the button hides nothing. Any signed-in customer could
+    // call it directly and spend real money out of the live Twilio
+    // balance, to any number they liked, ten times a day per company.
+    // The check belongs where it is enforced, not where it is drawn.
+    if (userData.platformAdmin !== true) {
+      throw new HttpsError("permission-denied", "Test notifications are not available on this account.");
+    }
     const companyId = userData.companyId;
 
     const today = new Date().toISOString().slice(0, 10);
