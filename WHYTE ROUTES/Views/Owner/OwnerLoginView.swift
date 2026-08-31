@@ -358,6 +358,13 @@ extension OwnerLoginView {
             return "Can't reach the server - check your connection and try again."
         case .tooManyRequests:
             return "Too many attempts. Wait a minute and try again."
+        case .keychainError:
+            // Not a credential problem at all - the sign-in SUCCEEDED
+            // and then failed writing the session to the device
+            // keychain. Worth its own message because every other
+            // wording sends the user off to re-check a password that
+            // was never wrong.
+            return "Signed in, but this device wouldn't save the session. Restart the app and try again."
         default:
             return "Something went wrong. Please try again. (code \(nsError.code))"
         }
