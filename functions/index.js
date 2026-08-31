@@ -1256,6 +1256,8 @@ exports.sendTrackingLink = onCall(
     let phone = stopData.customerPhone;
     let optedIn = !!stopData.customerOptedIn;
     let smsEnabled = true;
+    let email = stopData.customerEmail;
+    let emailEnabled = true;
 
     if (stopData.customerId) {
       const customerSnap = await admin.firestore().doc(`companies/${companyId}/customers/${stopData.customerId}`).get();
@@ -1263,8 +1265,10 @@ exports.sendTrackingLink = onCall(
       if (customerData) {
         customerName = customerData.name || customerName;
         phone = customerData.phone;
+        email = customerData.email;
         optedIn = !!customerData.notificationsOptIn;
         smsEnabled = customerData.smsEnabled !== false;
+        emailEnabled = customerData.emailEnabled !== false;
       } else {
         // Same rule as sendCustomerNotification: a deleted customer
         // record means do not contact, not "fall back to the phone
@@ -1273,9 +1277,26 @@ exports.sendTrackingLink = onCall(
       }
     }
 
+    // EMAIL IS A REAL CHANNEL HERE NOW, not an omission.
+    //
+    // This function could only ever send SMS, so a customer who keeps
+    // SMS off - or who has an email address and no mobile number -
+    // could never receive a tracking link at all. "Live tracking link
+    // for customers" is a bullet on the Premium paywall, so that was a
+    // paid feature silently unavailable to part of the customer base.
+    //
+    // Same precedence as every other notification in this file: SMS
+    // when it is available, email otherwise. Deliberately NOT both -
+    // one event should produce one message, and doubling every link
+    // send would double the annoyance and the cost.
+    const canSms = smsEnabled && phone && phone.trim().length > 0;
+    const canEmail = emailEnabled && email && email.trim().length > 0;
+
     if (!optedIn) return { deliveryStatus: "not_opted_in" };
-    if (!smsEnabled) return { deliveryStatus: "channel_disabled" };
-    if (!phone || !phone.trim()) return { deliveryStatus: "no_contact_on_file" };
+    if (!canSms && !canEmail) {
+      const hasContact = (phone && phone.trim()) || (email && email.trim());
+      return { deliveryStatus: hasContact ? "channel_disabled" : "no_contact_on_file" };
+    }
 
     // Reuse an existing active link for this stop so a customer who
     // already has the page open doesn't get a URL that silently stops
@@ -1306,10 +1327,14 @@ exports.sendTrackingLink = onCall(
       `${companyName}: track your service in real time here - ${url}\n\nReply STOP to opt out.`;
 
     let result;
+    const method = canSms ? "sms" : "email";
+    const contact = canSms ? phone : email;
     try {
-      result = await sendSms(phone, message);
+      result = canSms
+        ? await sendSms(phone, message)
+        : await sendEmail(email, "Track your service in real time", message);
     } catch (err) {
-      result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
+      result = { accepted: false, failureReason: err.message || `${method} send threw an error.` };
     }
 
     const deliveryStatus = result.accepted ? "accepted" : "failed";
@@ -1319,8 +1344,8 @@ exports.sendTrackingLink = onCall(
     await stopRef.collection("notifications").doc(`${stopId}_trackingLink`).set({
       stopId, routeId, customerName,
       type: "trackingLink",
-      contactMethod: "sms",
-      contactValue: phone,
+      contactMethod: method,
+      contactValue: contact,
       deliveryStatus,
       providerMessageId: result.providerMessageId || null,
       failureReason: result.failureReason || null,
@@ -1331,17 +1356,18 @@ exports.sendTrackingLink = onCall(
     if (result.accepted) {
       const period = new Date().toISOString().slice(0, 7);
       await admin.firestore().doc(`companies/${companyId}/notificationUsage/${period}`).set({
-        smsCount: admin.firestore.FieldValue.increment(1),
-        estimatedSmsCostUsd: admin.firestore.FieldValue.increment(0.0079),
+        [method === "sms" ? "smsCount" : "emailCount"]: admin.firestore.FieldValue.increment(1),
+        [method === "sms" ? "estimatedSmsCostUsd" : "estimatedEmailCostUsd"]:
+          admin.firestore.FieldValue.increment(method === "sms" ? 0.0079 : 0),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
     }
 
     console.log(
-      `${result.accepted ? "✅" : "⚠️"} tracking link ${linkId} (company ${companyId}) -> ${deliveryStatus}` +
+      `${result.accepted ? "✅" : "⚠️"} tracking link ${linkId} (company ${companyId}, ${method}) -> ${deliveryStatus}` +
       (result.failureReason ? ` (${result.failureReason})` : "")
     );
 
-    return { deliveryStatus, url, linkId, failureReason: result.failureReason || null };
+    return { deliveryStatus, url, linkId, method, failureReason: result.failureReason || null };
   }
 );
