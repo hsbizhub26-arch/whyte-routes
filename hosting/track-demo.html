@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WHYTE ROUTES — Live Tracking</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root {
+    --gold: #F5C451;
+    --bg: #000;
+    --panel: #121212;
+    --text: #fff;
+    --muted: rgba(255,255,255,.6);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 16px 20px calc(12px + env(safe-area-inset-top));
+    padding-top: calc(16px + env(safe-area-inset-top));
+    border-bottom: 1px solid rgba(245,196,81,.25);
+  }
+  .brand { color: var(--gold); font-weight: 800; letter-spacing: .5px; font-size: 15px; }
+  .company { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  #map { flex: 1 1 auto; min-height: 240px; background: #1a1a1a; }
+  .panel {
+    background: var(--panel);
+    border-top: 1px solid rgba(245,196,81,.25);
+    padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
+  }
+  .status { font-size: 22px; font-weight: 700; margin: 0 0 4px; }
+  .eta { color: var(--gold); font-size: 34px; font-weight: 800; margin: 6px 0 2px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; }
+  .addr { margin-top: 12px; font-size: 15px; }
+  .addr span { color: var(--muted); display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 2px; }
+  .stale { color: #ffb15c; font-size: 13px; margin-top: 10px; }
+  .queue {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 14px; padding: 12px 14px;
+    background: rgba(245,196,81,.10);
+    border: 1px solid rgba(245,196,81,.35);
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .queue #queueClose {
+    margin-left: auto; flex: 0 0 auto;
+    background: none; border: 0; cursor: pointer;
+    color: var(--muted); font-size: 20px; line-height: 1;
+    padding: 4px 6px; border-radius: 6px;
+  }
+  .queue #queueClose:hover, .queue #queueClose:focus-visible { color: #fff; }
+  .queue #queueBadge {
+    background: var(--gold); color: #000;
+    font-weight: 800; font-size: 14px;
+    min-width: 26px; height: 26px; border-radius: 13px;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: 0 0 auto;
+  }
+  /* The `hidden` attribute has to actually hide things.
+     .center and .queue both set `display: flex`, and an author rule
+     beats the browser's built-in [hidden] { display: none } on a
+     specificity tie - so every element the script "hid" stayed on
+     screen. Customers saw "Loading your tracking link..." sitting over
+     a page that had finished loading, and a "2 stops before yours"
+     badge that was the hardcoded placeholder in the markup rather than
+     their real queue position - shown even to the customer the driver
+     was on their way to next. */
+  [hidden] { display: none !important; }
+
+  .center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; text-align: center; }
+  .center p { color: var(--muted); max-width: 340px; line-height: 1.5; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--gold); margin-right:7px; vertical-align:middle; }
+  .leaflet-container { background: #1a1a1a; }
+  /* OSM tiles are bright; dim them so the page stays dark-themed. */
+  .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">WHYTE ROUTES</div>
+  <div class="company" id="companyLine">Demo - sample data, not a real customer</div>
+</header>
+
+<div id="map" hidden></div>
+
+<div class="center" id="message">
+  <p id="messageText">Loading your tracking link…</p>
+</div>
+
+<div class="panel" id="panel" hidden>
+  <p class="status" id="status"><span class="dot"></span><span id="statusText">On the way</span></p>
+  <div class="eta" id="eta" hidden></div>
+  <p class="sub" id="etaSub" hidden>estimated arrival</p>
+  <div class="queue" id="queue" hidden><span id="queueBadge">2</span><span id="queueText">stops before yours</span><button id="queueClose" type="button" aria-label="Hide queue position">&times;</button></div>
+  <div class="addr"><span>Service address</span><div id="address">—</div></div>
+  <p class="stale" id="stale" hidden></p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+// ================= DEMO PAGE =================
+// The real page, with Firestore swapped for a scripted scenario that
+// loops through every state a customer can see. Sample data is
+// invented on purpose - this URL is public, so no real customer name
+// or address may appear on it.
+const STOP = { lat: 44.0065, lng: -79.4504 };
+const LINK = { address: "120 Wellington Street, Aurora, ON", customerName: "Alex",
+               active: true, completed: false,
+               stopLatitude: STOP.lat, stopLongitude: STOP.lng };
+const LOC  = { lat: 43.9975, lng: -79.4662, etaMinutes: 9, stopsBefore: 1,
+               updatedAt: { toDate: () => new Date() } };
+const db = null;
+const doc = (...a) => a.filter(x => typeof x === "string").join("/");
+
+let pushLink = null, pushLoc = null;
+const onSnapshot = (ref, cb) => {
+  if (String(ref).endsWith("location/current")) {
+    pushLoc = () => cb({ exists: () => true, data: () => LOC });
+    pushLoc();
+  } else {
+    pushLink = () => cb({ exists: () => true, data: () => LINK });
+    pushLink();
+  }
+};
+
+const START = { lat: 43.9975, lng: -79.4662 };
+let step = 0;
+function reset() {
+  LINK.active = true; LINK.completed = false;
+  LOC.lat = START.lat; LOC.lng = START.lng;
+  LOC.stopsBefore = 1; LOC.etaMinutes = 9;
+}
+setInterval(() => {
+  step = (step + 1) % 16;
+  if (step === 1) { reset(); location.reload(); return; }
+
+  if (step <= 3) {
+    LOC.stopsBefore = 1;                    // someone ahead of you
+  } else if (step <= 12) {
+    LOC.stopsBefore = 0;                    // you are next
+    const t = (step - 3) / 9;
+    LOC.lat = START.lat + (STOP.lat - START.lat) * t;
+    LOC.lng = START.lng + (STOP.lng - START.lng) * t;
+    LOC.etaMinutes = Math.max(1, 9 - (step - 3));
+  } else {
+    LINK.active = false; LINK.completed = true;   // service complete
+    if (pushLink) pushLink();
+  }
+  LOC.updatedAt = { toDate: () => new Date() };
+  if (pushLoc) pushLoc();
+}, 1600);
+
+const params = new URLSearchParams(location.search);
+const companyId = "demo";
+const linkId = "demo";
+
+const $ = (id) => document.getElementById(id);
+function showMessage(text) {
+  $("message").hidden = false;
+  $("messageText").textContent = text;
+  $("panel").hidden = true;
+  $("map").hidden = true;
+}
+// ── Queue widget dismissal
+//
+// Comfort, not privacy. The count reveals nothing about anyone - it is
+// a bare integer, and no other customer's name, address or position is
+// in any document this page can read. Hiding it changes what the
+// customer looks at, not what reached their browser.
+//
+// Remembered per link so it stays closed on that person's own device
+// across reloads, and scoped by link id so a different job starts
+// fresh. localStorage is wrapped because Safari throws on access in
+// private browsing rather than returning null - an unguarded read here
+// would take the whole page down with it.
+const queueDismissKey = "wr-queue-dismissed-" + linkId;
+
+function queueDismissed() {
+  try { return localStorage.getItem(queueDismissKey) === "1"; }
+  catch { return false; }
+}
+function dismissQueue() {
+  try { localStorage.setItem(queueDismissKey, "1"); } catch {}
+  $("queue").hidden = true;
+}
+
+/// The ONLY place the queue widget is shown, so a remembered dismissal
+/// can't be undone by the next snapshot. Every other site sets
+/// hidden = true directly, which is always safe.
+function showQueue(count) {
+  if (queueDismissed()) { $("queue").hidden = true; return; }
+  $("queue").hidden = false;
+  $("queueBadge").textContent = count;
+  $("queueText").textContent = count === 1 ? "stop before yours" : "stops before yours";
+}
+
+function showTracking() {
+  $("message").hidden = true;
+  $("panel").hidden = false;
+  $("map").hidden = false;
+  if (map) setTimeout(() => map.invalidateSize(), 0);
+}
+
+$("queueClose").addEventListener("click", dismissQueue);
+
+if (!companyId || !linkId) {
+  showMessage("This tracking link looks incomplete. Please use the full link from your text message.");
+  throw new Error("missing params");
+}
+
+let map = null, driverMarker = null, stopMarker = null, hasFitBounds = false;
+// Once the service is done this latches true and never clears. The
+// link doc and the location doc have independent listeners that can
+// fire in either order, so without this a late position update could
+// repaint a live-looking driver onto a completed page.
+let serviceComplete = false;
+
+function ensureMap() {
+  if (map) return;
+  map = L.map("map", { zoomControl: false, attributionControl: true }).setView([43.7, -79.4], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+}
+
+const goldIcon = () => L.divIcon({
+  className: "",
+  html: '<div style="width:18px;height:18px;border-radius:50%;background:#F5C451;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.5)"></div>',
+  iconSize: [18, 18], iconAnchor: [9, 9]
+});
+const homeIcon = () => L.divIcon({
+  className: "",
+  html: '<div style="width:16px;height:16px;border-radius:4px;background:#fff;border:3px solid #F5C451;box-shadow:0 0 0 2px rgba(0,0,0,.5)"></div>',
+  iconSize: [16, 16], iconAnchor: [8, 8]
+});
+
+// ── The tracking link itself: address, status, whether it's still live
+onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId), (snap) => {
+  if (!snap.exists()) {
+    showMessage("This tracking link is no longer available. If your service is still scheduled, your contractor can send a new link.");
+    return;
+  }
+  const d = snap.data();
+  $("address").textContent = d.address || "—";
+  // demo keeps its own header label
+
+  if (d.active === false || d.completed === true) {
+    serviceComplete = true;
+    $("statusText").textContent = "Service complete";
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+    $("stale").hidden = true;
+    $("queue").hidden = true;
+    // Remove the driver entirely rather than leaving a last-known pin
+    // sitting on the map - their position is no longer this customer's
+    // business once their own service is finished.
+    if (driverMarker && map) { map.removeLayer(driverMarker); driverMarker = null; }
+    if (routeLine && map) { map.removeLayer(routeLine); routeLine = null; }
+    showTracking();
+    return;
+  }
+  showTracking();
+
+  if (typeof d.stopLatitude === "number" && typeof d.stopLongitude === "number") {
+    ensureMap();
+    const pos = [d.stopLatitude, d.stopLongitude];
+    if (!stopMarker) stopMarker = L.marker(pos, { icon: homeIcon() }).addTo(map);
+    else stopMarker.setLatLng(pos);
+    fitIfPossible();
+  }
+}, (err) => {
+  // A link that has gone dark - superseded, or simply aged past the
+  // window the security rule allows - fails as permission-denied, not
+  // as a network error. Telling that customer to check their
+  // connection would send them retrying something that is never
+  // coming back; the rule is the revocation, so say so.
+  if (err && err.code === "permission-denied") {
+    showMessage("This tracking link is no longer available. If your service is still scheduled, your contractor can send a new link.");
+    return;
+  }
+  showMessage("Couldn't load this tracking link. Please check your connection and try again.");
+});
+
+// ── Live driver position, published by the driver's app while en route
+onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", "current"), (snap) => {
+  // The driver's app deletes this document when the stop is completed,
+  // so there is normally nothing left to read. This guard covers the
+  // ordering race where a final update lands just as the link flips.
+  if (serviceComplete) return;
+  if (!snap.exists()) {
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+    $("statusText").textContent = "Scheduled";
+    $("stale").hidden = false;
+    $("stale").textContent = "Your driver hasn't started toward this stop yet.";
+    return;
+  }
+  const d = snap.data();
+  ensureMap();
+
+  // A waiting customer's document carries no coordinates at all - the
+  // driver's position is only published once they are the current
+  // destination, so that the truck's location can never reveal the
+  // property it is parked at while serving someone else. Drop any
+  // marker if coordinates go away.
+  if (typeof d.latitude === "number" && typeof d.longitude === "number") {
+    const pos = [d.latitude, d.longitude];
+    if (!driverMarker) driverMarker = L.marker(pos, { icon: goldIcon() }).addTo(map);
+    else driverMarker.setLatLng(pos);
+    fitIfPossible();
+  } else if (driverMarker) {
+    map.removeLayer(driverMarker);
+    driverMarker = null;
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+  }
+
+  // Queue position drives the whole status. `stopsBefore` is a bare
+  // count published by the driver's app - this page is never able to
+  // read who or where those other stops are.
+  const stopsBefore = typeof d.stopsBefore === "number" ? d.stopsBefore : null;
+  const isNext = d.isCurrentDestination === true || stopsBefore === 0;
+
+  // Driver is physically at this property. Takes precedence over
+  // everything else - an ETA or "on the way" while they're standing in
+  // the driveway reads as broken.
+  if (d.hasArrived === true) {
+    $("statusText").textContent = "Your driver is here";
+    $("queue").hidden = true;
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+    $("stale").hidden = true;
+    updateRouteLine(false);
+    return;
+  }
+
+  if (stopsBefore !== null && stopsBefore > 0) {
+    $("statusText").textContent = "Driver has a stop on the way";
+    showQueue(stopsBefore);
+    $("stale").hidden = false;
+    $("stale").textContent = "Your driver's live location appears once they're on the way to you.";
+  } else {
+    $("queue").hidden = true;
+    $("statusText").textContent = isNext ? "On the way to you" : "On the way";
+  }
+
+  // An ETA is only published for the customer actually being driven
+  // to. For anyone further back it would be a guess dressed up as a
+  // fact - how long each property ahead takes is exactly what nobody
+  // can know yet - so the queue position is shown instead.
+  if (isNext && typeof d.etaMinutes === "number" && d.etaMinutes >= 0) {
+    $("eta").hidden = false;
+    $("etaSub").hidden = false;
+    $("eta").textContent = d.etaMinutes <= 1 ? "Arriving now" : `${d.etaMinutes} min`;
+  } else {
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+  }
+
+  // The route line is drawn ONLY once this customer is next.
+  //
+  // Two reasons, and the privacy one is the important one: drawing a
+  // path through the stops actually being driven would trace a line
+  // straight to other customers' homes. And while the driver is
+  // servicing someone else first, a direct line here would imply
+  // they're heading over now, which isn't true. So: no line until the
+  // truck is genuinely on its way to this address.
+  updateRouteLine(isNext);
+
+  // A position that stopped updating is worse than no position - it
+  // would quietly show a driver frozen mid-street as if it were live.
+  const updated = d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : null;
+  if (updated && driverMarker) {
+    const ageMin = Math.round((Date.now() - updated) / 60000);
+    if (ageMin >= 5) {
+      $("stale").hidden = false;
+      $("stale").textContent = `Last update ${ageMin} min ago — your driver may be out of signal.`;
+    } else {
+      $("stale").hidden = true;
+    }
+  }
+}, () => { /* location may legitimately not exist yet */ });
+
+// A straight driver->destination line, drawn only when this customer
+// is next. Deliberately NOT the real road route: fetching directions
+// would need a keyed routing provider on a public page, and the only
+// path worth drawing here is the one to this address. Nothing about
+// any other stop is ever represented on this map.
+let routeLine = null;
+function updateRouteLine(shouldShow) {
+  if (!map) return;
+  if (!shouldShow || !driverMarker || !stopMarker) {
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    return;
+  }
+  const pts = [driverMarker.getLatLng(), stopMarker.getLatLng()];
+  if (routeLine) {
+    routeLine.setLatLngs(pts);
+  } else {
+    routeLine = L.polyline(pts, {
+      color: "#F5C451", weight: 4, opacity: .85, dashArray: "8 8"
+    }).addTo(map);
+  }
+}
+
+function fitIfPossible() {
+  if (hasFitBounds || !map) return;
+  const pts = [];
+  if (driverMarker) pts.push(driverMarker.getLatLng());
+  if (stopMarker) pts.push(stopMarker.getLatLng());
+  if (pts.length === 2) {
+    map.fitBounds(L.latLngBounds(pts).pad(0.35));
+    hasFitBounds = true;
+  } else if (pts.length === 1) {
+    map.setView(pts[0], 14);
+  }
+}
+</script>
+</body>
+</html>

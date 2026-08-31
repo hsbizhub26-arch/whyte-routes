@@ -298,6 +298,32 @@ async function flushQueuedMorningSummaries(companyId) {
   const queueSnap = await queueRef.get();
 
   for (const doc of queueSnap.docs) {
+    // CLAIM THE DOC BEFORE SENDING, in a transaction.
+    //
+    // Two callers are DESIGNED to overlap: the 6 AM scheduled function
+    // and the inline flush that runs at the top of every live-hours
+    // notifyStop. On a 30-driveway night the loop below sits inside
+    // ~30 sequential Twilio round-trips, so a second flush starting
+    // anywhere in that half-minute window read the same undeleted docs
+    // and texted all 30 customers their "cleared your driveway last
+    // night" receipt a second time - and double-charged the company's
+    // own notificationUsage for the privilege. Two drivers tapping
+    // Start Shift in the same second did it without the cron.
+    //
+    // Deleting inside a transaction makes the claim atomic: exactly
+    // one flush can win a given document, and the loser's get() simply
+    // finds it gone. Claiming BEFORE the send rather than after is the
+    // same trade this file already makes for the per-stop notification
+    // doc - a crash mid-send risks one missed receipt rather than ever
+    // risking a second real SMS charge.
+    const claimed = await admin.firestore().runTransaction(async (tx) => {
+      const fresh = await tx.get(doc.ref);
+      if (!fresh.exists) return false;
+      tx.delete(doc.ref);
+      return true;
+    });
+    if (!claimed) continue;
+
     const q = doc.data();
     let method = "none";
     let contact = null;
@@ -324,13 +350,22 @@ async function flushQueuedMorningSummaries(companyId) {
     const deliveryStatus = method === "none" ? "no_contact_on_file" : (result.accepted ? "accepted" : "failed");
 
     if (q.notificationRefPath) {
-      await admin.firestore().doc(q.notificationRefPath).update({
-        contactMethod: method,
-        contactValue: contact || "",
-        deliveryStatus,
-        providerMessageId: result.providerMessageId || null,
-        failureReason: result.failureReason || null,
-      });
+      // Bookkeeping only, and it must not be able to abort the rest of
+      // the queue. update() throws NOT_FOUND if the notification doc is
+      // gone - and staff can delete it, the rules permit exactly that -
+      // which would otherwise take down every summary still queued
+      // behind this one, after their texts had already been paid for.
+      try {
+        await admin.firestore().doc(q.notificationRefPath).update({
+          contactMethod: method,
+          contactValue: contact || "",
+          deliveryStatus,
+          providerMessageId: result.providerMessageId || null,
+          failureReason: result.failureReason || null,
+        });
+      } catch (err) {
+        console.warn(`⚠️ couldn't update ${q.notificationRefPath} after sending: ${err.message}`);
+      }
     }
 
     if (method !== "none") {
@@ -346,7 +381,8 @@ async function flushQueuedMorningSummaries(companyId) {
       }, { merge: true });
     }
 
-    await doc.ref.delete();
+    // No delete here - the transaction above already claimed and
+    // removed this document before a single message went out.
   }
 }
 
@@ -973,7 +1009,17 @@ exports.sendTestNotification = onCall(
 
     let result;
     try {
-      result = await sendSms(phone, "This is a test notification from WHYTE ROUTES. If you received this, real SMS sending is working.");
+      // Deliberately CARRIES A LINK. The old test message was plain
+      // text, so it sailed through while every real tracking-link text
+      // was silently filtered by the carrier (Twilio status
+      // "undelivered", error 30007) - the test passed and the product
+      // did not. A diagnostic that cannot fail the way production
+      // fails is not a diagnostic.
+      result = await sendSms(
+        phone,
+        "WHYTE ROUTES test: if you received this, SMS with links is working. " +
+        `${TRACKING_BASE_URL}?c=test&t=test\n\nReply STOP to opt out.`
+      );
     } catch (err) {
       result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
     }
@@ -1197,7 +1243,11 @@ exports.sendTrackingLink = onCall(
     });
 
     const companyName = companyData.name || "Your service crew";
-    const message = `${companyName}: track your service in real time here - ${url}`;
+    // "Reply STOP to opt out" is not decoration. Its absence is one of
+    // the signals carriers filter application traffic on, and campaign
+    // vetting requires it. Both messages that carry a link now say it.
+    const message =
+      `${companyName}: track your service in real time here - ${url}\n\nReply STOP to opt out.`;
 
     let result;
     try {

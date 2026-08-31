@@ -66,6 +66,17 @@
     display: inline-flex; align-items: center; justify-content: center;
     flex: 0 0 auto;
   }
+  /* The `hidden` attribute has to actually hide things.
+     .center and .queue both set `display: flex`, and an author rule
+     beats the browser's built-in [hidden] { display: none } on a
+     specificity tie - so every element the script "hid" stayed on
+     screen. Customers saw "Loading your tracking link..." sitting over
+     a page that had finished loading, and a "2 stops before yours"
+     badge that was the hardcoded placeholder in the markup rather than
+     their real queue position - shown even to the customer the driver
+     was on their way to next. */
+  [hidden] { display: none !important; }
+
   .center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; text-align: center; }
   .center p { color: var(--muted); max-width: 340px; line-height: 1.5; }
   .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--gold); margin-right:7px; vertical-align:middle; }
