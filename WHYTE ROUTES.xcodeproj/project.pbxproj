@@ -86,6 +86,7 @@
 				Views/Driver/DriverDashboardView.swift,
 				Views/Driver/DriverDetailView.swift,
 				Views/Driver/DriverMapView.swift,
+				Views/Driver/DriverNavigationScreen.swift,
 				Views/Driver/DriverProfileView.swift,
 				Views/Driver/DriverRouteView.swift,
 				Views/Driver/DriverStopView.swift,

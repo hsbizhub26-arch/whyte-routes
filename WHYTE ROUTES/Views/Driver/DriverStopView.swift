@@ -390,6 +390,37 @@ struct DriverStopView: View {
                 }
             }
         }
+        // FULL-SCREEN WHILE GUIDANCE IS RUNNING.
+        //
+        // The inline 280pt map stays exactly as it is - it is the right
+        // size for looking at a stop before setting off. But once
+        // turn-by-turn starts the task changes completely: the driver is
+        // moving, the phone is on a mount, and they get one glance. Every
+        // navigation app goes full-bleed at this moment for that reason.
+        //
+        // Driven off nav.isNavigating rather than its own flag, so there
+        // is one source of truth: ending navigation from either screen,
+        // or the session stopping on arrival, dismisses this by itself.
+        .fullScreenCover(isPresented: Binding(
+            get: { nav.isNavigating },
+            set: { if !$0 && nav.isNavigating { nav.stop() } }
+        )) {
+            DriverNavigationScreen(
+                nav: nav,
+                stopName: vm.stop.customerName ?? "Stop",
+                stopAddress: vm.stop.address,
+                stopCoordinate: vm.stop.coordinate,
+                stopIndex: vm.stopPosition?.current ?? 1,
+                stopCount: vm.stopPosition?.total ?? 1,
+                isAtProperty: vm.stop.arrivedAt != nil,
+                atPropertyElapsed: nil,
+                onEnd: { nav.stop() },
+                onComplete: {
+                    nav.stop()
+                    Task { await vm.markCompleted() }
+                }
+            )
+        }
         .sheet(isPresented: $showPhotoCapture) {
             if let companyId = CompanySession.shared.currentCompanyId,
                let routeId = vm.route?.id,
