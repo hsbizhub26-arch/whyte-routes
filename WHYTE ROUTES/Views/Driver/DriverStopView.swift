@@ -346,11 +346,19 @@ struct DriverStopView: View {
                         header
                         mapSection
                         actionButtons
-                        // smsButton intentionally hidden - the tracking link it
-                        // sends has no real destination yet (no onOpenURL
-                        // handler, no tracking page built). Re-enable once
-                        // customer tracking (Phase 3) is actually wired up -
-                        // see smsButton below, left in place for that.
+                        // The driver-side "Text Customer" button is GONE, not
+                        // hidden. Its old comment said the tracking link had
+                        // "no real destination yet" - that stopped being true
+                        // the moment the tracking page shipped. What makes it
+                        // unrevivable is different and permanent: tracking
+                        // tokens are minted SERVER-SIDE, by ensureTrackingLink
+                        // inside the Cloud Function, so this app cannot
+                        // construct a valid tracking URL at all. It was
+                        // building one by hand against whyteroutes.app - a
+                        // domain nobody owns - and shipping that string in the
+                        // binary. Sending a tracking link is the owner's
+                        // "Send Tracking Link" action, which goes through the
+                        // function that actually owns the token.
                         statusControl
                         // photoProofButton intentionally hidden for the snow
                         // beta - a photo step adds real friction to exactly
@@ -763,17 +771,6 @@ extension DriverStopView {
 
         case .arrived, .completed:
             EmptyView()
-        }
-    }
-
-    // MARK: SMS
-    private var smsButton: some View {
-        Group {
-            if let phone = vm.stop.customerPhone {
-                SMSButton(title: "Text Customer",
-                          phone: phone,
-                          link: "https://whyteroutes.app/tracking/\(vm.stop.id)")
-            }
         }
     }
 

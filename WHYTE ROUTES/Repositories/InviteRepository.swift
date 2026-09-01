@@ -100,7 +100,13 @@ final class InviteRepository {
             try await db.collection("invites").document(invite.id).updateData(["status": "accepted"])
             return true
         } catch {
-            print("⚠️ InviteRepository.consume(\(invite.id)) failed: \(error.localizedDescription)")
+            // invite.id IS the normalized email address or E.164
+            // phone number - that is the entire design of the invites
+            // collection (see Invite.normalize). Logging the id is
+            // logging the person. lookupInvite above stays a plain
+            // print because it deliberately logs only the *method*
+            // ("email"/"phone"), never the value itself.
+            safePrint("⚠️ InviteRepository.consume(\(invite.id)) failed: \(error.localizedDescription)")
             return false
         }
     }

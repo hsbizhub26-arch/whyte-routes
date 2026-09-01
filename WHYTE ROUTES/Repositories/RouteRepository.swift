@@ -215,7 +215,11 @@ final class RouteRepository {
 
             batch.commit { error in
                 if let error {
-                    print("❌ Failed assigning driver (\(routeId) -> \(driverId)): \(error.localizedDescription)")
+                    // driverId is a Firebase uid, so this
+                    // one is DEBUG-only. Every other failure
+                    // log in this file carries route ids and
+                    // error text only, and stays shipped.
+                    safePrint("❌ Failed assigning driver (\(routeId) -> \(driverId)): \(error.localizedDescription)")
                 }
                 completion?(error == nil)
             }

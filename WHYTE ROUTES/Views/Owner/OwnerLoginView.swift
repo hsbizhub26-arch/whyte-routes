@@ -296,9 +296,16 @@ extension OwnerLoginView {
             } catch let authError {
                 let nsError = authError as NSError
                 print("⛔️ Sign-in failed: domain=\(nsError.domain) code=\(nsError.code)")
-                print("⛔️ userInfo=\(nsError.userInfo)")
+                // domain and code above ship - they are what makes
+                // a field report actionable. userInfo does not:
+                // FirebaseAuth puts FIRAuthErrorUserInfoEmailKey in
+                // there, and on some failures the raw Identity
+                // Toolkit response body, so this dump can carry the
+                // address the user just typed. Same for the
+                // underlying error below.
+                safePrint("⛔️ userInfo=\(nsError.userInfo)")
                 if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
-                    print("⛔️ underlying: domain=\(underlying.domain) code=\(underlying.code) userInfo=\(underlying.userInfo)")
+                    safePrint("⛔️ underlying: domain=\(underlying.domain) code=\(underlying.code) userInfo=\(underlying.userInfo)")
                 }
                 self.error = friendlyAuthMessage(authError)
             }

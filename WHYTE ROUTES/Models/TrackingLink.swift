@@ -123,17 +123,23 @@ extension TrackingLink {
         return address == stop.address && customerName == expectedName
     }
 
-    /// Encodes both the company and the link itself - the customer's
-    /// page is unauthenticated, so the URL is the only thing telling
-    /// it which company's subcollection to read from.
-    ///
-    /// Points at Firebase Hosting (hosting/track.html), the same place
-    /// the privacy policy and terms are served from. It previously
-    /// pointed at whyteroutes.app, a domain the project doesn't own,
-    /// so every link generated would have gone nowhere.
-    var url: URL? {
-        URL(string: "https://whyte-routes.web.app/track?c=\(companyId)&t=\(id)")
-    }
+    // THE CLIENT NO LONGER BUILDS TRACKING URLS. There used to be a
+    // `url` property here and it is deliberately gone, not moved.
+    //
+    // Three reasons, any one of which is sufficient. The shape was the
+    // superseded ?c=<companyId>&t=<linkId> form rather than the short
+    // /t/<token> one. It interpolated companyId without percent-encoding,
+    // which is precisely the bug that shipped broken links to a tenant
+    // whose document id contains a space - the SMS client truncated the
+    // URL at that space and the customer got a page that could never
+    // load. And the token it would need does not exist on the client at
+    // all: ensureTrackingLink mints it server-side, inside the Cloud
+    // Function, and returns the finished URL.
+    //
+    // Anything needing a tracking URL calls sendTrackingLink and uses
+    // what comes back. A second builder here could only ever drift from
+    // the real one, and the last time it drifted it drifted into a
+    // domain nobody owns.
 }
 
 typealias AppTrackingLink = TrackingLink

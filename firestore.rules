@@ -391,8 +391,15 @@ service cloud.firestore {
 
       // ── companies/{companyId}/drivers/{driverId} ─────────
       // Contains PII (name, phone) alongside location - authenticated
-      // company staff only, never public. (See CustomerTrackingView.swift
-      // for why customer tracking does NOT read this collection.)
+      // company staff only, never public.
+      //
+      // Customer tracking must NOT read this collection, and the fix is
+      // never to loosen this rule. A customer's page is served a
+      // purpose-built, position-only document at
+      // trackingLinks/{linkId}/location/current, which carries
+      // coordinates and nothing else - no driver name, phone or id. The
+      // view that used to explain this has been deleted, so the reason
+      // is written here, where the rule it constrains actually lives.
       match /drivers/{driverId} {
         // A plain driver may read only their own record - staff need
         // every driver's location/contact info for the fleet map, but

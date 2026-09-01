@@ -44,7 +44,11 @@ final class FirestoreDriverRepository: DriverRepository {
             guard let data = snapshot.data() else { return nil }
             return Driver(from: data, id: uid)
         } catch {
-            print("⚠️ FirestoreDriverRepository.fetchDriver(\(uid)) failed: \(error.localizedDescription)")
+            // uid here, and driver.id below, are Firebase uids, so
+            // both are DEBUG-only. The two listener failures further
+            // down name nobody and stay as plain print, so a field
+            // report still carries them.
+            safePrint("⚠️ FirestoreDriverRepository.fetchDriver(\(uid)) failed: \(error.localizedDescription)")
             return nil
         }
     }
@@ -56,7 +60,7 @@ final class FirestoreDriverRepository: DriverRepository {
             try await driversRef.document(driver.id).setData(driver.toDict())
             return driver
         } catch {
-            print("⚠️ FirestoreDriverRepository.createDriver(\(driver.id)) failed: \(error.localizedDescription)")
+            safePrint("⚠️ FirestoreDriverRepository.createDriver(\(driver.id)) failed: \(error.localizedDescription)")
             return nil
         }
     }

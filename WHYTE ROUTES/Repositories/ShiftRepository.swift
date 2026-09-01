@@ -38,7 +38,7 @@ final class ShiftRepository {
             guard let doc = snapshot.documents.first else { return nil }
             return Shift(from: doc.data(), id: doc.documentID)
         } catch {
-            print("⚠️ ShiftRepository.fetchActiveShift(\(driverId)) failed: \(error.localizedDescription)")
+            safePrint("⚠️ ShiftRepository.fetchActiveShift(\(driverId)) failed: \(error.localizedDescription)")
             return nil
         }
     }
@@ -83,7 +83,7 @@ final class ShiftRepository {
                 .getDocuments()
             return snapshot.documents.compactMap { Shift(from: $0.data(), id: $0.documentID) }
         } catch {
-            print("⚠️ ShiftRepository.fetchRecentShifts(\(driverId)) failed: \(error.localizedDescription)")
+            safePrint("⚠️ ShiftRepository.fetchRecentShifts(\(driverId)) failed: \(error.localizedDescription)")
             return []
         }
     }

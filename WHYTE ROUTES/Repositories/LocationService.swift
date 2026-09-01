@@ -79,7 +79,9 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         requestPermissions()
         manager.startUpdatingLocation()
 
-        print("📡 Location tracking started for driver:", driverId)
+        // The driver's uid, so DEBUG-only. "tracking stopped" below
+        // names nobody and stays a plain print.
+        safePrint("📡 Location tracking started for driver: \(driverId)")
     }
 
     // MARK: - Stop Tracking

@@ -13,7 +13,7 @@ final class CompanyRepository {
             guard let data = snapshot.data() else { return nil }
             return Company(from: data, id: snapshot.documentID)
         } catch {
-            print("⚠️ CompanyRepository.fetch(\(companyId)) failed: \(error.localizedDescription)")
+            safePrint("⚠️ CompanyRepository.fetch(\(companyId)) failed: \(error.localizedDescription)")
             return nil
         }
     }
@@ -30,12 +30,12 @@ final class CompanyRepository {
                 .getDocuments()
 
             guard let doc = snapshot.documents.first else {
-                print("🔍 CompanyRepository.fetchOwnedCompany(\(ownerUID)): query succeeded, 0 matching documents")
+                safePrint("🔍 CompanyRepository.fetchOwnedCompany(\(ownerUID)): query succeeded, 0 matching documents")
                 return nil
             }
             return Company(from: doc.data(), id: doc.documentID)
         } catch {
-            print("⚠️ CompanyRepository.fetchOwnedCompany(\(ownerUID)) query FAILED (likely Firestore rules, not \"not found\"): \(error.localizedDescription)")
+            safePrint("⚠️ CompanyRepository.fetchOwnedCompany(\(ownerUID)) query FAILED (likely Firestore rules, not \"not found\"): \(error.localizedDescription)")
             return nil
         }
     }
@@ -51,7 +51,7 @@ final class CompanyRepository {
                 .updateData(["navigationSettings": settings.toDict()])
             return true
         } catch {
-            print("⚠️ CompanyRepository.updateNavigationSettings(\(companyId)) failed: \(error.localizedDescription)")
+            safePrint("⚠️ CompanyRepository.updateNavigationSettings(\(companyId)) failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -64,7 +64,7 @@ final class CompanyRepository {
                 .updateData(["quietHoursEnabled": enabled])
             return true
         } catch {
-            print("⚠️ CompanyRepository.updateQuietHoursEnabled(\(companyId)) failed: \(error.localizedDescription)")
+            safePrint("⚠️ CompanyRepository.updateQuietHoursEnabled(\(companyId)) failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -78,7 +78,7 @@ final class CompanyRepository {
             created.id = docRef.documentID
             return created
         } catch {
-            print("⚠️ Failed to create company \(company.name): \(error.localizedDescription)")
+            safePrint("⚠️ Failed to create company \(company.name): \(error.localizedDescription)")
             return nil
         }
     }

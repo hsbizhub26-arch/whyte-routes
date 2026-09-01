@@ -74,6 +74,7 @@
 				Services/RouteOptimizationService.swift,
 				Services/SMSService.swift,
 				Services/TrackingBroadcastService.swift,
+				Utilities/SafePrint.swift,
 				Utilities/TimestampFormatter.swift,
 				ViewModels/Driver/DriverNextStopController.swift,
 				ViewModels/Driver/DriverSession.swift,
@@ -461,7 +462,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 				XROS_DEPLOYMENT_TARGET = 26.1;
 			};
 			name = Debug;
@@ -522,7 +523,7 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1";
+				TARGETED_DEVICE_FAMILY = 1;
 				XROS_DEPLOYMENT_TARGET = 26.1;
 			};
 			name = Release;

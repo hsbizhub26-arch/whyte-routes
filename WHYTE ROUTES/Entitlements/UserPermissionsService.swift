@@ -67,7 +67,7 @@ final class UserPermissionsService {
             // Missing document and read errors (offline, permission-denied)
             // are both handled the same way: fall back to the caller's
             // whitelist check rather than blocking access.
-            print("⚠️ UserPermissionsService.fetch failed for \(uid): \(error.localizedDescription)")
+            safePrint("⚠️ UserPermissionsService.fetch failed for \(uid): \(error.localizedDescription)")
             return nil
         }
     }
@@ -93,7 +93,7 @@ final class UserPermissionsService {
             let delay = UInt64(150_000_000) << attempt
             try? await Task.sleep(nanoseconds: delay)
         }
-        print("⚠️ users/\(docRef.documentID) not server-visible yet - first queries may need a retry")
+        safePrint("⚠️ users/\(docRef.documentID) not server-visible yet - first queries may need a retry")
     }
 
     @discardableResult
@@ -125,7 +125,7 @@ final class UserPermissionsService {
             if let companyRole { data["companyRole"] = companyRole }
 
             try await docRef.setData(data)
-            print("✅ Created users/\(uid) permissions document for \(email)")
+            safePrint("✅ Created users/\(uid) permissions document for \(email)")
 
             // The write is server-acknowledged by the line above, but
             // that is NOT the same as the Security Rules engine being
@@ -151,7 +151,7 @@ final class UserPermissionsService {
             await confirmServerVisible(docRef)
             return true
         } catch {
-            print("⚠️ Failed to create users/\(uid) permissions document: \(error.localizedDescription)")
+            safePrint("⚠️ Failed to create users/\(uid) permissions document: \(error.localizedDescription)")
             return false
         }
     }
@@ -182,7 +182,7 @@ final class UserPermissionsService {
             ], merge: true)
             return true
         } catch {
-            print("⚠️ Failed attaching users/\(uid) to company \(companyId): \(error.localizedDescription)")
+            safePrint("⚠️ Failed attaching users/\(uid) to company \(companyId): \(error.localizedDescription)")
             return false
         }
     }
@@ -192,7 +192,7 @@ final class UserPermissionsService {
         do {
             try await docRef.setData(fields, merge: true)
         } catch {
-            print("⚠️ Failed to backfill users/\(uid): \(error.localizedDescription)")
+            safePrint("⚠️ Failed to backfill users/\(uid): \(error.localizedDescription)")
         }
     }
 }

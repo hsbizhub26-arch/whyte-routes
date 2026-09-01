@@ -84,9 +84,9 @@ final class AuthSession: ObservableObject {
                                 uid: user.uid,
                                 fields: ["companyId": owned.id, "companyRole": "owner"]
                             )
-                            print("🏢 Backfilled company membership: \(owned.name) (\(owned.id)) as owner")
+                            safePrint("🏢 Backfilled company membership: \(owned.name) (\(owned.id)) as owner")
                         } else {
-                            print("🏢 No owned company found for uid \(user.uid) - CompanySession stays empty")
+                            safePrint("🏢 No owned company found for uid \(user.uid) - CompanySession stays empty")
                         }
                     }
 
@@ -118,7 +118,7 @@ final class AuthSession: ObservableObject {
                             await InviteRepository().consume(invite)
                             permissions.companyId = invite.companyId
                             permissions.companyRole = invite.role
-                            print("🎟️ Late invite accepted for \(user.uid) -> \(invite.companyId) as \(invite.role)")
+                            safePrint("🎟️ Late invite accepted for \(user.uid) -> \(invite.companyId) as \(invite.role)")
                         }
                     }
 
@@ -310,9 +310,9 @@ final class AuthSession: ObservableObject {
             FeatureAccessManager.shared.bindToCompanySession()
 
             if let company {
-                print("🏢 CompanySession loaded: \(company.name) [\(company.subscriptionTier)/\(company.subscriptionStatus)] role=\(companyRole ?? "owner")")
+                safePrint("🏢 CompanySession loaded: \(company.name) [\(company.subscriptionTier)/\(company.subscriptionStatus)] role=\(companyRole ?? "owner")")
             } else {
-                print("⚠️ CompanySession: companyId \(companyId) is set on the user but the company document couldn't be read (missing, or Firestore rules blocked it)")
+                safePrint("⚠️ CompanySession: companyId \(companyId) is set on the user but the company document couldn't be read (missing, or Firestore rules blocked it)")
             }
 
             if companyRole == "driver" {
@@ -371,7 +371,7 @@ final class AuthSession: ObservableObject {
         if let created = await repo.createDriver(newDriver) {
             DriverSession.shared.setDriver(created)
         } else {
-            print("⚠️ Could not create driver record for uid \(uid) in company \(companyId) - likely rules not yet updated to allow driver self-create (see firestore.rules.v4)")
+            safePrint("⚠️ Could not create driver record for uid \(uid) in company \(companyId) - likely rules not yet updated to allow driver self-create (see firestore.rules.v4)")
         }
     }
 
