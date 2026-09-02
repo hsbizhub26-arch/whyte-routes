@@ -29,8 +29,14 @@ struct DriverNavigationScreen: View {
     let onEnd: () -> Void
     let onComplete: () -> Void
 
+    @ObservedObject private var location = LocationService.shared
+
     @State private var camera: MapCameraPosition =
         .userLocation(followsHeading: true, fallback: .automatic)
+    /// False once the driver pans the map themselves, so the camera
+    /// stops yanking itself back while they are looking ahead down the
+    /// route. Re-armed by the recentre button.
+    @State private var isFollowing = true
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -48,8 +54,16 @@ struct DriverNavigationScreen: View {
         // The screen a driver stares at while moving should not also be
         // the screen that dims and locks itself.
         .persistentSystemOverlays(.hidden)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
+            updateCamera()
+        }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        // Re-aim on every position fix, and again whenever the distance
+        // to the next turn crosses into a tighter zoom band.
+        .onChange(of: location.currentLocation?.latitude) { _, _ in updateCamera() }
+        .onChange(of: location.currentHeading) { _, _ in updateCamera() }
+        .onChange(of: nav.distanceToManeuver) { _, _ in updateCamera() }
     }
 
     // MARK: - Map
@@ -77,6 +91,89 @@ struct DriverNavigationScreen: View {
             }
         }
         .mapControlVisibility(.hidden)
+        .overlay(alignment: .bottomTrailing) { recentreButton }
+    }
+
+    /// Shown only once the driver has taken manual control of the map.
+    @ViewBuilder
+    private var recentreButton: some View {
+        if !isFollowing {
+            Button {
+                isFollowing = true
+                updateCamera()
+            } label: {
+                Image(systemName: "location.fill")
+                    .font(.title3.bold())
+                    .foregroundColor(.black)
+                    .padding(14)
+                    .background(Circle().fill(Color("WRThemeGold")))
+                    .shadow(color: .black.opacity(0.4), radius: 5)
+            }
+            .padding(.trailing, 18)
+            .padding(.bottom, 210)
+        }
+    }
+
+    // MARK: - Driving camera
+    //
+    // A navigation camera is not a map camera. Three things separate the
+    // two, and all three are what "like Waze" actually means:
+    //
+    //  HEADING-UP. The map rotates so the direction of travel is always
+    //  up the screen. North-up forces the driver to do the rotation in
+    //  their head at the exact moment they are deciding which way to
+    //  turn.
+    //
+    //  PITCH. A flat overhead view wastes most of the screen on roads
+    //  behind and beside you. Tilting to 60 degrees puts the road ahead
+    //  across the whole display, which is the only part that matters.
+    //
+    //  ADAPTIVE ZOOM. Far from a turn you want context; approaching one
+    //  you want to see which of two closely spaced streets is yours.
+    //  A fixed zoom cannot do both, so the camera tightens as the
+    //  maneuver approaches.
+
+    private var cameraDistance: CLLocationDistance {
+        guard let toManeuver = nav.distanceToManeuver else { return 700 }
+        switch toManeuver {
+        case ..<80:   return 190   // committing to the turn
+        case ..<200:  return 300
+        case ..<600:  return 480
+        default:      return 700   // cruising between turns
+        }
+    }
+
+    private func updateCamera() {
+        guard isFollowing, let coordinate = location.currentLocation else { return }
+        let heading = location.currentHeading ?? 0
+
+        // Sit the driver low in the frame rather than dead centre, so
+        // the screen is mostly road AHEAD. Half the view is useless if
+        // it is pointed at where they have already been.
+        let lookAhead = pushed(coordinate, metres: cameraDistance * 0.28, bearing: heading)
+
+        withAnimation(.easeInOut(duration: 0.45)) {
+            camera = .camera(
+                MapCamera(centerCoordinate: lookAhead,
+                          distance: cameraDistance,
+                          heading: heading,
+                          pitch: 60)
+            )
+        }
+    }
+
+    /// Moves a coordinate `metres` along `bearing`. Flat-earth maths is
+    /// fine at these distances - a few hundred metres of camera offset,
+    /// not a route calculation.
+    private func pushed(_ from: CLLocationCoordinate2D,
+                        metres: CLLocationDistance,
+                        bearing: CLLocationDirection) -> CLLocationCoordinate2D {
+        let radians = bearing * .pi / 180
+        let latitudeDelta = (metres * cos(radians)) / 111_320
+        let longitudeDelta = (metres * sin(radians))
+            / (111_320 * cos(from.latitude * .pi / 180))
+        return CLLocationCoordinate2D(latitude: from.latitude + latitudeDelta,
+                                      longitude: from.longitude + longitudeDelta)
     }
 
     // MARK: - Maneuver banner
