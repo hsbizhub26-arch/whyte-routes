@@ -427,7 +427,10 @@
 				INFOPLIST_FILE = "WHYTE ROUTES/Resources/Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSAppDataUsageDescription = "";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WHYTE ROUTES uses the camera so drivers can photograph their license for their profile and capture photo proof of completed work.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "WHYTE ROUTES uses your location, including in the background while you are clocked in on a route, to share your live position with your dispatcher, detect arrival at stops, and notify customers.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "WHYTE ROUTES uses your location to show your position on the fleet map and provide turn-by-turn navigation to your stops.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "WHYTE ROUTES accesses your photo library so you can choose an existing photo for your driver license or proof of completed work.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -488,7 +491,10 @@
 				INFOPLIST_FILE = "WHYTE ROUTES/Resources/Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSAppDataUsageDescription = "";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WHYTE ROUTES uses the camera so drivers can photograph their license for their profile and capture photo proof of completed work.";
+				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "WHYTE ROUTES uses your location, including in the background while you are clocked in on a route, to share your live position with your dispatcher, detect arrival at stops, and notify customers.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "WHYTE ROUTES uses your location to show your position on the fleet map and provide turn-by-turn navigation to your stops.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "WHYTE ROUTES accesses your photo library so you can choose an existing photo for your driver license or proof of completed work.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
