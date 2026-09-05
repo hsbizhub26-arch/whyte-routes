@@ -54,7 +54,22 @@ struct AddressAutocompleteField: View {
                             }
                             .padding(.vertical, 4)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            // Without an explicit shape only the text
+                            // glyphs are tappable - the gap between two
+                            // suggestions belongs to whichever row wins
+                            // hit-testing, which is how a tap "under"
+                            // one address selected its neighbour.
+                            .contentShape(Rectangle())
                         }
+                        // Inside a Form/List row the DEFAULT button
+                        // style hands the tap to the row, which then
+                        // fires buttons itself - so tapping anywhere
+                        // in this list picked an arbitrary suggestion
+                        // (usually not the touched one), and the one
+                        // under the finger often couldn't be selected
+                        // at all. Borderless gives each suggestion its
+                        // own independent hit area.
+                        .buttonStyle(.borderless)
                         if index != visible.count - 1 {
                             Divider()
                         }
