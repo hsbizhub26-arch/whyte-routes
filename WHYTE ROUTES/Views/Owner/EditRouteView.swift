@@ -93,8 +93,8 @@ struct EditRouteView: View {
                         Section("Driver") {
                             Picker("Assign to", selection: $selectedDriverId) {
                                 Text("Unassigned").tag(String?.none)
-                                ForEach(drivers) { driver in
-                                    Text(driver.name).tag(String?.some(driver.id))
+                                ForEach(DriverPickerOrdering.ordered(drivers)) { driver in
+                                    Text(DriverPickerOrdering.label(for: driver)).tag(String?.some(driver.id))
                                 }
                             }
                         }
