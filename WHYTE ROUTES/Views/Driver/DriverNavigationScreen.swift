@@ -146,24 +146,25 @@ struct DriverNavigationScreen: View {
         .allowsHitTesting(false)
     }
 
-    /// Shown only once the driver has taken manual control of the map.
-    @ViewBuilder
+    /// Always on screen, like Google's locate-me chip - a driver who
+    /// panned away mid-drive shouldn't have to know a hidden control
+    /// exists to get back. Gold and loud when the camera is off the
+    /// truck; quiet when already following (tap is then a harmless
+    /// re-aim).
     private var recentreButton: some View {
-        if !isFollowing {
-            Button {
-                isFollowing = true
-                updateCamera()
-            } label: {
-                Image(systemName: "location.fill")
-                    .font(.title3.bold())
-                    .foregroundColor(.black)
-                    .padding(14)
-                    .background(Circle().fill(Color("WRThemeGold")))
-                    .shadow(color: .black.opacity(0.4), radius: 5)
-            }
-            .padding(.trailing, 18)
-            .padding(.bottom, 210)
+        Button {
+            isFollowing = true
+            updateCamera()
+        } label: {
+            Image(systemName: isFollowing ? "location.fill" : "location.fill.viewfinder")
+                .font(.title3.bold())
+                .foregroundColor(isFollowing ? Color("WRThemeGold") : .black)
+                .padding(isFollowing ? 11 : 14)
+                .background(Circle().fill(isFollowing ? Color.black.opacity(0.55) : Color("WRThemeGold")))
+                .shadow(color: .black.opacity(0.4), radius: 5)
         }
+        .padding(.trailing, 18)
+        .padding(.bottom, 210)
     }
 
     // MARK: - Driving camera
