@@ -72,15 +72,12 @@ struct DriverNavigationScreen: View {
         .onChange(of: location.currentLocation?.latitude) { _, _ in updateCamera() }
         .onChange(of: location.currentHeading) { _, _ in updateCamera() }
         .onChange(of: nav.distanceToManeuver) { _, _ in updateCamera() }
-        // The map writes back into `camera` when the DRIVER moves it.
-        // That's the only reliable pan/pinch signal SwiftUI gives us,
-        // and without it isFollowing could never become false - the
-        // recentre button was unreachable and a panned map stayed
-        // wherever it was left.
-        .onChange(of: camera) { _, newValue in
-            if newValue.positionedByUser {
-                isFollowing = false
-            }
+        // Heartbeat: re-aim once a second regardless of which state
+        // change did or didn't fire. This is what actually guarantees
+        // "the camera follows the truck" - every event-driven trigger
+        // above is an optimization on top of it.
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            updateCamera()
         }
     }
 
@@ -109,6 +106,18 @@ struct DriverNavigationScreen: View {
             }
         }
         .mapControlVisibility(.hidden)
+        // Break follow-mode ONLY on a real finger gesture. The previous
+        // approach watched the camera binding's positionedByUser flag,
+        // but Map also writes back into the binding during programmatic
+        // animated moves and can mark those as user-positioned - which
+        // silently killed follow-mode on the very first camera set and
+        // left the map parked on the zoomed-out whole-route framing.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 15).onChanged { _ in isFollowing = false }
+        )
+        .simultaneousGesture(
+            MagnificationGesture().onChanged { _ in isFollowing = false }
+        )
         .overlay(alignment: .bottomTrailing) { recentreButton }
     }
 
@@ -162,7 +171,17 @@ struct DriverNavigationScreen: View {
     }
 
     private func updateCamera() {
-        guard isFollowing, let coordinate = location.currentLocation else { return }
+        guard isFollowing else { return }
+        guard let coordinate = location.currentLocation else {
+            // No fix yet (cold GPS, simulator without a location) - sit
+            // over the destination at street level rather than leaving
+            // the .automatic fallback framing the entire route.
+            if let stopCoordinate {
+                camera = .camera(MapCamera(centerCoordinate: stopCoordinate,
+                                           distance: 700, heading: 0, pitch: 0))
+            }
+            return
+        }
         let heading = location.currentHeading ?? 0
 
         // Sit the driver low in the frame rather than dead centre, so

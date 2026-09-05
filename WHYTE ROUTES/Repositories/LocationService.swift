@@ -102,6 +102,20 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // not what the backend is billed for.
     func setNavigationMode(_ active: Bool) {
         manager.distanceFilter = active ? kCLDistanceFilterNone : 20
+        if active {
+            // Navigation must not depend on the shift lifecycle having
+            // started GPS - an owner trying the driver flow, or a driver
+            // opening navigation before clocking in, otherwise gets a
+            // camera with no fixes at all. Idempotent if already running,
+            // and the Firestore write path stays driverId-gated, so this
+            // publishes to the UI only.
+            requestPermissions()
+            manager.startUpdatingLocation()
+        } else if driverId.isEmpty {
+            // Only stop what navigation itself started - never the
+            // tracker for an active shift.
+            manager.stopUpdatingLocation()
+        }
     }
 
     /// Where the last Firestore write happened, so navigation mode's
