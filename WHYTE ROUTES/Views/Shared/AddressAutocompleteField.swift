@@ -21,15 +21,35 @@ struct AddressAutocompleteField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            TextField(placeholder, text: $address)
-                .onChange(of: address) { _, newValue in
-                    if suppressNextChange {
-                        suppressNextChange = false
-                        return
+            HStack(spacing: 6) {
+                TextField(placeholder, text: $address)
+                    .onChange(of: address) { _, newValue in
+                        if suppressNextChange {
+                            suppressNextChange = false
+                            return
+                        }
+                        search.updateQuery(newValue)
+                        showSuggestions = !newValue.isEmpty
                     }
-                    search.updateQuery(newValue)
-                    showSuggestions = !newValue.isEmpty
+
+                // One tap to blank the field and start typing the next
+                // address - selecting the old text and deleting it is
+                // exactly the kind of fiddling nobody does with gloves
+                // on in a truck. Clearing the TEXT is enough: every
+                // caller already drops the resolved coordinates when
+                // the address string is empty at save.
+                if !address.isEmpty {
+                    Button {
+                        address = ""
+                        search.updateQuery("")
+                        showSuggestions = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
                 }
+            }
 
             if showSuggestions && !search.results.isEmpty {
                 let visible = Array(search.results.prefix(5).enumerated())
