@@ -100,8 +100,24 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // Firestore write path is throttled separately (see
     // didUpdateLocations), so this only changes what the CAMERA sees,
     // not what the backend is billed for.
+    /// Whether the compass may drive currentHeading - see
+    /// didUpdateHeading. Only true while full-screen navigation is up;
+    /// the fleet/customer pins outside navigation should keep pointing
+    /// the way the truck was travelling, not the way the phone happens
+    /// to be held in someone's hand.
+    private var navigationModeActive = false
+    /// Latest GPS ground speed (m/s, negative = unknown). Decides
+    /// whether course or compass owns the heading.
+    private var lastSpeed: CLLocationSpeed = -1
+
     func setNavigationMode(_ active: Bool) {
+        navigationModeActive = active
         manager.distanceFilter = active ? kCLDistanceFilterNone : 20
+        // The magnetometer heading is what turns the map when the
+        // DRIVER turns, before the truck moves - GPS course only knows
+        // a direction once there is actual travel. Google/Waze feel
+        // "attached to the phone" because of exactly this source.
+        if active { manager.startUpdatingHeading() } else { manager.stopUpdatingHeading() }
         if active {
             // Navigation must not depend on the shift lifecycle having
             // started GPS - an owner trying the driver flow, or a driver
@@ -168,7 +184,13 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         // direction (typically stationary) - keep the last known
         // heading rather than snapping the customer's map pin to
         // north every time the truck stops at a light.
-        if location.course >= 0 {
+        lastSpeed = location.speed
+        // Above walking pace GPS course is the truth (it's where the
+        // vehicle is actually going, phone orientation be damned);
+        // below it the compass owns the heading in navigation mode -
+        // see didUpdateHeading. Outside navigation, keep the old
+        // behavior: course when known, last value otherwise.
+        if location.course >= 0, !navigationModeActive || location.speed >= 2 {
             currentHeading = location.course
         }
         currentAccuracy = location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil
@@ -189,6 +211,16 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         )
 
         detectArrival(at: location)
+    }
+
+    // MARK: - Compass Heading (navigation mode only)
+    // Turns the nav map with the phone while stationary or crawling,
+    // exactly like Google Maps/Waze. Gated on navigationModeActive so
+    // the fleet map and customer tracking pins never inherit "which way
+    // the phone was facing in the cupholder."
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        guard navigationModeActive, newHeading.headingAccuracy >= 0, lastSpeed < 2 else { return }
+        currentHeading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
     }
 
     // MARK: - Detect Arrival (geofence)

@@ -120,6 +120,30 @@ struct DriverNavigationScreen: View {
             MagnificationGesture().onChanged { _ in isFollowing = false }
         )
         .overlay(alignment: .bottomTrailing) { recentreButton }
+        .overlay(alignment: .topTrailing) { compassBadge }
+    }
+
+    /// Google-style compass: the map is heading-up, so this shows where
+    /// north went. The needle counter-rotates by the camera heading -
+    /// red half pointing at true north on screen. Display-only.
+    private var compassBadge: some View {
+        ZStack {
+            Circle().fill(.black.opacity(0.55))
+            Image(systemName: "location.north.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.red)
+                .rotationEffect(.degrees(-(location.currentHeading ?? 0)))
+            Text("N")
+                .font(.system(size: 7, weight: .heavy))
+                .foregroundColor(.white)
+                .offset(y: -14)
+                .rotationEffect(.degrees(-(location.currentHeading ?? 0)))
+        }
+        .frame(width: 40, height: 40)
+        .padding(.trailing, 14)
+        // Below the maneuver banner, which owns the top of the screen.
+        .padding(.top, 130)
+        .allowsHitTesting(false)
     }
 
     /// Shown only once the driver has taken manual control of the map.
