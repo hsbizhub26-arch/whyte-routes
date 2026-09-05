@@ -93,6 +93,21 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         print("🛑 Location tracking stopped")
     }
 
+    // MARK: - Navigation Mode
+    // Full-screen turn-by-turn needs a fix on every GPS tick so the
+    // camera glides with the vehicle the way Uber/Waze do - a 20m
+    // filter reads as the map stuttering forward in lurches. The
+    // Firestore write path is throttled separately (see
+    // didUpdateLocations), so this only changes what the CAMERA sees,
+    // not what the backend is billed for.
+    func setNavigationMode(_ active: Bool) {
+        manager.distanceFilter = active ? kCLDistanceFilterNone : 20
+    }
+
+    /// Where the last Firestore write happened, so navigation mode's
+    /// per-tick fixes don't turn into per-tick billed writes.
+    private var lastWrittenLocation: CLLocation?
+
     // MARK: - Arrival Detection Target
     // Set/cleared independently of start/stop tracking so opening a
     // specific stop doesn't restart the location manager - it just
@@ -145,6 +160,14 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         currentAccuracy = location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil
 
         guard !driverId.isEmpty else { return }
+        // Same 20m granularity the distanceFilter used to enforce for
+        // everything - now enforced here so navigation mode's per-tick
+        // fixes never become per-tick Firestore writes.
+        if let last = lastWrittenLocation, location.distance(from: last) < 20 {
+            detectArrival(at: location)
+            return
+        }
+        lastWrittenLocation = location
         driverRepo.updateDriverLocation(
             driverId: driverId,
             latitude: location.coordinate.latitude,

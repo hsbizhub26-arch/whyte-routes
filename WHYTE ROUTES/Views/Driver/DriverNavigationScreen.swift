@@ -56,14 +56,32 @@ struct DriverNavigationScreen: View {
         .persistentSystemOverlays(.hidden)
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
+            // Per-tick GPS while this screen is up - with the shift
+            // tracker's 20m filter the camera lurched forward in 20m
+            // jumps (and sat on the zoomed-out fallback until the first
+            // qualifying fix), which read as "not following at all".
+            LocationService.shared.setNavigationMode(true)
             updateCamera()
         }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
+            LocationService.shared.setNavigationMode(false)
+        }
         // Re-aim on every position fix, and again whenever the distance
         // to the next turn crosses into a tighter zoom band.
         .onChange(of: location.currentLocation?.latitude) { _, _ in updateCamera() }
         .onChange(of: location.currentHeading) { _, _ in updateCamera() }
         .onChange(of: nav.distanceToManeuver) { _, _ in updateCamera() }
+        // The map writes back into `camera` when the DRIVER moves it.
+        // That's the only reliable pan/pinch signal SwiftUI gives us,
+        // and without it isFollowing could never become false - the
+        // recentre button was unreachable and a panned map stayed
+        // wherever it was left.
+        .onChange(of: camera) { _, newValue in
+            if newValue.positionedByUser {
+                isFollowing = false
+            }
+        }
     }
 
     // MARK: - Map
