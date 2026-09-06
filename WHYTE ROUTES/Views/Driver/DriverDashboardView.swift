@@ -23,6 +23,15 @@ struct DriverDashboardView: View {
         case route
         case profile
 
+        /// The stop screen carries its own gold close button (see
+        /// DriverStopView) because it can also be presented from the
+        /// Route tab, which has no toolbar. Lets the dashboard skip
+        /// stacking a second Close on top of it.
+        var isStop: Bool {
+            if case .stop = self { return true }
+            return false
+        }
+
         var id: String {
             switch self {
             case .stop(let s): return "stop-\(s.id)"
@@ -96,17 +105,24 @@ struct DriverDashboardView: View {
                     }
                 }
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            activeSheet = nil
-                        } label: {
-                            // Gloves, cold, 3am: a labelled control
-                            // with a full-size hit area, not a small
-                            // grey X in a corner.
-                            Label("Close", systemImage: "chevron.down")
-                                .font(.body.weight(.semibold))
+                    // Not for stop sheets - DriverStopView has its own
+                    // gold close button (needed because the stop can
+                    // also open from the Route tab, which has no
+                    // toolbar), and two close controls stacked on top
+                    // of each other read as a bug.
+                    if !sheet.isStop {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                activeSheet = nil
+                            } label: {
+                                // Gloves, cold, 3am: a labelled control
+                                // with a full-size hit area, not a small
+                                // grey X in a corner.
+                                Label("Close", systemImage: "chevron.down")
+                                    .font(.body.weight(.semibold))
+                            }
+                            .tint(Color("WRThemeGold"))
                         }
-                        .tint(Color("WRThemeGold"))
                     }
                 }
             }
