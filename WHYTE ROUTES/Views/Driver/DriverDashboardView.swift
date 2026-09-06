@@ -312,10 +312,21 @@ struct DriverDashboardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
-        } else if session.assignedRoute != nil && session.hasLoadedStops {
+        } else if session.assignedRoute != nil && session.hasLoadedStops && totalStops > 0 {
+            // Genuinely finished: the route had stops and every one is
+            // done. Guarded on totalStops so an assigned route with no
+            // stops yet never shows a celebration for work that never
+            // existed.
             Text("Route complete 🎉")
                 .font(.subheadline.bold())
                 .foregroundColor(.green)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if session.assignedRoute != nil && session.hasLoadedStops {
+            // Route assigned, but it has no stops on it yet - the
+            // dispatcher still has to add them. Not "complete."
+            Text("No stops on this route yet")
+                .font(.footnote)
+                .foregroundColor(.white.opacity(0.6))
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if session.assignedRoute != nil {
             HStack(spacing: 8) {

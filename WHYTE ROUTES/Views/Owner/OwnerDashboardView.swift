@@ -341,29 +341,33 @@ extension OwnerDashboardView {
     }
 
     func statCard(icon: String, tint: Color, value: String, title: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // Compact: tighter spacing, a smaller icon chip and value, and
+        // 12pt padding instead of the system default. With six of these
+        // now on the dashboard the old size pushed the reports widget
+        // well below the fold.
+        VStack(alignment: .leading, spacing: 6) {
             Image(systemName: icon)
-                .font(.title3)
+                .font(.footnote)
                 .foregroundColor(tint)
-                .frame(width: 40, height: 40)
+                .frame(width: 30, height: 30)
                 .background(tint.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
 
             Text(value)
                 .foregroundColor(.white)
-                .font(.system(size: 30, weight: .bold))
+                .font(.system(size: 22, weight: .bold))
             Text(title)
                 .foregroundColor(.white.opacity(0.6))
-                .font(.subheadline)
+                .font(.caption)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
+        .padding(12)
         .background(WRTheme.softBlack)
-        .cornerRadius(14)
+        .cornerRadius(12)
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 12)
                 .stroke(tint.opacity(0.35), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
     }
 }
