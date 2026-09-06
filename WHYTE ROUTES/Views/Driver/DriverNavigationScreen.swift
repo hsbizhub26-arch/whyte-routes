@@ -77,14 +77,20 @@ struct DriverNavigationScreen: View {
     // under 80m - the driver heard "turn right" three times before the
     // map visibly zoomed. Now the first callout at 400m already brings
     // the camera in, and each later one pulls it tighter.
+    //
+    // Far more aggressive than the first pass. 180m at the turn read as
+    // "not zooming in" on a real drive: with the 60-degree tilt that is
+    // still a wide view. Google/Waze get down to near street level at
+    // the maneuver, so the tightest band is now 90m - a 5.5x pull-in
+    // from cruising that a driver cannot miss.
     static func zoomDistance(for toManeuver: CLLocationDistance?) -> CLLocationDistance {
-        guard let toManeuver else { return 700 }
+        guard let toManeuver else { return 500 }
         switch toManeuver {
-        case ..<60:   return 180   // final "turn right" (voice at 40m)
-        case ..<160:  return 260   // second callout (voice at 150m)
-        case ..<420:  return 360   // FIRST callout (voice at 400m) - visibly closer
-        case ..<800:  return 540   // approaching the turn
-        default:      return 700   // cruising between turns
+        case ..<60:   return 90    // final "turn right" (voice at 40m) - street level
+        case ..<160:  return 150   // second callout (voice at 150m)
+        case ..<420:  return 240   // FIRST callout (voice at 400m) - clearly closer
+        case ..<800:  return 360   // approaching the turn
+        default:      return 500   // cruising between turns
         }
     }
 
