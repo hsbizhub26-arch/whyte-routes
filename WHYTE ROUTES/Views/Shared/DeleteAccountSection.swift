@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 /// The deletion control itself, with no container of its own, so it can
 /// sit in a plain VStack screen as well as a Form.
@@ -13,6 +14,15 @@ import SwiftUI
 struct DeleteAccountButton: View {
     @StateObject private var manager = DeleteAccountManager()
     @State private var showConfirmation = false
+    @State private var showPasswordPrompt = false
+    @State private var password = ""
+
+    /// True when this account signs in with email/password (as opposed
+    /// to Apple), so deletion needs a password re-entry step; Apple
+    /// users are re-verified by the Apple sheet inside the manager.
+    private var isPasswordAccount: Bool {
+        Auth.auth().currentUser?.providerData.contains { $0.providerID == "password" } ?? false
+    }
 
     /// Styled for a Form row by default; `standalone` gives the button
     /// the same full-width filled shape as Log Out on the driver's
@@ -51,10 +61,33 @@ struct DeleteAccountButton: View {
                     isPresented: $showConfirmation,
                     titleVisibility: .visible
                 ) {
-                    Button("Delete Account", role: .destructive) {
-                        Task { await manager.deleteCurrentUser() }
+                    Button("Continue", role: .destructive) {
+                        // Second gate: password users must re-enter their
+                        // password; Apple users go straight into the
+                        // manager, which pops the Apple sheet to verify.
+                        if isPasswordAccount {
+                            password = ""
+                            showPasswordPrompt = true
+                        } else {
+                            Task { await manager.deleteCurrentUser() }
+                        }
                     }
                     Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(isPasswordAccount
+                         ? "You'll enter your password on the next step to confirm it's really you."
+                         : "You'll confirm with Sign in with Apple to verify it's really you.")
+                }
+                .alert("Confirm Deletion", isPresented: $showPasswordPrompt) {
+                    SecureField("Your password", text: $password)
+                        .textContentType(.password)
+                    Button("Delete Account", role: .destructive) {
+                        Task { await manager.deleteCurrentUser(password: password) }
+                        password = ""
+                    }
+                    Button("Cancel", role: .cancel) { password = "" }
+                } message: {
+                    Text("Enter your password to permanently delete your account. This cannot be undone.")
                 }
             }
 

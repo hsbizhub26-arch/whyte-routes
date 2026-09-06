@@ -118,6 +118,15 @@ struct DriverProfileView: View {
                 }
                 .padding(.horizontal)
 
+                // Real separation between the everyday action (Log Out)
+                // and the irreversible one (Delete Account), so a driver
+                // reaching for Log Out can't clip Delete. A divider plus
+                // generous space, not the old 4pt gap.
+                Divider()
+                    .overlay(Color.white.opacity(0.1))
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 24)
+
                 // MARK: - Delete Account
                 // Required by App Store Guideline 5.1.1(v) for any app
                 // that creates accounts, and this is the only screen a
@@ -127,7 +136,6 @@ struct DriverProfileView: View {
                 // which only owners and managers ever see.
                 DeleteAccountButton(standalone: true)
                     .padding(.horizontal)
-                    .padding(.top, 4)
 
                 Text("Deleting your account removes your driver profile, your licence photo, and your login. It cannot be undone.")
                     .font(.caption)

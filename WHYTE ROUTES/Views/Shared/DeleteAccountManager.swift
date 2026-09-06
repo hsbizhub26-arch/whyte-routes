@@ -27,7 +27,7 @@ final class DeleteAccountManager: ObservableObject {
     @Published var isDeleting: Bool = false
     @Published var errorMessage: String?
 
-    func deleteCurrentUser() async {
+    func deleteCurrentUser(password: String? = nil) async {
         await MainActor.run {
             self.isDeleting = true
             self.errorMessage = nil
@@ -63,6 +63,31 @@ final class DeleteAccountManager: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.errorMessage = Self.friendlyErrorMessage(from: error)
+                    self.isDeleting = false
+                }
+                return
+            }
+        }
+
+        // Email/password accounts get the same identity re-check the
+        // Apple sheet gives Apple users - re-enter the password before
+        // anything irreversible. Without it, an unlocked phone left on
+        // this screen could delete the account with two taps and no
+        // proof it was the owner doing it.
+        if user.providerData.contains(where: { $0.providerID == "password" }) {
+            guard let password, !password.isEmpty, let email = user.email else {
+                await MainActor.run {
+                    self.errorMessage = "Enter your password to confirm deletion."
+                    self.isDeleting = false
+                }
+                return
+            }
+            do {
+                let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+                try await user.reauthenticate(with: credential)
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = "That password didn't match. Your account was not deleted."
                     self.isDeleting = false
                 }
                 return

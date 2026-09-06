@@ -345,7 +345,7 @@ struct DriverStopView: View {
                         progressBar
                         header
                         mapSection
-                        actionButtons
+                        primaryAction
                         // The driver-side "Text Customer" button is GONE, not
                         // hidden. Its old comment said the tracking link had
                         // "no real destination yet" - that stopped being true
@@ -359,7 +359,6 @@ struct DriverStopView: View {
                         // binary. Sending a tracking link is the owner's
                         // "Send Tracking Link" action, which goes through the
                         // function that actually owns the token.
-                        statusControl
                         // photoProofButton intentionally hidden for the snow
                         // beta - a photo step adds real friction to exactly
                         // what overnight snow ops needs to be fast: gloves,
@@ -705,56 +704,84 @@ extension DriverStopView {
     }
 
     // MARK: ACTION BUTTONS
-    private var actionButtons: some View {
+    // MARK: PRIMARY ACTION - one button per stage, Uber-Driver style.
+    //
+    // Previously this was TWO stacked gold buttons that looked
+    // identical but did different jobs: "Start Driving" (mark en route
+    // + text the customer) and "Start Navigation" (open the in-app
+    // turn-by-turn). A driver at 5am can't tell a status button from a
+    // maps button when both say "Start ___" in the same colour, so the
+    // two are merged: starting to drive and getting directions are one
+    // action here, exactly as they always are in real life. In-app
+    // navigation stays the only navigation - leaving the route inside
+    // the app keeps the stop list, arrival geofence, customer tracking
+    // link and shift timer all live, none of which survive a bounce out
+    // to Apple Maps.
+    @ViewBuilder
+    private var primaryAction: some View {
         VStack(spacing: 16) {
-            // IN-APP NAVIGATION IS THE ONLY NAVIGATION.
-            //
-            // There used to be a second "Navigate" button directly
-            // underneath this one that handed off to Apple Maps /
-            // Google Maps / Waze. Two buttons doing what looks like the
-            // same job, and the external one was the one that read
-            // simply "Navigate" - so that is the one drivers pressed,
-            // and the app they ended up in was Apple Maps. The in-app
-            // turn-by-turn engine was never what anyone actually saw.
-            //
-            // Leaving the route inside the app is the point: it keeps
-            // the stop list, the arrival geofence, the customer's
-            // tracking link and the shift timer all live, none of which
-            // survive a bounce out to another app.
-            if let coordinate = vm.stop.coordinate {
+            switch vm.jobStatus {
+            case .scheduled:
+                // ONE tap: mark en route (which texts the customer
+                // "on my way"), and open navigation.
                 Button {
-                    if nav.isNavigating {
-                        nav.stop()
-                    } else {
+                    Task { await vm.startDriving() }
+                    if let coordinate = vm.stop.coordinate {
                         nav.start(to: coordinate)
                     }
                 } label: {
-                    // "Start Navigation", not "GO".
-                    //
-                    // GO was a leftover from when this sat directly
-                    // above a second button that said "Navigate" and
-                    // opened Apple Maps - the short label existed to
-                    // tell them apart. That button is gone, and what
-                    // remained was a two-letter label on the single
-                    // most important control a driver touches. The
-                    // person who built this app could not find it; a
-                    // driver at 5am has no chance.
-                    Label(
-                        nav.isNavigating ? "End Navigation" : "Start Navigation",
-                        systemImage: nav.isNavigating ? "xmark.circle.fill" : "location.north.circle.fill"
-                    )
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(nav.isNavigating ? Color.red.opacity(0.85) : Color("WRThemeGold"))
-                    .foregroundColor(nav.isNavigating ? .white : .black)
-                    .cornerRadius(12)
+                    Label("Start Driving", systemImage: "car.fill")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color("WRThemeGold"))
+                        .cornerRadius(14)
                 }
+
+            case .enRoute:
+                // Now that they're on the way, arriving is the primary
+                // action. Navigation becomes a secondary control so a
+                // driver who closed the map can pull directions back
+                // without re-triggering the customer text.
+                Button {
+                    Task { await vm.markArrived() }
+                } label: {
+                    Label("I've Arrived", systemImage: "mappin.circle.fill")
+                        .font(.headline)
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color("WRThemeGold"))
+                        .cornerRadius(14)
+                }
+
+                if let coordinate = vm.stop.coordinate {
+                    Button {
+                        if nav.isNavigating { nav.stop() } else { nav.start(to: coordinate) }
+                    } label: {
+                        Label(
+                            nav.isNavigating ? "End Navigation" : "Resume Navigation",
+                            systemImage: nav.isNavigating ? "xmark.circle" : "location.north.circle"
+                        )
+                        .font(.subheadline.bold())
+                        .foregroundColor(nav.isNavigating ? .red : Color("WRThemeGold"))
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke((nav.isNavigating ? Color.red : Color("WRThemeGold")).opacity(0.6), lineWidth: 1)
+                        )
+                    }
+                }
+
+            case .arrived, .completed:
+                EmptyView()
             }
 
             // Surfaced here rather than only in the maneuver banner:
-            // without it, tapping GO with no GPS fix yet did nothing
-            // visible at all, which reads as a dead button.
+            // without it, tapping the button with no GPS fix yet did
+            // nothing visible at all, which reads as a dead button.
             if let error = nav.errorMessage, !nav.isNavigating {
                 Text(error)
                     .font(.footnote)
@@ -765,43 +792,6 @@ extension DriverStopView {
             if let arrivedAt = vm.stop.arrivedAt {
                 TimerPill(arrivedAt: arrivedAt)
             }
-        }
-    }
-
-    // MARK: STATUS CONTROL (En Route / Arrived - each notifies the
-    // customer via NotificationService; Completed is handled by the
-    // existing completeButton below)
-    @ViewBuilder
-    private var statusControl: some View {
-        switch vm.jobStatus {
-        case .scheduled:
-            Button {
-                Task { await vm.startDriving() }
-            } label: {
-                Label("Start Driving", systemImage: "car.fill")
-                    .font(.headline)
-                    .foregroundColor(.black)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color("WRThemeGold"))
-                    .cornerRadius(14)
-            }
-
-        case .enRoute:
-            Button {
-                Task { await vm.markArrived() }
-            } label: {
-                Label("I've Arrived", systemImage: "mappin.circle.fill")
-                    .font(.headline)
-                    .foregroundColor(.black)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color("WRThemeGold"))
-                    .cornerRadius(14)
-            }
-
-        case .arrived, .completed:
-            EmptyView()
         }
     }
 
