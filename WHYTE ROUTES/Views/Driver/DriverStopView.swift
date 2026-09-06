@@ -722,12 +722,22 @@ extension DriverStopView {
         VStack(spacing: 16) {
             switch vm.jobStatus {
             case .scheduled:
-                // ONE tap: mark en route (which texts the customer
-                // "on my way"), and open navigation.
+                // ONE tap does the whole "I'm starting this stop"
+                // gesture: clock in if not already on shift (which
+                // starts GPS tracking, the dispatcher's live map, the
+                // customer tracking page and the time report), mark the
+                // stop en route (texting the customer "on my way"), and
+                // open navigation. A driver never has to find a separate
+                // Start Shift button first.
                 Button {
-                    Task { await vm.startDriving() }
-                    if let coordinate = vm.stop.coordinate {
-                        nav.start(to: coordinate)
+                    Task {
+                        if DriverSession.shared.activeShift == nil {
+                            _ = await DriverSession.shared.startShift()
+                        }
+                        await vm.startDriving()
+                        if let coordinate = vm.stop.coordinate {
+                            nav.start(to: coordinate)
+                        }
                     }
                 } label: {
                     Label("Start Driving", systemImage: "car.fill")
