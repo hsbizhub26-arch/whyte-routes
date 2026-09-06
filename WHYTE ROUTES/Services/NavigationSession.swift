@@ -137,9 +137,14 @@ final class NavigationSession: NSObject, ObservableObject {
             remainingDistance = best.distance
             remainingTime = best.expectedTravelTime
             currentInstruction = firstMeaningfulInstruction(in: best)
-            // Not spoken here. The first location fix announces the
-            // step WITH its distance through announceIfCrossingThreshold;
-            // a bare instruction here duplicated the final 40m callout.
+            // Speak straight away on start/resume, so the driver gets
+            // audible proof that voice guidance is live. Nothing used to
+            // be said here - the first sound came only when a distance
+            // threshold was crossed, so resuming 600m from a turn meant
+            // a minute of silence that reads as "the voice is broken."
+            // announceCurrentStepNow marks the thresholds it covers, so
+            // this greeting never double-speaks the same callout.
+            if announceFirstStep { announceCurrentStepNow() }
         } catch {
             errorMessage = "Couldn't get directions: \(error.localizedDescription)"
         }
@@ -218,6 +223,37 @@ final class NavigationSession: NSObject, ObservableObject {
 
     // Speaks each threshold at most once per step, so a driver
     // crawling toward a light doesn't hear the same turn repeatedly.
+    /// Speaks the current maneuver right now, with its distance.
+    /// Used when navigation starts or resumes so there is always an
+    /// immediate spoken confirmation instead of silence until the next
+    /// threshold. Every threshold this already covers is marked spoken,
+    /// so the same callout doesn't repeat itself seconds later.
+    private func announceCurrentStepNow() {
+        guard isNavigating,
+              let route,
+              stepIndex < route.steps.count,
+              let here = LocationService.shared.currentLocation,
+              let maneuverPoint = route.steps[stepIndex].polyline.coordinates.last
+        else { return }
+
+        let instruction = route.steps[stepIndex].instructions
+        guard !instruction.isEmpty else { return }
+
+        let distance = CLLocation(latitude: here.latitude, longitude: here.longitude)
+            .distance(from: CLLocation(latitude: maneuverPoint.latitude,
+                                       longitude: maneuverPoint.longitude))
+
+        if distance <= 40 {
+            speak(instruction)
+        } else {
+            speak("In \(Int(distance)) metres, \(instruction)")
+        }
+
+        for (index, threshold) in Self.announceThresholds.enumerated() where distance <= threshold {
+            spokenThresholdsForStep.insert(index)
+        }
+    }
+
     private func announceIfCrossingThreshold(distance: CLLocationDistance, instruction: String) {
         guard !instruction.isEmpty else { return }
         // Speak for the TIGHTEST threshold crossed, and mark every
@@ -295,6 +331,12 @@ final class NavigationSession: NSObject, ObservableObject {
     }
 
     private func speak(_ text: String) {
+        // Re-arm the session on every utterance. End Navigation
+        // deactivates it, and a resume that races that deactivation
+        // would otherwise speak into a dead session - silence, with no
+        // error anywhere. setCategory/setActive are cheap and
+        // idempotent, so doing this per utterance is free insurance.
+        configureAudioSession()
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-CA") ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
