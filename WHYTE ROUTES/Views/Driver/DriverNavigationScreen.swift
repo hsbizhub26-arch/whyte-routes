@@ -70,12 +70,20 @@ struct DriverNavigationScreen: View {
     // distance-to-maneuver changes. Far from a turn you want context;
     // approaching one you want to see which of two closely spaced
     // streets is yours - a fixed zoom can't do both.
+    //
+    // The bands are aligned to the voice callouts (400m / 150m / 40m,
+    // see NavigationSession.announceThresholds) so the map tightens
+    // WITH each announcement. Previously the only obvious step came
+    // under 80m - the driver heard "turn right" three times before the
+    // map visibly zoomed. Now the first callout at 400m already brings
+    // the camera in, and each later one pulls it tighter.
     static func zoomDistance(for toManeuver: CLLocationDistance?) -> CLLocationDistance {
         guard let toManeuver else { return 700 }
         switch toManeuver {
-        case ..<80:   return 190   // committing to the turn
-        case ..<200:  return 300
-        case ..<600:  return 480
+        case ..<60:   return 180   // final "turn right" (voice at 40m)
+        case ..<160:  return 260   // second callout (voice at 150m)
+        case ..<420:  return 360   // FIRST callout (voice at 400m) - visibly closer
+        case ..<800:  return 540   // approaching the turn
         default:      return 700   // cruising between turns
         }
     }
@@ -263,6 +271,24 @@ private struct NavMapCanvas: View, Equatable {
     /// Re-armed by the recentre button.
     @State private var isFollowing = true
 
+    /// When this map appeared. Follow-mode is immune to gestures for a
+    /// moment after it does: the tap that started navigation lands on
+    /// this very map as it slides in, and its tail registered as a
+    /// "drag" that killed follow-mode the instant nav began - so the
+    /// camera never tracked the truck until the driver hit recentre.
+    @State private var appearedAt = Date()
+
+    /// A pan must be this deliberate to break follow-mode. 15pt let a
+    /// brushed finger in a moving truck do it; 40pt is an intentional
+    /// swipe.
+    private static let deliberatePanDistance: CGFloat = 40
+    private static let gestureGracePeriod: TimeInterval = 2.0
+
+    private func userTookOverMap() {
+        guard Date().timeIntervalSince(appearedAt) > Self.gestureGracePeriod else { return }
+        isFollowing = false
+    }
+
     /// 1 Hz - matched to the GPS fix rate. Re-animating faster than new
     /// positions arrive just re-tweens to the same spot and burns
     /// frames, which is a large part of what read as "laggy."
@@ -291,14 +317,15 @@ private struct NavMapCanvas: View, Equatable {
         .mapControlVisibility(.hidden)
         // Break follow-mode only on a real finger gesture.
         .simultaneousGesture(
-            DragGesture(minimumDistance: 15).onChanged { _ in isFollowing = false }
+            DragGesture(minimumDistance: Self.deliberatePanDistance).onChanged { _ in userTookOverMap() }
         )
         .simultaneousGesture(
-            MagnificationGesture().onChanged { _ in isFollowing = false }
+            MagnificationGesture().onChanged { _ in userTookOverMap() }
         )
         .overlay(alignment: .bottomTrailing) { recentreButton }
         .overlay(alignment: .topTrailing) { compassBadge }
         .onAppear {
+            appearedAt = Date()
             LocationService.shared.setNavigationMode(true)
             updateCamera()
         }
