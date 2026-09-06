@@ -41,7 +41,12 @@ final class NavigationSession: NSObject, ObservableObject {
     // Announce at a far, near, and immediate distance, the way a
     // driver actually needs it: once with time to change lanes, once
     // to commit, once at the turn itself.
-    private static let announceThresholds: [CLLocationDistance] = [400, 150, 40]
+    // Three callouts per step, Google-style: the first fix after a
+    // step begins announces it WITH its real distance (the 100km
+    // threshold is always crossed, so it fires immediately), a near
+    // reminder at 250m, and the bare instruction at 40m. Nothing is
+    // ever spoken bare twice.
+    private static let announceThresholds: [CLLocationDistance] = [100_000, 250, 40]
     /// Treated as "this maneuver is done, move to the next one".
     private static let stepCompleteRadius: CLLocationDistance = 25
     /// How far off the line before we consider the driver to have left the route.
@@ -132,9 +137,9 @@ final class NavigationSession: NSObject, ObservableObject {
             remainingDistance = best.distance
             remainingTime = best.expectedTravelTime
             currentInstruction = firstMeaningfulInstruction(in: best)
-            if announceFirstStep, let currentInstruction {
-                speak(currentInstruction)
-            }
+            // Not spoken here. The first location fix announces the
+            // step WITH its distance through announceIfCrossingThreshold;
+            // a bare instruction here duplicated the final 40m callout.
         } catch {
             errorMessage = "Couldn't get directions: \(error.localizedDescription)"
         }
@@ -205,24 +210,31 @@ final class NavigationSession: NSObject, ObservableObject {
 
         let next = route.steps[stepIndex]
         currentInstruction = next.instructions.isEmpty ? currentInstruction : next.instructions
-        if !next.instructions.isEmpty {
-            speak(next.instructions)
-        }
+        // Not spoken here. The next location fix announces this step
+        // WITH its distance ("In 800 metres, turn left") through
+        // announceIfCrossingThreshold; a bare instruction here was the
+        // duplicate the driver heard.
     }
 
     // Speaks each threshold at most once per step, so a driver
     // crawling toward a light doesn't hear the same turn repeatedly.
     private func announceIfCrossingThreshold(distance: CLLocationDistance, instruction: String) {
         guard !instruction.isEmpty else { return }
-        for (index, threshold) in Self.announceThresholds.enumerated() {
-            if distance <= threshold, !spokenThresholdsForStep.contains(index) {
-                spokenThresholdsForStep.insert(index)
-                if threshold <= 40 {
-                    speak(instruction)
-                } else {
-                    speak("In \(Int(distance)) metres, \(instruction)")
-                }
-                break
+        // Speak for the TIGHTEST threshold crossed, and mark every
+        // looser one spoken too. The old loop fired the loosest first
+        // and broke, so a turn already 120m away at step-start spoke the
+        // 400m and 150m callouts on consecutive fixes - the same turn,
+        // twice in a row.
+        var target: Int?
+        for (index, threshold) in Self.announceThresholds.enumerated() where distance <= threshold {
+            target = index
+        }
+        if let index = target, !spokenThresholdsForStep.contains(index) {
+            for i in 0...index { spokenThresholdsForStep.insert(i) }
+            if Self.announceThresholds[index] <= 40 {
+                speak(instruction)
+            } else {
+                speak("In \(Int(distance)) metres, \(instruction)")
             }
         }
     }

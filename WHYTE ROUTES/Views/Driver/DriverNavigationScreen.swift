@@ -83,13 +83,21 @@ struct DriverNavigationScreen: View {
     // still a wide view. Google/Waze get down to near street level at
     // the maneuver, so the tightest band is now 90m - a 5.5x pull-in
     // from cruising that a driver cannot miss.
+    //
+    // Finer steps than the previous four so the pull-in reads as a
+    // continuous zoom rather than a couple of jumps, and tighter at the
+    // end (70m - genuinely street level). Eight bands is still only a
+    // handful of Equatable transitions per turn.
     static func zoomDistance(for toManeuver: CLLocationDistance?) -> CLLocationDistance {
         guard let toManeuver else { return 500 }
         switch toManeuver {
-        case ..<60:   return 90    // final "turn right" (voice at 40m) - street level
-        case ..<160:  return 150   // second callout (voice at 150m)
-        case ..<420:  return 240   // FIRST callout (voice at 400m) - clearly closer
-        case ..<800:  return 360   // approaching the turn
+        case ..<60:   return 70    // final "turn left" (voice at 40m) - street level
+        case ..<100:  return 100
+        case ..<160:  return 140   // second callout (voice at 150m)
+        case ..<300:  return 200
+        case ..<420:  return 260   // FIRST callout (voice at 400m) - clearly closer
+        case ..<600:  return 340
+        case ..<900:  return 420
         default:      return 500   // cruising between turns
         }
     }
