@@ -71,16 +71,6 @@ struct SettingsView: View {
     var body: some View {
         Group {
             List {
-                Section("Account") {
-                    Button("Sign Out") {
-                        try? Auth.auth().signOut()
-                    }
-                    .foregroundColor(WRTheme.gold)
-                    .listRowBackground(Color.black.opacity(0.2))
-
-                    DeleteAccountSection()
-                        .listRowBackground(Color.black.opacity(0.2))
-                }
                 Section {
                     Button {
                         showReportIssue = true
@@ -177,9 +167,17 @@ struct SettingsView: View {
                     .listRowBackground(Color.black.opacity(0.2))
                 } header: {
                     Text("Privacy & Permissions")
-                } footer: {
-                    Text("Deleting your account cannot be undone.")
-                        .foregroundColor(.gray)
+                }
+                // Sign Out sits well below the account tools and is
+                // separated from Delete Account by the whole Support
+                // section, so the safe, everyday action can't be
+                // confused with the irreversible one.
+                Section {
+                    Button("Sign Out") {
+                        try? Auth.auth().signOut()
+                    }
+                    .foregroundColor(WRTheme.gold)
+                    .listRowBackground(Color.black.opacity(0.2))
                 }
                 Section {
                     Button("Email Support") {
@@ -200,6 +198,19 @@ struct SettingsView: View {
                     Text("Support")
                 } footer: {
                     Text("For urgent issues, include your driver ID and route ID in the email.")
+                        .foregroundColor(.gray)
+                }
+                // The one irreversible action, deliberately the very
+                // last thing on the screen and in its own section -
+                // nowhere near Sign Out, so no one deletes their
+                // account when they meant to log out.
+                Section {
+                    DeleteAccountSection()
+                        .listRowBackground(Color.black.opacity(0.2))
+                } header: {
+                    Text("Danger Zone")
+                } footer: {
+                    Text("Deleting your account cannot be undone.")
                         .foregroundColor(.gray)
                 }
             }

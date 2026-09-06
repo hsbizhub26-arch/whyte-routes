@@ -73,6 +73,15 @@ final class ShiftRepository {
         ])
     }
 
+    /// Deletes one shift record. The Firestore rule permits this only
+    /// for company staff (owner/manager) - a driver's request is
+    /// refused server-side, so this is safe even though the caller
+    /// also gates it in the UI.
+    func deleteShift(driverId: String, shiftId: String) async throws {
+        let ref = try shiftsRef(driverId: driverId)
+        try await ref.document(shiftId).delete()
+    }
+
     /// Most recent shifts for the time-accounting report, newest first.
     func fetchRecentShifts(driverId: String, limit: Int = 10) async -> [Shift] {
         guard let ref = try? shiftsRef(driverId: driverId) else { return [] }

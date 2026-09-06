@@ -17,10 +17,18 @@ struct DriverTimeReportView: View {
 
     let driver: Driver
 
+    @EnvironmentObject private var auth: AuthSession
+
     @State private var shifts: [Shift] = []
     @State private var stops: [Stop] = []
     @State private var isLoading = true
     @State private var hasLoadedStopsOnce = false
+
+    /// Only owners and managers may delete time records. A driver never
+    /// reaches this screen, but gating the action (in addition to the
+    /// Firestore rule, which refuses a driver's delete server-side)
+    /// keeps the capability explicit.
+    private var canDelete: Bool { auth.role == .owner || auth.role == .manager }
 
     private let shiftRepo = ShiftRepository()
     private let routeRepo = RouteRepository()
@@ -45,6 +53,15 @@ struct DriverTimeReportView: View {
                     ForEach(shifts) { shift in
                         Section {
                             shiftSummary(shift)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if canDelete {
+                                        Button(role: .destructive) {
+                                            delete(shift)
+                                        } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
+                                }
                             ForEach(stopsDuring(shift)) { stop in
                                 stopRow(stop)
                             }
@@ -61,6 +78,22 @@ struct DriverTimeReportView: View {
         }
         .navigationTitle("\(driver.name) - Time")
         .onAppear(perform: load)
+    }
+
+    private func delete(_ shift: Shift) {
+        // Optimistic: drop it from the list immediately, restore if the
+        // server refuses (e.g. a manager whose role changed underneath
+        // them). The Firestore rule is the real gate.
+        let previous = shifts
+        shifts.removeAll { $0.id == shift.id }
+        Task {
+            do {
+                try await shiftRepo.deleteShift(driverId: driver.id, shiftId: shift.id)
+            } catch {
+                await MainActor.run { shifts = previous }
+                safePrint("⚠️ Failed to delete shift \(shift.id): \(error.localizedDescription)")
+            }
+        }
     }
 
     private func load() {

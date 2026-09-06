@@ -21,6 +21,12 @@ struct OwnerDashboardView: View {
         routeService.routes.reduce(0) { $0 + $1.stops.count }
     }
 
+    /// Drivers that currently have a route to run - the "actually out
+    /// working" number, distinct from total headcount.
+    private var driversOnRoute: Int {
+        driverVM.drivers.filter { ($0.activeRoute ?? "").isEmpty == false }.count
+    }
+
     private var completionFraction: Double {
         guard totalStopsToday > 0 else { return 0 }
         return min(1, Double(totalCompletedStops) / Double(totalStopsToday))
@@ -141,6 +147,38 @@ struct OwnerDashboardView: View {
                         tint: WRTheme.routeTeal,
                         value: "\(routeService.routes.count)",
                         title: "Active Routes"
+                    )
+                }
+                .padding(.horizontal)
+
+                HStack(spacing: 14) {
+                    statCard(
+                        icon: "mappin.and.ellipse",
+                        tint: WRTheme.gold,
+                        value: "\(totalCompletedStops)/\(totalStopsToday)",
+                        title: "Stops Done"
+                    )
+                    statCard(
+                        icon: "checkmark.circle.fill",
+                        tint: WRTheme.routeTeal,
+                        value: "\(Int((completionFraction * 100).rounded()))%",
+                        title: "Completion"
+                    )
+                }
+                .padding(.horizontal)
+
+                HStack(spacing: 14) {
+                    statCard(
+                        icon: "person.crop.circle.fill",
+                        tint: WRTheme.gold,
+                        value: "\(customerCount)",
+                        title: "Customers"
+                    )
+                    statCard(
+                        icon: "figure.walk.motion",
+                        tint: WRTheme.routeTeal,
+                        value: "\(driversOnRoute)",
+                        title: "On Route"
                     )
                 }
                 .padding(.horizontal)
