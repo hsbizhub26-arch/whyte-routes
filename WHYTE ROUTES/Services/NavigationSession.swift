@@ -53,26 +53,30 @@ final class NavigationSession: NSObject, ObservableObject {
     // MARK: - Lifecycle
 
     func start(to destination: CLLocationCoordinate2D) {
-        // Checked BEFORE flipping isNavigating, not inside
-        // calculateRoute. Routing from an unknown origin can't work, so
-        // starting first meant the button flipped to "End", no route
-        // ever drew, and nothing said why - a dead button. The most
-        // common cause is simply not being on shift: GPS tracking is
-        // tied to the shift lifecycle, so say that rather than making
-        // the driver guess.
-        guard LocationService.shared.currentLocation != nil else {
-            errorMessage = DriverSession.shared.activeShift == nil
-                ? "Start your shift first - navigation needs GPS."
-                : "Waiting for GPS…"
-            return
-        }
-
         self.destination = destination
         isNavigating = true
         errorMessage = nil
         configureAudioSession()
+
+        // Navigation no longer depends on the driver being clocked in.
+        // It starts its own GPS here; if they ARE on shift the same
+        // fixes also write to Firestore for the dispatcher and the
+        // customer tracking page, and if they're not, navigation still
+        // works locally. This is why "Start your shift first" is gone -
+        // it was a false dead-end that fired whenever a driver hit
+        // navigate before starting a shift, which the merged Start
+        // Driving button made the common path.
+        LocationService.shared.setNavigationMode(true)
         observeLocation()
-        Task { await calculateRoute(announceFirstStep: true) }
+
+        if LocationService.shared.currentLocation != nil {
+            Task { await calculateRoute(announceFirstStep: true) }
+        } else {
+            // No fix yet (cold GPS). observeLocation() below calculates
+            // the route the moment the first location arrives; until
+            // then the map shows the destination and this note.
+            errorMessage = "Getting GPS…"
+        }
     }
 
     func stop() {
@@ -149,7 +153,19 @@ final class NavigationSession: NSObject, ObservableObject {
         LocationService.shared.$currentLocation
             .compactMap { $0 }
             .sink { [weak self] coordinate in
-                Task { @MainActor in self?.updateProgress(at: coordinate) }
+                Task { @MainActor in
+                    guard let self else { return }
+                    // If start() couldn't calculate the route yet because
+                    // there was no fix, the first fix to arrive does it -
+                    // clearing the "Getting GPS…" note and drawing the
+                    // route. Afterwards it's ordinary progress tracking.
+                    if self.route == nil, self.destination != nil, self.isNavigating, !self.isRecalculating {
+                        self.errorMessage = nil
+                        await self.calculateRoute(announceFirstStep: true)
+                    } else {
+                        self.updateProgress(at: coordinate)
+                    }
+                }
             }
             .store(in: &cancellables)
     }
