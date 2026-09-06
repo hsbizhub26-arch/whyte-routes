@@ -328,12 +328,14 @@ struct DriverStopView: View {
     /// the stop when navigation ends.
     @State private var navCamera: MapCameraPosition = .automatic
 
+    @Environment(\.dismiss) private var dismiss
+
     init(stop: Stop) {
         _vm = StateObject(wrappedValue: DriverStopViewModel(stop: stop))
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topLeading) {
             Color("WRBlack").ignoresSafeArea()
 
             if vm.routeCompleted {
@@ -388,6 +390,8 @@ struct DriverStopView: View {
                     .padding()
                 }
             }
+
+            closeButton
         }
         // FULL-SCREEN WHILE GUIDANCE IS RUNNING.
         //
@@ -704,6 +708,25 @@ extension DriverStopView {
     }
 
     // MARK: ACTION BUTTONS
+    // Always-visible escape. This screen is a sheet, whose only other
+    // way out is a swipe-down grabber that's easy to miss - and if the
+    // driver started navigation and it's busy, they could feel trapped.
+    // Ends navigation first if it's running, then dismisses the sheet.
+    private var closeButton: some View {
+        Button {
+            if nav.isNavigating { nav.stop() }
+            dismiss()
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.headline.bold())
+                .foregroundColor(.white)
+                .padding(12)
+                .background(Circle().fill(Color.black.opacity(0.55)))
+        }
+        .padding(.leading, 16)
+        .padding(.top, 8)
+    }
+
     // MARK: PRIMARY ACTION - one button per stage, Uber-Driver style.
     //
     // Previously this was TWO stacked gold buttons that looked

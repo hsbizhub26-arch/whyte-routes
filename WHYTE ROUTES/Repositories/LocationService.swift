@@ -112,7 +112,14 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func setNavigationMode(_ active: Bool) {
         navigationModeActive = active
-        manager.distanceFilter = active ? kCLDistanceFilterNone : 20
+        // 5m while navigating (not kCLDistanceFilterNone). The camera is
+        // driven by its own 2Hz timer now, so it no longer needs a fix
+        // on every GPS tick - and the unfiltered firehose was the lag:
+        // every fix re-ran the whole navigation view's body, a Firestore
+        // write, the arrival geofence and the customer-tracking publish.
+        // 5m keeps following smooth at driving speed while cutting that
+        // downstream work by an order of magnitude.
+        manager.distanceFilter = active ? 5 : 20
         // The magnetometer heading is what turns the map when the
         // DRIVER turns, before the truck moves - GPS course only knows
         // a direction once there is actual travel. Google/Waze feel
