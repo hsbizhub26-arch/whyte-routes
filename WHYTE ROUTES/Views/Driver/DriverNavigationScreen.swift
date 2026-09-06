@@ -30,25 +30,22 @@ struct DriverNavigationScreen: View {
     let onEnd: () -> Void
     let onComplete: () -> Void
 
-    @ObservedObject private var location = LocationService.shared
-
-    @State private var camera: MapCameraPosition =
-        .userLocation(followsHeading: true, fallback: .automatic)
-    /// False once the driver pans the map themselves, so the camera
-    /// stops yanking itself back while they are looking ahead down the
-    /// route. Re-armed by the recentre button.
-    @State private var isFollowing = true
-
-    /// The single camera cadence. 2 Hz is smooth to the eye without
-    /// asking Apple Maps to re-animate the camera more often than it
-    /// can comfortably render; updateCamera animates over the same
-    /// 0.5s so consecutive moves join seamlessly.
-    private let cameraTick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
-
     var body: some View {
         ZStack(alignment: .top) {
-            map
-                .ignoresSafeArea()
+            // The map, its camera and the follow loop live in their own
+            // view (NavMapCanvas, below). THAT is the lag fix: the
+            // camera animating and the map redrawing every second no
+            // longer drag the maneuver banner and bottom bar through a
+            // re-layout too, and - because NavMapCanvas is Equatable -
+            // the map only rebuilds when the route line or the zoom band
+            // actually change, not every time the ETA text ticks.
+            NavMapCanvas(
+                stopCoordinate: stopCoordinate,
+                routePolyline: nav.route?.polyline,
+                zoomDistance: Self.zoomDistance(for: nav.distanceToManeuver)
+            )
+            .equatable()
+            .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 maneuverBanner
@@ -61,193 +58,26 @@ struct DriverNavigationScreen: View {
         // The screen a driver stares at while moving should not also be
         // the screen that dims and locks itself.
         .persistentSystemOverlays(.hidden)
-        .onAppear {
-            UIApplication.shared.isIdleTimerDisabled = true
-            // Per-tick GPS while this screen is up - with the shift
-            // tracker's 20m filter the camera lurched forward in 20m
-            // jumps (and sat on the zoomed-out fallback until the first
-            // qualifying fix), which read as "not following at all".
-            LocationService.shared.setNavigationMode(true)
-            updateCamera()
-        }
-        .onDisappear {
-            UIApplication.shared.isIdleTimerDisabled = false
-            LocationService.shared.setNavigationMode(false)
-        }
-        // ONE camera driver, not four. Previously every GPS fix, every
-        // compass reading, every zoom-band change AND a 1s timer each
-        // fired its own 0.45s animation; at kCLDistanceFilterNone the
-        // location/heading streams fire many times a second, so those
-        // animations stacked and never settled - the visible stutter.
-        //
-        // Now a single steady tick drives the camera, and the animation
-        // duration equals the tick interval so each move interpolates
-        // exactly into the next: continuous glide, nothing overlapping.
-        // Position, heading (map rotates as the phone turns) and the
-        // zoom band are all read fresh inside updateCamera on each tick,
-        // so no separate onChange triggers are needed.
-        .onReceive(cameraTick) { _ in updateCamera() }
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
-    // MARK: - Map
-
-    private var map: some View {
-        Map(position: $camera) {
-            UserAnnotation()
-
-            if let stopCoordinate {
-                Annotation("", coordinate: stopCoordinate) {
-                    Image(systemName: "mappin.circle.fill")
-                        .font(.title)
-                        .foregroundColor(Color("WRThemeGold"))
-                        .background(Circle().fill(.white).padding(3))
-                        .shadow(color: .black.opacity(0.35), radius: 4)
-                }
-            }
-
-            if let polyline = nav.route?.polyline {
-                // Thicker than the inline card's 6pt. On a full screen at
-                // arm's length a 6pt line reads as a scratch.
-                MapPolyline(polyline)
-                    .stroke(Color("WRThemeGold"),
-                            style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
-            }
-        }
-        .mapControlVisibility(.hidden)
-        // Break follow-mode ONLY on a real finger gesture. The previous
-        // approach watched the camera binding's positionedByUser flag,
-        // but Map also writes back into the binding during programmatic
-        // animated moves and can mark those as user-positioned - which
-        // silently killed follow-mode on the very first camera set and
-        // left the map parked on the zoomed-out whole-route framing.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 15).onChanged { _ in isFollowing = false }
-        )
-        .simultaneousGesture(
-            MagnificationGesture().onChanged { _ in isFollowing = false }
-        )
-        .overlay(alignment: .bottomTrailing) { recentreButton }
-        .overlay(alignment: .topTrailing) { compassBadge }
-    }
-
-    /// Google-style compass: the map is heading-up, so this shows where
-    /// north went. The needle counter-rotates by the camera heading -
-    /// red half pointing at true north on screen. Display-only.
-    private var compassBadge: some View {
-        ZStack {
-            Circle().fill(.black.opacity(0.55))
-            Image(systemName: "location.north.fill")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.red)
-                .rotationEffect(.degrees(-(location.currentHeading ?? 0)))
-            Text("N")
-                .font(.system(size: 7, weight: .heavy))
-                .foregroundColor(.white)
-                .offset(y: -14)
-                .rotationEffect(.degrees(-(location.currentHeading ?? 0)))
-        }
-        .frame(width: 40, height: 40)
-        .padding(.trailing, 14)
-        // Below the maneuver banner, which owns the top of the screen.
-        .padding(.top, 130)
-        .allowsHitTesting(false)
-    }
-
-    /// Always on screen, like Google's locate-me chip - a driver who
-    /// panned away mid-drive shouldn't have to know a hidden control
-    /// exists to get back. Gold and loud when the camera is off the
-    /// truck; quiet when already following (tap is then a harmless
-    /// re-aim).
-    private var recentreButton: some View {
-        Button {
-            isFollowing = true
-            updateCamera()
-        } label: {
-            Image(systemName: isFollowing ? "location.fill" : "location.fill.viewfinder")
-                .font(.title3.bold())
-                .foregroundColor(isFollowing ? Color("WRThemeGold") : .black)
-                .padding(isFollowing ? 11 : 14)
-                .background(Circle().fill(isFollowing ? Color.black.opacity(0.55) : Color("WRThemeGold")))
-                .shadow(color: .black.opacity(0.4), radius: 5)
-        }
-        .padding(.trailing, 18)
-        .padding(.bottom, 210)
-    }
-
-    // MARK: - Driving camera
+    // MARK: - Adaptive zoom bands
     //
-    // A navigation camera is not a map camera. Three things separate the
-    // two, and all three are what "like Waze" actually means:
-    //
-    //  HEADING-UP. The map rotates so the direction of travel is always
-    //  up the screen. North-up forces the driver to do the rotation in
-    //  their head at the exact moment they are deciding which way to
-    //  turn.
-    //
-    //  PITCH. A flat overhead view wastes most of the screen on roads
-    //  behind and beside you. Tilting to 60 degrees puts the road ahead
-    //  across the whole display, which is the only part that matters.
-    //
-    //  ADAPTIVE ZOOM. Far from a turn you want context; approaching one
-    //  you want to see which of two closely spaced streets is yours.
-    //  A fixed zoom cannot do both, so the camera tightens as the
-    //  maneuver approaches.
-
-    private var cameraDistance: CLLocationDistance {
-        guard let toManeuver = nav.distanceToManeuver else { return 700 }
+    // Computed here, and passed to the map as a single already-bucketed
+    // distance, so the map's Equatable check only trips four times a
+    // turn (the band transitions) instead of on every metre the raw
+    // distance-to-maneuver changes. Far from a turn you want context;
+    // approaching one you want to see which of two closely spaced
+    // streets is yours - a fixed zoom can't do both.
+    static func zoomDistance(for toManeuver: CLLocationDistance?) -> CLLocationDistance {
+        guard let toManeuver else { return 700 }
         switch toManeuver {
         case ..<80:   return 190   // committing to the turn
         case ..<200:  return 300
         case ..<600:  return 480
         default:      return 700   // cruising between turns
         }
-    }
-
-    private func updateCamera() {
-        guard isFollowing else { return }
-        guard let coordinate = location.currentLocation else {
-            // No fix yet (cold GPS, simulator without a location) - sit
-            // over the destination at street level rather than leaving
-            // the .automatic fallback framing the entire route.
-            if let stopCoordinate {
-                camera = .camera(MapCamera(centerCoordinate: stopCoordinate,
-                                           distance: 700, heading: 0, pitch: 0))
-            }
-            return
-        }
-        let heading = location.currentHeading ?? 0
-
-        // Sit the driver low in the frame rather than dead centre, so
-        // the screen is mostly road AHEAD. Half the view is useless if
-        // it is pointed at where they have already been.
-        let lookAhead = pushed(coordinate, metres: cameraDistance * 0.28, bearing: heading)
-
-        // Linear over exactly one tick interval: the camera is always
-        // mid-glide toward the next target when the next tick arrives,
-        // so motion is continuous rather than a series of eased hops
-        // that visibly start and stop.
-        withAnimation(.linear(duration: 0.5)) {
-            camera = .camera(
-                MapCamera(centerCoordinate: lookAhead,
-                          distance: cameraDistance,
-                          heading: heading,
-                          pitch: 60)
-            )
-        }
-    }
-
-    /// Moves a coordinate `metres` along `bearing`. Flat-earth maths is
-    /// fine at these distances - a few hundred metres of camera offset,
-    /// not a route calculation.
-    private func pushed(_ from: CLLocationCoordinate2D,
-                        metres: CLLocationDistance,
-                        bearing: CLLocationDirection) -> CLLocationCoordinate2D {
-        let radians = bearing * .pi / 180
-        let latitudeDelta = (metres * cos(radians)) / 111_320
-        let longitudeDelta = (metres * sin(radians))
-            / (111_320 * cos(from.latitude * .pi / 180))
-        return CLLocationCoordinate2D(latitude: from.latitude + latitudeDelta,
-                                      longitude: from.longitude + longitudeDelta)
     }
 
     // MARK: - Maneuver banner
@@ -387,5 +217,173 @@ struct DriverNavigationScreen: View {
         if text.contains("exit") || text.contains("ramp") { return "arrow.up.right" }
         if text.contains("arrive") || text.contains("destination") { return "mappin.circle.fill" }
         return "arrow.up"
+    }
+}
+
+// MARK: - Isolated map surface
+//
+// Everything that redraws while driving - the MapKit view, the follow
+// camera, the 1 Hz camera loop, the compass and the recentre control -
+// lives here, apart from the maneuver banner and bottom bar. Two things
+// make navigation smooth:
+//
+//  1. It's Equatable, so when the PARENT re-renders (ETA/instruction
+//     ticking every second) this whole map subtree is skipped unless
+//     the route line, the destination pin or the zoom band changed.
+//
+//  2. It owns the camera state, so the camera animating no longer
+//     re-lays-out the banner and bars - and their text ticking no
+//     longer re-declares the map.
+//
+// A navigation camera is not a map camera: it's HEADING-UP (rotates so
+// travel is up-screen) and PITCHED (tilted 60 so the screen is mostly
+// road ahead) - which is what "like Waze" actually means.
+private struct NavMapCanvas: View, Equatable {
+
+    let stopCoordinate: CLLocationCoordinate2D?
+    let routePolyline: MKPolyline?
+    let zoomDistance: CLLocationDistance
+
+    // Skip re-rendering unless something the MAP actually draws changed.
+    // Deliberately does NOT look at location/heading - those drive the
+    // camera through @ObservedObject inside, not the parent's diffing.
+    static func == (a: NavMapCanvas, b: NavMapCanvas) -> Bool {
+        a.zoomDistance == b.zoomDistance
+            && a.routePolyline === b.routePolyline
+            && a.stopCoordinate?.latitude == b.stopCoordinate?.latitude
+            && a.stopCoordinate?.longitude == b.stopCoordinate?.longitude
+    }
+
+    @ObservedObject private var location = LocationService.shared
+
+    @State private var camera: MapCameraPosition =
+        .userLocation(followsHeading: true, fallback: .automatic)
+    /// False once the driver pans the map themselves, so the camera
+    /// stops yanking itself back while they look ahead down the route.
+    /// Re-armed by the recentre button.
+    @State private var isFollowing = true
+
+    /// 1 Hz - matched to the GPS fix rate. Re-animating faster than new
+    /// positions arrive just re-tweens to the same spot and burns
+    /// frames, which is a large part of what read as "laggy."
+    private let cameraTick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Map(position: $camera) {
+            UserAnnotation()
+
+            if let stopCoordinate {
+                Annotation("", coordinate: stopCoordinate) {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.title)
+                        .foregroundColor(Color("WRThemeGold"))
+                        .background(Circle().fill(.white).padding(3))
+                        .shadow(color: .black.opacity(0.35), radius: 4)
+                }
+            }
+
+            if let routePolyline {
+                MapPolyline(routePolyline)
+                    .stroke(Color("WRThemeGold"),
+                            style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .mapControlVisibility(.hidden)
+        // Break follow-mode only on a real finger gesture.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 15).onChanged { _ in isFollowing = false }
+        )
+        .simultaneousGesture(
+            MagnificationGesture().onChanged { _ in isFollowing = false }
+        )
+        .overlay(alignment: .bottomTrailing) { recentreButton }
+        .overlay(alignment: .topTrailing) { compassBadge }
+        .onAppear {
+            LocationService.shared.setNavigationMode(true)
+            updateCamera()
+        }
+        .onDisappear { LocationService.shared.setNavigationMode(false) }
+        .onReceive(cameraTick) { _ in updateCamera() }
+    }
+
+    /// Google-style compass: the map is heading-up, so this shows where
+    /// north went. Display-only.
+    private var compassBadge: some View {
+        ZStack {
+            Circle().fill(.black.opacity(0.55))
+            Image(systemName: "location.north.fill")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.red)
+                .rotationEffect(.degrees(-(location.currentHeading ?? 0)))
+            Text("N")
+                .font(.system(size: 7, weight: .heavy))
+                .foregroundColor(.white)
+                .offset(y: -14)
+                .rotationEffect(.degrees(-(location.currentHeading ?? 0)))
+        }
+        .frame(width: 40, height: 40)
+        .padding(.trailing, 14)
+        .padding(.top, 130)
+        .allowsHitTesting(false)
+    }
+
+    /// Always on screen, like Google's locate-me chip.
+    private var recentreButton: some View {
+        Button {
+            isFollowing = true
+            updateCamera()
+        } label: {
+            Image(systemName: isFollowing ? "location.fill" : "location.fill.viewfinder")
+                .font(.title3.bold())
+                .foregroundColor(isFollowing ? Color("WRThemeGold") : .black)
+                .padding(isFollowing ? 11 : 14)
+                .background(Circle().fill(isFollowing ? Color.black.opacity(0.55) : Color("WRThemeGold")))
+                .shadow(color: .black.opacity(0.4), radius: 5)
+        }
+        .padding(.trailing, 18)
+        .padding(.bottom, 210)
+    }
+
+    private func updateCamera() {
+        guard isFollowing else { return }
+        guard let coordinate = location.currentLocation else {
+            // No fix yet (cold GPS, simulator without a location) - sit
+            // over the destination rather than framing the whole route.
+            if let stopCoordinate {
+                camera = .camera(MapCamera(centerCoordinate: stopCoordinate,
+                                           distance: 700, heading: 0, pitch: 0))
+            }
+            return
+        }
+        let heading = location.currentHeading ?? 0
+
+        // Sit the driver low in the frame so the screen is mostly road
+        // AHEAD, not where they've already been.
+        let lookAhead = pushed(coordinate, metres: zoomDistance * 0.28, bearing: heading)
+
+        // Linear over one tick interval so the camera is always
+        // mid-glide toward the next target when the next tick arrives -
+        // continuous motion, not eased hops that start and stop.
+        withAnimation(.linear(duration: 1)) {
+            camera = .camera(
+                MapCamera(centerCoordinate: lookAhead,
+                          distance: zoomDistance,
+                          heading: heading,
+                          pitch: 60)
+            )
+        }
+    }
+
+    /// Moves a coordinate `metres` along `bearing`. Flat-earth maths is
+    /// fine at a few hundred metres of camera offset.
+    private func pushed(_ from: CLLocationCoordinate2D,
+                        metres: CLLocationDistance,
+                        bearing: CLLocationDirection) -> CLLocationCoordinate2D {
+        let radians = bearing * .pi / 180
+        let latitudeDelta = (metres * cos(radians)) / 111_320
+        let longitudeDelta = (metres * sin(radians))
+            / (111_320 * cos(from.latitude * .pi / 180))
+        return CLLocationCoordinate2D(latitude: from.latitude + latitudeDelta,
+                                      longitude: from.longitude + longitudeDelta)
     }
 }
