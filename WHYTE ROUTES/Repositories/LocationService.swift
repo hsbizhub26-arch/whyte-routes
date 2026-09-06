@@ -220,7 +220,18 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // the phone was facing in the cupholder."
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         guard navigationModeActive, newHeading.headingAccuracy >= 0, lastSpeed < 2 else { return }
-        currentHeading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        // The magnetometer streams dozens of updates a second. Publishing
+        // every one re-runs the whole navigation view's body that often
+        // for sub-degree jitter nobody can see - a real frame-rate cost.
+        // Only publish once the heading has actually moved a couple of
+        // degrees, which is smooth to the eye and a fraction of the work.
+        if let current = currentHeading {
+            var delta = abs(heading - current).truncatingRemainder(dividingBy: 360)
+            if delta > 180 { delta = 360 - delta }
+            guard delta >= 2 else { return }
+        }
+        currentHeading = heading
     }
 
     // MARK: - Detect Arrival (geofence)

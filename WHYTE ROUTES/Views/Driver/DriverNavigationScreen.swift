@@ -39,6 +39,12 @@ struct DriverNavigationScreen: View {
     /// route. Re-armed by the recentre button.
     @State private var isFollowing = true
 
+    /// The single camera cadence. 2 Hz is smooth to the eye without
+    /// asking Apple Maps to re-animate the camera more often than it
+    /// can comfortably render; updateCamera animates over the same
+    /// 0.5s so consecutive moves join seamlessly.
+    private let cameraTick = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
     var body: some View {
         ZStack(alignment: .top) {
             map
@@ -68,18 +74,19 @@ struct DriverNavigationScreen: View {
             UIApplication.shared.isIdleTimerDisabled = false
             LocationService.shared.setNavigationMode(false)
         }
-        // Re-aim on every position fix, and again whenever the distance
-        // to the next turn crosses into a tighter zoom band.
-        .onChange(of: location.currentLocation?.latitude) { _, _ in updateCamera() }
-        .onChange(of: location.currentHeading) { _, _ in updateCamera() }
-        .onChange(of: nav.distanceToManeuver) { _, _ in updateCamera() }
-        // Heartbeat: re-aim once a second regardless of which state
-        // change did or didn't fire. This is what actually guarantees
-        // "the camera follows the truck" - every event-driven trigger
-        // above is an optimization on top of it.
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-            updateCamera()
-        }
+        // ONE camera driver, not four. Previously every GPS fix, every
+        // compass reading, every zoom-band change AND a 1s timer each
+        // fired its own 0.45s animation; at kCLDistanceFilterNone the
+        // location/heading streams fire many times a second, so those
+        // animations stacked and never settled - the visible stutter.
+        //
+        // Now a single steady tick drives the camera, and the animation
+        // duration equals the tick interval so each move interpolates
+        // exactly into the next: continuous glide, nothing overlapping.
+        // Position, heading (map rotates as the phone turns) and the
+        // zoom band are all read fresh inside updateCamera on each tick,
+        // so no separate onChange triggers are needed.
+        .onReceive(cameraTick) { _ in updateCamera() }
     }
 
     // MARK: - Map
@@ -215,7 +222,11 @@ struct DriverNavigationScreen: View {
         // it is pointed at where they have already been.
         let lookAhead = pushed(coordinate, metres: cameraDistance * 0.28, bearing: heading)
 
-        withAnimation(.easeInOut(duration: 0.45)) {
+        // Linear over exactly one tick interval: the camera is always
+        // mid-glide toward the next target when the next tick arrives,
+        // so motion is continuous rather than a series of eased hops
+        // that visibly start and stop.
+        withAnimation(.linear(duration: 0.5)) {
             camera = .camera(
                 MapCamera(centerCoordinate: lookAhead,
                           distance: cameraDistance,
