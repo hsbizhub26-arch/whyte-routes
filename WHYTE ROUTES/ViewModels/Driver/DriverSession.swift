@@ -122,10 +122,20 @@ final class DriverSession: ObservableObject {
     }
 
     // MARK: Load assigned route
+    //
+    // Keyed on the Firebase Auth uid, NOT driver?.id. A route and its
+    // stops are assigned with the driver's uid (assignDriver), the
+    // stops query filters on the uid, and the security rules compare
+    // against the uid. driver?.id is that same uid in the normal case,
+    // but it is loaded asynchronously and can be nil or briefly stale
+    // right after sign-in - and when it was, this returned early and
+    // "My Route" showed "No route assigned" for a driver who had one.
+    // Reading the uid straight from Auth makes every leg of the route/
+    // stops/rules chain use the one identical value, for every account.
     func loadAssignedRoute() {
-        guard let id = driver?.id else { return }
+        guard let uid = Auth.auth().currentUser?.uid ?? driver?.id else { return }
 
-        routeRepo.fetchRouteForDriver(driverId: id) { route in
+        routeRepo.fetchRouteForDriver(driverId: uid) { route in
             Task { @MainActor in
                 self.assignedRoute = route
                 if let route = route {
@@ -137,8 +147,8 @@ final class DriverSession: ObservableObject {
 
     // MARK: Load a specific route by id (used to restore an active route on relaunch)
     func loadAssignedRoute(routeId: String) async {
-        guard let id = driver?.id else { return }
-        routeRepo.fetchRouteForDriver(driverId: id) { route in
+        guard let uid = Auth.auth().currentUser?.uid ?? driver?.id else { return }
+        routeRepo.fetchRouteForDriver(driverId: uid) { route in
             Task { @MainActor in
                 self.assignedRoute = route
                 if let route = route {
