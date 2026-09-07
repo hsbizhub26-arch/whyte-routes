@@ -61,6 +61,10 @@ final class TrackingBroadcastService {
     // that customer on a pin-less map for far longer than that. The
     // moment someone becomes next, they should see the truck.
     private var forceNextPublish = false
+    /// Where the truck was when it last genuinely moved, and when.
+    /// Drives the break detection below - see breakGracePeriod.
+    private var lastMovementCoordinate: CLLocationCoordinate2D?
+    private var lastMovedAt: Date?
     private var lastEtaComputedAt: Date?
     private var cachedEtaMinutes: Int?
 
@@ -83,6 +87,15 @@ final class TrackingBroadcastService {
     // the stop is presumed abandoned rather than genuinely en route,
     // and its customer stops receiving a position.
     private static let maxEnRouteDuration: TimeInterval = 90 * 60
+    // A driver stopping for fuel, a washroom or a coffee is normal and
+    // none of the customer's business - but a live pin parked outside a
+    // gas station reads as slacking, and it is the DRIVER who wears
+    // that. Past this much time without meaningful movement mid-drive,
+    // the position is withheld.
+    private static let breakGracePeriod: TimeInterval = 4 * 60
+    // Far enough that GPS jitter at a standstill never counts as
+    // movement, short enough that genuinely pulling away does.
+    private static let movementThreshold: CLLocationDistance = 40
 
     // MARK: - Lifecycle (tied to the shift, like GPS tracking itself)
 
@@ -177,6 +190,30 @@ final class TrackingBroadcastService {
         refreshEtaIfStale(to: currentDestination, from: coordinate)
 
         let here = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+
+        // ── Break detection ───────────────────────────────────────
+        // Gas, washroom, coffee, waiting on a locked gate: all normal,
+        // none of it the customer's business. A stationary pin outside
+        // a Tim Hortons invites "thought you were on the way?", and the
+        // driver is the one who has to answer for it. So once the truck
+        // has not meaningfully moved for breakGracePeriod, coordinates
+        // are withheld and the customer sees exactly what they saw
+        // before the truck set off: "On the way to you", with an ETA.
+        // No pin frozen in a parking lot. Movement restores it on its
+        // own - there is nothing for a driver to remember to switch
+        // back on, which matters at 5am in the cold.
+        if let anchor = lastMovementCoordinate {
+            let moved = here.distance(from: CLLocation(latitude: anchor.latitude,
+                                                       longitude: anchor.longitude))
+            if moved >= Self.movementThreshold {
+                lastMovementCoordinate = coordinate
+                lastMovedAt = Date()
+            }
+        } else {
+            lastMovementCoordinate = coordinate
+            lastMovedAt = Date()
+        }
+        let isOnABreak = Date().timeIntervalSince(lastMovedAt ?? Date()) >= Self.breakGracePeriod
 
         // Distance to the nearest ALREADY-SERVICED property. Position
         // is withheld while the truck is sitting on one of those - the
@@ -276,6 +313,11 @@ final class TrackingBroadcastService {
                 && (enRouteRecently || arrivedAndStillHere)
                 && fixIsTrustworthy
                 && !sittingOnAFinishedProperty
+                // Parked mid-drive: withhold. Deliberately NOT applied
+                // to arrivedAndStillHere - a driver who has arrived is
+                // MEANT to be stationary, and that customer should keep
+                // seeing the truck at their own address.
+                && !(isOnABreak && !arrivedAndStillHere)
 
             // COORDINATES ONLY FOR THE CUSTOMER BEING DRIVEN TO.
             //

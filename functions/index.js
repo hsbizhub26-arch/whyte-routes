@@ -218,11 +218,16 @@ function tierRank(subscriptionTier) {
 // wanted it will be asked for explicitly - until then, no substitution.
 const MESSAGE_TEMPLATES = {
   shiftStart: (c) =>
-    `Hi ${c.customerName}, your WHYTE ROUTES driver has started their route today! Track live progress here: ${c.trackingUrl}`,
+    `Hi ${c.customerName}, your driver has started their route today! Track live progress here: ${c.trackingUrl}`,
   eta10: (c) =>
-    `Hi ${c.customerName}, your WHYTE ROUTES driver is approximately 10 minutes away from ${c.address}!`,
+    `Hi ${c.customerName}, your driver is approximately 10 minutes away from ${c.address}!`,
+  // A RECEIPT, not just an announcement. The date and time are what
+  // make it worth keeping: a customer asking "did they even come on
+  // Tuesday?" has the answer in their own message history, and so does
+  // the company if it is ever disputed. Stamped in the COMPANY's
+  // timezone, not the Cloud Function's - see completedStamp below.
   completed: (c) =>
-    `Hi ${c.customerName}, your service at ${c.address} has been completed! Thank you for choosing WHYTE ROUTES.`,
+    `Hi ${c.customerName}, your service at ${c.address} was completed ${c.completedStamp}. Thank you!`,
 };
 
 function buildMessage(type, ctx) {
@@ -683,6 +688,25 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     customerName,
     address: stopData.address || "your address",
     trackingUrl,
+    // Formatted here rather than in the template so it lands in the
+    // company's own timezone. Reuses the same toLocaleString pattern
+    // as buildMorningSummaryMessage, which exists because formatting
+    // without an explicit timeZone silently used the function's UTC
+    // runtime and mis-stated every overnight visit by several hours.
+    // Date and time built SEPARATELY, and the time in en-US on
+    // purpose. en-CA renders "11:15 p.m." with trailing periods, which
+    // collided with the sentence's own full stop and shipped a receipt
+    // reading "11:15 p.m.. Thank you!". en-US gives a clean "11:15 PM".
+    completedStamp: (() => {
+      const when = new Date();
+      const day = when.toLocaleDateString("en-CA", {
+        weekday: "short", month: "short", day: "numeric", timeZone,
+      });
+      const time = when.toLocaleTimeString("en-US", {
+        hour: "numeric", minute: "2-digit", timeZone,
+      });
+      return `${day} at ${time}`;
+    })(),
   });
 
   // Consent and preference both passed, and it's Quiet Hours, and

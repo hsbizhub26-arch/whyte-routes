@@ -339,7 +339,11 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   }
 
   if (stopsBefore !== null && stopsBefore > 0) {
-    $("statusText").textContent = "Driver has a stop on the way";
+    // Deliberately count-NEUTRAL. This used to read "Driver has a stop
+    // on the way" while the badge underneath said "2 stops before
+    // yours" - the page contradicting itself in two adjacent lines.
+    // The badge owns the number; this line owns the status.
+    $("statusText").textContent = "Driver is on their route";
     showQueue(stopsBefore);
     $("stale").hidden = false;
     $("stale").textContent = "Your driver's live location appears once they're on the way to you.";
