@@ -87,12 +87,25 @@ final class NavigationSession: NSObject, ObservableObject {
         LocationService.shared.setNavigationMode(true)
         observeLocation()
 
-        if LocationService.shared.currentLocation != nil {
-            Task { await calculateRoute(announceFirstStep: true) }
-        } else {
-            // No fix yet (cold GPS). observeLocation() below calculates
-            // the route the moment the first location arrives; until
-            // then the map shows the destination and this note.
+        // Do NOT calculate the route here as well.
+        //
+        // observeLocation() above subscribes to @Published currentLocation,
+        // and @Published delivers its CURRENT value to a new subscriber
+        // immediately. So when a fix already exists - the normal case on
+        // Start Driving and on Resume Navigation - that sink fires at once
+        // and calculates the route itself. Calling calculateRoute here too
+        // raced that delivery: both passed the `route == nil` guard before
+        // either set isRecalculating, so the route was built twice and the
+        // opening maneuver was ANNOUNCED TWICE ("Turn left... Turn left").
+        // That duplicate is what a driver heard on every start and resume.
+        //
+        // Proven by the offline harness in
+        // NavigationSession, which captured two identical utterances at
+        // startup before this change and one after it.
+        if LocationService.shared.currentLocation == nil {
+            // No fix yet (cold GPS). The sink calculates the route the
+            // moment the first location arrives; until then the map shows
+            // the destination and this note.
             errorMessage = "Getting GPS…"
         }
     }
