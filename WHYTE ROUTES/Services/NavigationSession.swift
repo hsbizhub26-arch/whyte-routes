@@ -138,8 +138,8 @@ final class NavigationSession: NSObject, ObservableObject {
         defer { isRecalculating = false }
 
         let request = MKDirections.Request()
-        request.source = MKMapItem(location: CLLocation(latitude: origin.latitude, longitude: origin.longitude), address: nil)
-        request.destination = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: origin.latitude, longitude: origin.longitude)))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: destination.latitude, longitude: destination.longitude)))
         request.transportType = .automobile
 
         // The company's own avoid-tolls/highways preferences already

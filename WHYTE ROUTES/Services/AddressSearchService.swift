@@ -39,7 +39,10 @@ final class AddressSearchService: NSObject, ObservableObject {
         do {
             let response = try await search.start()
             guard let item = response.mapItems.first else { return nil }
-            let coordinate = item.location.coordinate
+            // .placemark, not .location: MKMapItem.location is iOS 26+,
+            // and this resolver is what gives EVERY stop and customer
+            // in the app its real coordinates.
+            let coordinate = item.placemark.coordinate
             let address = [completion.title, completion.subtitle]
                 .filter { !$0.isEmpty }
                 .joined(separator: ", ")

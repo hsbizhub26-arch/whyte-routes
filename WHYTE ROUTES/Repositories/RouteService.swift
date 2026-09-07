@@ -143,26 +143,6 @@ final class RouteService: ObservableObject {
         routeRepo.createRoute(name: name, driverId: driverId, completion: completion)
     }
 
-    // MARK: - Create Tracking Link for a Stop
-    func createTrackingLink(routeId: String,
-                            stop: Stop,
-                            driverId: String,
-                            completion: @escaping (TrackingLink?) -> Void) {
-
-        trackingRepo.create(
-            customerName: stop.customerName ?? "",
-            address: stop.address,
-            driverId: driverId,
-            stopId: stop.id,
-            // Binds the link to the person, not just the stop. Without
-            // it the link can't be told apart from one belonging to a
-            // customer this stop used to point at, and everything
-            // downstream has to assume the worst and supersede it.
-            customerId: stop.customerId,
-            completion: completion
-        )
-    }
-
     // MARK: - Deactivate a Tracking Link
     func deactivateTrackingLink(_ linkId: String) {
         trackingRepo.deactivate(id: linkId)

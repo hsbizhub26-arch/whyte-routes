@@ -270,8 +270,8 @@ final class DriverStopViewModel: ObservableObject {
         }
 
         let request = MKDirections.Request()
-        let sourceItem = MKMapItem(location: CLLocation(latitude: origin.latitude, longitude: origin.longitude), address: nil)
-        let destinationItem = MKMapItem(location: CLLocation(latitude: destination.latitude, longitude: destination.longitude), address: nil)
+        let sourceItem = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: origin.latitude, longitude: origin.longitude)))
+        let destinationItem = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: destination.latitude, longitude: destination.longitude)))
         request.source = sourceItem
         request.destination = destinationItem
         request.transportType = .automobile
@@ -361,17 +361,14 @@ struct DriverStopView: View {
                         // binary. Sending a tracking link is the owner's
                         // "Send Tracking Link" action, which goes through the
                         // function that actually owns the token.
-                        // photoProofButton intentionally hidden for the snow
-                        // beta - a photo step adds real friction to exactly
-                        // what overnight snow ops needs to be fast: gloves,
-                        // darkness, snow falling, dozens of properties to
-                        // clear before people wake up. Not tier-gating this
-                        // away (access.canAccessProofOfWork() still governs
-                        // whether it WOULD show), just not calling it -
-                        // PhotoProofView/PhotoUploader/the Storage rules all
-                        // stay intact for landscaping jobs, where before/after
-                        // photos are genuinely useful and driver pace isn't
-                        // the same constraint.
+                        // photoProofButton is optional and never blocks
+                        // completion - a driver in gloves, in the dark, with
+                        // dozens of driveways left before people wake up can
+                        // ignore it entirely and tap straight through. It is
+                        // tier-gated on canAccessProofOfWork() and only shown
+                        // once actually arrived, so it costs a snow crew
+                        // nothing while giving landscaping jobs (and any
+                        // "you never came" dispute) a timestamped photo.
                         //
                         // One button per stage, Uber-Driver-style - only
                         // shown once actually arrived. It used to render
@@ -381,6 +378,9 @@ struct DriverStopView: View {
                         // silently skipping the en-route/arrived customer
                         // texts along with the steps themselves.
                         if vm.jobStatus == .arrived || vm.jobStatus == .completed {
+                            if access.canAccessProofOfWork() {
+                                photoProofButton
+                            }
                             completeButton
                             completionErrorBanner
                         }
@@ -855,7 +855,12 @@ extension DriverStopView {
     private var completeButton: some View {
         Button {
             Task {
-                proofPhotoURL = nil
+                // Was `proofPhotoURL = nil` - which threw away the proof
+                // the driver had just taken at the exact moment the stop
+                // was completed, so the button flipped from "Photo Added"
+                // back to "Add Photo Proof". The photo and its metadata
+                // are already in Storage/Firestore by then; this state is
+                // only the button's label.
                 await vm.markCompleted()
             }
         } label: {

@@ -214,7 +214,12 @@ struct DriverNavigationScreen: View {
                 .fill(.black.opacity(0.82))
         )
         .padding(.horizontal, 10)
-        .padding(.bottom, 8)
+        // Clearance ABOVE the bottom safe-area inset the VStack is
+        // already laid out inside. 8pt put the card hard against the
+        // home indicator - and on a device whose bottom inset is 0 it
+        // sat almost on the physical edge, which is what read as the
+        // card being cut off.
+        .padding(.bottom, 24)
     }
 
     // MARK: - Formatting

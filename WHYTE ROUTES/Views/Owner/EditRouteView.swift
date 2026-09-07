@@ -47,6 +47,12 @@ struct EditRouteView: View {
     // wrong feature.
     @State private var upgradeReason = "Route Optimization"
     @State private var moveTargetStop: Stop?
+    // Quick-add (ad-hoc stop). `quickResolved` holds the address MapKit
+    // actually resolved, kept separate from the text in the box so the
+    // two can be compared before anything is written.
+    @State private var quickAddress = ""
+    @State private var quickResolved: ResolvedAddress?
+    @State private var photoProofStop: Stop?
     @State private var otherRoutes: [Route] = []
 
     private let routeRepo = RouteRepository()
@@ -59,6 +65,40 @@ struct EditRouteView: View {
     /// notice that it changed. Falls back to the cached name and
     /// address for a one-off stop with no Customer record, the same
     /// way TrackingLink.belongsTo(_:) does.
+    struct ResolvedAddress {
+        let address: String
+        let latitude: Double
+        let longitude: Double
+    }
+
+    /// Inert until the text in the box is EXACTLY the address MapKit
+    /// resolved. If the dispatcher keeps typing after tapping a
+    /// suggestion, the coordinates on hand belong to a different
+    /// address than the one on screen - which is how a stop ends up
+    /// pinned at somebody else's house.
+    private var quickAddIsReady: Bool {
+        guard let resolved = quickResolved else { return false }
+        return !quickAddress.trimmingCharacters(in: .whitespaces).isEmpty
+            && resolved.address == quickAddress
+    }
+
+    private func addQuickStop() {
+        guard quickAddIsReady, let resolved = quickResolved else { return }
+        guard access.canAddStop(currentCount: stops.count) else {
+            upgradeReason = "More Stops Per Route"
+            showUpgradePrompt = true
+            return
+        }
+        stops.append(
+            Stop(address: resolved.address,
+                 latitude: resolved.latitude,
+                 longitude: resolved.longitude,
+                 order: stops.count)
+        )
+        quickAddress = ""
+        quickResolved = nil
+    }
+
     private func customerIdentity(of stop: Stop) -> String {
         if let customerId = stop.customerId { return "cid:\(customerId)" }
         return "adhoc:\(stop.customerName ?? "")|\(stop.address)"
@@ -123,6 +163,47 @@ struct EditRouteView: View {
                         }
 
                         Section {
+                            // Ad-hoc stop: type an address, tap a suggestion,
+                            // tap Add. No Customer record required - Stop.customerId
+                            // has always been optional, and saveRouteEdits already
+                            // persists a stop that has none. This is the mid-storm
+                            // "plow this one too" call: a driveway the dispatcher
+                            // may never service again should not force a customer
+                            // profile to be created first.
+                            VStack(alignment: .leading, spacing: 6) {
+                                AddressAutocompleteField(
+                                    address: $quickAddress,
+                                    placeholder: "Add a stop by address"
+                                ) { address, lat, lng in
+                                    // Null Island is not a driveway. A 0,0 fix
+                                    // means the resolve failed, and writing it
+                                    // would send a driver into the Atlantic.
+                                    guard !(lat == 0 && lng == 0) else { return }
+                                    quickAddress = address
+                                    quickResolved = ResolvedAddress(
+                                        address: address, latitude: lat, longitude: lng
+                                    )
+                                }
+
+                                Button {
+                                    addQuickStop()
+                                } label: {
+                                    Label("Add This Address", systemImage: "plus.circle.fill")
+                                        .font(.footnote.bold())
+                                        .foregroundColor(quickAddIsReady ? .yellow : .secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .contentShape(Rectangle())
+                                .disabled(!quickAddIsReady)
+
+                                if !quickAddress.isEmpty && !quickAddIsReady {
+                                    Text("Pick the address from the suggestions so the stop gets real coordinates.")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+
                             ForEach(stops) { stop in
                                 stopRow(stop)
                             }
@@ -222,6 +303,25 @@ struct EditRouteView: View {
             }
             .sheet(item: $moveTargetStop) { stop in
                 moveStopSheet(stop)
+            }
+            .sheet(item: $photoProofStop) { stop in
+                NavigationStack {
+                    if let companyId = CompanySession.shared.currentCompanyId {
+                        ManagerPhotoProofView(
+                            companyId: companyId,
+                            routeId: routeId,
+                            stopId: stop.id
+                        )
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { photoProofStop = nil }
+                            }
+                        }
+                    } else {
+                        Text("No company session.")
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
         }
     }
@@ -357,6 +457,15 @@ struct EditRouteView: View {
                 if originalStopIds.contains(stop.id) {
                     rowActionButton("View Notification Log") {
                         historyStop = stop
+                    }
+
+                    // Proof-of-work photos the driver uploaded for this
+                    // stop. Dispute resolution: "you never came" answered
+                    // with a timestamped photo of the cleared driveway.
+                    if access.canAccessProofOfWork() {
+                        rowActionButton("View Photo Proof") {
+                            photoProofStop = stop
+                        }
                     }
 
                     // For customers who'd rather check on their own than
