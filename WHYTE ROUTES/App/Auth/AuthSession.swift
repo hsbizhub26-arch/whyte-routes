@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import FirebaseAuth
+import FirebaseFirestore
 
 // MARK: - AuthSession
 
@@ -31,6 +32,50 @@ final class AuthSession: ObservableObject {
 
     private init() {}
 
+    /// Watches this account's own permissions document so an offboarded
+    /// person is signed out instead of sitting on a cached route.
+    ///
+    /// Server access dies the instant revokeEmployee commits - rules are
+    /// re-evaluated on every request - but the app reads users/{uid}
+    /// exactly ONCE, at sign-in, with no listener. Without this, a
+    /// revoked driver keeps whatever stops were already downloaded on
+    /// screen until they happen to relaunch, which looks to them like
+    /// they are still on the job.
+    ///
+    /// Self-read is already permitted by firestore.rules, so this needs
+    /// no rules change.
+    private var membershipListener: ListenerRegistration?
+
+    private func startMembershipWatch(uid: String) {
+        membershipListener?.remove()
+        membershipListener = Firestore.firestore()
+            .collection("users").document(uid)
+            .addSnapshotListener { [weak self] snapshot, _ in
+                Task { @MainActor in
+                    guard let self, let snapshot, snapshot.exists else { return }
+                    let data = snapshot.data() ?? [:]
+                    // The KEY being gone is the signal. revokeEmployee
+                    // uses FieldValue.delete() rather than writing null,
+                    // precisely so a fresh invite can re-attach this
+                    // person next season.
+                    let stillAMember = data["companyId"] is String
+                    let wasAMember = CompanySession.shared.currentCompanyId != nil
+                    if wasAMember && !stillAMember {
+                        safePrint("🔒 Membership revoked for \(uid) - signing out")
+                        self.stopMembershipWatch()
+                        CompanySession.shared.clear()
+                        DriverSession.shared.logout()
+                        try? Auth.auth().signOut()
+                    }
+                }
+            }
+    }
+
+    private func stopMembershipWatch() {
+        membershipListener?.remove()
+        membershipListener = nil
+    }
+
     func listenForAuthChanges() {
         // Remove existing listener if present
         if let handle = authListener {
@@ -42,6 +87,8 @@ final class AuthSession: ObservableObject {
             Task { @MainActor in
                 self?.user = user
                 defer { self?.isLoading = false }
+
+                if user == nil { self?.stopMembershipWatch() }
 
                 guard let self = self, let user = user else {
                     self?.role = .none
@@ -136,6 +183,7 @@ final class AuthSession: ObservableObject {
                     // owner/manager role resolved above, so "My Route"
                     // has real data without touching self.role at all.
                     self.alsoDrives = permissions.alsoDrives
+                    self.startMembershipWatch(uid: user.uid)
                     if permissions.alsoDrives,
                        let companyId = permissions.companyId,
                        permissions.companyRole != "driver" {

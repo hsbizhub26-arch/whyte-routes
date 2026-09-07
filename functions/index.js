@@ -133,9 +133,37 @@ exports.syncSubscriptionEntitlement = onCall(async (request) => {
   // verification (the signature only proves Apple issued it at some
   // point) - revocationDate is what actually says whether it's still
   // good today.
-  if (payload.revocationDate) {
-    console.log(`Transaction ${payload.transactionId} was revoked - not granting access.`);
-    return { granted: false, reason: "revoked" };
+  // REVOKED OR EXPIRED -> ACTIVELY DOWNGRADE, don't just decline to grant.
+  //
+  // This previously returned without touching the company document, so a
+  // refund, a cancellation, or a lapsed renewal left subscriptionTier
+  // sitting at whatever it last was - forever. The company kept every
+  // paid feature indefinitely, and kept consuming the platform's own
+  // Twilio balance, because the SMS entitlement reads this same field
+  // (tierRank >= 1). Failing "open" on billing is a permanent revenue
+  // leak, and in a tight regional trade it spreads by word of mouth.
+  const expiresMs = payload.expiresDate ? Number(payload.expiresDate) : null;
+  const hasExpired = expiresMs !== null && expiresMs < Date.now();
+
+  if (payload.revocationDate || hasExpired) {
+    const reason = payload.revocationDate ? "revoked" : "expired";
+    // Resolve the company the same server-side way the grant path does,
+    // so a downgrade can never be pointed at someone else's company.
+    const uidR = request.auth.uid;
+    const userSnapR = await admin.firestore().doc(`users/${uidR}`).get();
+    const userDataR = userSnapR.data();
+
+    if (userDataR && userDataR.companyId && userDataR.companyRole === "owner") {
+      await admin.firestore().doc(`companies/${userDataR.companyId}`).update({
+        subscriptionTier: "starter",
+        subscriptionStatus: reason === "revoked" ? "cancelled" : "expired",
+      });
+      console.log(
+        `⬇️  companies/${userDataR.companyId}.subscriptionTier -> starter (${reason}, ` +
+        `transaction ${payload.transactionId}, uid ${uidR})`
+      );
+    }
+    return { granted: false, reason };
   }
 
   const tier = PRODUCT_TO_TIER[payload.productId];
@@ -159,6 +187,10 @@ exports.syncSubscriptionEntitlement = onCall(async (request) => {
 
   await admin.firestore().doc(`companies/${userData.companyId}`).update({
     subscriptionTier: tier,
+    // Written alongside the tier so status and tier can never disagree -
+    // a company reinstating after a lapse would otherwise keep reading
+    // "expired" while holding a paid tier.
+    subscriptionStatus: "active",
   });
 
   console.log(
@@ -1395,3 +1427,194 @@ exports.sendTrackingLink = onCall(
     return { deliveryStatus, url, linkId, method, failureReason: result.failureReason || null };
   }
 );
+
+// ─────────────────────────────────────────────────────────────────────
+// revokeEmployee - ATOMIC OFFBOARDING
+//
+// An owner CANNOT revoke access from the client, and this is not a
+// missing button - it is structural. firestore.rules:254 freezes
+// companyId on the owner-manages-employee branch, :255 restricts
+// companyRole to manager|driver, :165 blocks reading another user's
+// document and :357 blocks deleting it. The single field that gates
+// every authorization helper is the one field the owner is forbidden
+// to touch. So this runs on the Admin SDK, which bypasses rules - and
+// that is precisely why it needs ZERO changes to the hardened rules
+// file. The cross-tenant branch that closed a full takeover stays
+// exactly as it is.
+//
+// THE TRAP THIS AVOIDS: deleting companies/{c}/drivers/{uid} is
+// permitted for staff and revokes NOTHING - no helper reads that
+// document for authorization. The driver would keep route reads, stop
+// writes, photo uploads and GPS publishing. It looks like removal,
+// does nothing, and orphans the payroll history behind it.
+//
+// ORDER MATTERS. Access is cut LAST, because two things become
+// impossible the instant companyId disappears:
+//   1. The open shift can never be closed by anyone. Rules let only
+//      the driver write their own shifts (:438); staff get read and
+//      delete but never update (:436/:439). Cut access first and
+//      endedAt stays nil forever, corrupting hours already worked.
+//   2. The assigned route strands. assignDriver stamps driverId onto
+//      the route AND every stop, and nothing reverses it - the owner's
+//      own handles go through fetchRouteForDriver(driverId:), so the
+//      route would sit "assigned" to a ghost uid with no UI left to
+//      reassign it. An unserviced route, mid-storm.
+exports.revokeEmployee = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in required.");
+  }
+
+  const targetUid = request.data && request.data.targetUid;
+  if (typeof targetUid !== "string" || targetUid.length === 0) {
+    throw new HttpsError("invalid-argument", "targetUid is required.");
+  }
+
+  const uid = request.auth.uid;
+  if (uid === targetUid) {
+    throw new HttpsError("failed-precondition", "You cannot remove yourself from your own company.");
+  }
+
+  const db = admin.firestore();
+
+  // companyId comes from the CALLER'S OWN document, never from
+  // request.data - the same rule every other callable here follows, so
+  // a uid from another tenant simply is not found below.
+  const callerSnap = await db.doc(`users/${uid}`).get();
+  const caller = callerSnap.data();
+  if (!caller || !caller.companyId) {
+    throw new HttpsError("failed-precondition", "No company associated with this account.");
+  }
+  if (caller.companyRole !== "owner") {
+    throw new HttpsError("permission-denied", "Only the company owner can remove an employee.");
+  }
+  const companyId = caller.companyId;
+
+  const targetSnap = await db.doc(`users/${targetUid}`).get();
+  const target = targetSnap.data();
+  if (!target || target.companyId !== companyId) {
+    throw new HttpsError("not-found", "That person is not in your company.");
+  }
+
+  // ---- ALL READS FIRST (a batch cannot read) ----
+  const openShifts = await db
+    .collection(`companies/${companyId}/drivers/${targetUid}/shifts`)
+    .where("status", "==", "active")
+    .get();
+
+  const assignedRoutes = await db
+    .collection(`companies/${companyId}/routes`)
+    .where("driverId", "==", targetUid)
+    .get();
+  const liveRoutes = assignedRoutes.docs.filter((d) => d.data().status !== "completed");
+  const stopsPerRoute = await Promise.all(liveRoutes.map((r) => r.ref.collection("stops").get()));
+  const liveStopIds = new Set(stopsPerRoute.flatMap((s) => s.docs.map((d) => d.id)));
+
+  // Filtered in memory rather than with a `where in` - that operator
+  // caps at 10 values and a driver can hold far more stops than that.
+  const activeLinks = await db
+    .collection(`companies/${companyId}/trackingLinks`)
+    .where("active", "==", true)
+    .get();
+  const linksToKill = activeLinks.docs.filter((d) => liveStopIds.has(d.data().stopId));
+
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  // ---- PASS 1: release routes and stops, chunked ----
+  // Firestore caps a batch at 500 writes and a driver may hold several
+  // routes of 100+ stops, so this cannot be one commit. It runs first
+  // and separately: a partially released route is recoverable (the
+  // owner simply reassigns it), whereas a partially cut access grant
+  // is not.
+  let released = 0;
+  for (let i = 0; i < liveRoutes.length; i++) {
+    const routeDoc = liveRoutes[i];
+    const stops = stopsPerRoute[i].docs;
+    let batch = db.batch();
+    let ops = 0;
+
+    // Exact inverse of RouteRepository.assignDriver: route + every stop.
+    batch.update(routeDoc.ref, { driverId: "", status: "pending", updatedAt: now });
+    ops++;
+
+    for (const stop of stops) {
+      if (ops >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        ops = 0;
+      }
+      batch.update(stop.ref, { driverId: "" });
+      ops++;
+    }
+    if (ops > 0) await batch.commit();
+    released++;
+  }
+
+  // ---- PASS 2: the atomic cut ----
+  // Shift close, link supersede, tombstone and access removal commit
+  // together or not at all. There is no state where access is gone but
+  // the shift is still open.
+  const finalBatch = db.batch();
+
+  // Payroll first. Preserve, never delete.
+  openShifts.docs.forEach((d) => {
+    finalBatch.update(d.ref, { endedAt: now, status: "completed", endedBy: "revoked" });
+  });
+
+  // `superseded` is excluded outright by isLiveTrackingLink; active:false
+  // alone would leave the completedAt grace window open, so a customer
+  // could still watch a revoked driver.
+  linksToKill.forEach((d) => {
+    finalBatch.update(d.ref, { active: false, superseded: true, supersededAt: now });
+  });
+
+  // TOMBSTONE, never delete. Subcollections survive parent deletion, so
+  // deleting this document would leave the logged hours intact and
+  // permanently unreachable - the owner's only path to payroll iterates
+  // this very collection.
+  finalBatch.set(
+    db.doc(`companies/${companyId}/drivers/${targetUid}`),
+    {
+      status: "revoked",
+      revokedAt: now,
+      revokedBy: uid,
+      activeRoute: admin.firestore.FieldValue.delete(),
+      latitude: admin.firestore.FieldValue.delete(),
+      longitude: admin.firestore.FieldValue.delete(),
+      lastUpdated: admin.firestore.FieldValue.delete(),
+    },
+    { merge: true }
+  );
+
+  // THE CUT. This one field is the whole revocation, across Firestore
+  // AND Storage (storage.rules re-reads this same document, so licence
+  // photos and proof-of-work images die in the same write).
+  //
+  // FieldValue.delete(), not null: the late-invite branch tests
+  // `!('companyId' in resource.data)`, so removing the KEY is what lets
+  // a seasonal driver be re-hired on a fresh invite next winter.
+  finalBatch.update(db.doc(`users/${targetUid}`), {
+    companyId: admin.firestore.FieldValue.delete(),
+    companyRole: admin.firestore.FieldValue.delete(),
+    revokedFromCompanyId: companyId,
+    revokedAt: now,
+  });
+
+  await finalBatch.commit();
+
+  console.log(
+    `🔒 revokeEmployee: ${targetUid} removed from ${companyId} by ${uid} ` +
+    `(${released} routes released, ${openShifts.size} shifts closed, ${linksToKill.length} links superseded)`
+  );
+
+  // Deliberately NOT calling admin.auth().revokeRefreshTokens(). Rules
+  // are data-driven and re-evaluated server-side on every request, so
+  // the cut is already instant; revoking tokens would additionally sign
+  // the person out of their own Apple/email account, which still
+  // legitimately exists and is not ours to terminate.
+  return {
+    revoked: true,
+    routesReleased: released,
+    shiftsClosed: openShifts.size,
+    linksSuperseded: linksToKill.length,
+  };
+});

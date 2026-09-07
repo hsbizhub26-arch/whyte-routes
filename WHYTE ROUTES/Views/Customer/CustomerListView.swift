@@ -57,6 +57,9 @@ struct CustomerListView: View {
     @ObservedObject private var access = FeatureAccessManager.shared
     @State private var showAddCustomer = false
     @State private var showUpgradePrompt = false
+    /// Bulk import. The single biggest onboarding blocker is retyping
+    /// an existing book by hand on a phone.
+    @State private var showImport = false
     @State private var editingCustomer: Customer?
     /// Set by the swipe action; drives the confirmation. Deleting a
     /// customer is not undoable, so it does not happen on the swipe
@@ -130,6 +133,13 @@ struct CustomerListView: View {
             }
             .navigationTitle("Customers")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showImport = true
+                    } label: {
+                        Label("Import", systemImage: "square.and.arrow.down")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         // Checked here, not just at save time, so a
@@ -143,6 +153,11 @@ struct CustomerListView: View {
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
+                }
+            }
+            .sheet(isPresented: $showImport) {
+                ImportCustomersView(existing: vm.customers) { imported in
+                    if imported > 0 { vm.load() }
                 }
             }
             .sheet(isPresented: $showAddCustomer) {

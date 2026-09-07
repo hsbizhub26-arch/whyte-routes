@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import FirebaseAuth
+import FirebaseFunctions
 
 @MainActor
 final class ManageEmployeesViewModel: ObservableObject {
@@ -23,7 +24,13 @@ final class ManageEmployeesViewModel: ObservableObject {
             self?.pendingInvites = invites.sorted { $0.createdAt > $1.createdAt }
         }
         driverRepo.listenToDrivers { [weak self] drivers in
-            self?.activeDrivers = drivers.sorted { $0.name < $1.name }
+            // Revoked people are tombstones, not teammates. Filtered out
+            // of Active Team and out of every assignment picker - but
+            // deliberately NOT out of Driver Reports, so an owner can
+            // still pull a former employee's hours for payroll.
+            self?.activeDrivers = drivers
+                .filter { !$0.isRevoked }
+                .sorted { $0.name < $1.name }
         }
     }
 
@@ -33,12 +40,28 @@ final class ManageEmployeesViewModel: ObservableObject {
         driverRepo.updateDriverName(driverId: driver.id, name: trimmed, completion: nil)
     }
 
+    /// Set when an invite is blocked by the plan's driver ceiling, so the
+    /// view can present the paywall instead of an inline error.
+    @Published var hitDriverLimit = false
+
     func sendInvite() {
         guard let companyId = CompanySession.shared.currentCompanyId,
               let companyName = CompanySession.shared.currentCompany?.name,
               let ownerUID = AuthSession.shared.user?.uid
         else {
             errorMessage = "No company loaded yet - try again in a moment."
+            return
+        }
+
+        // The driver ceiling had NO enforcement either - canAddDriver()
+        // was dead code. A free company could invite an entire crew and
+        // dispatch it indefinitely. Pending invites count toward the
+        // limit as well as active drivers, or the ceiling is trivially
+        // walked around by queueing invitations.
+        let access = FeatureAccessManager.shared
+        let crewSize = activeDrivers.count + pendingInvites.count
+        guard access.canAddDriver(currentCount: crewSize) else {
+            hitDriverLimit = true
             return
         }
 
@@ -91,6 +114,38 @@ final class ManageEmployeesViewModel: ObservableObject {
         }
     }
 
+    /// Offboards a teammate through the revokeEmployee Cloud Function.
+    ///
+    /// This CANNOT be done from the client: firestore.rules freezes
+    /// companyId on the owner-manages-employee branch and blocks
+    /// deleting another user's document, so the one field that gates
+    /// access is the one field an owner may not touch. The function
+    /// runs on the Admin SDK and closes the open shift, hands the route
+    /// back to Unassigned and supersedes live customer links before
+    /// cutting access - in that order, because afterwards nobody can
+    /// close that shift.
+    @discardableResult
+    func revoke(_ driver: Driver) async -> Bool {
+        errorMessage = nil
+        successMessage = nil
+        do {
+            let result = try await Functions.functions()
+                .httpsCallable("revokeEmployee")
+                .call(["targetUid": driver.id])
+            let data = result.data as? [String: Any]
+            let routes = data?["routesReleased"] as? Int ?? 0
+            let shifts = data?["shiftsClosed"] as? Int ?? 0
+            var detail = "\(driver.name) no longer has access."
+            if routes > 0 { detail += " \(routes) route\(routes == 1 ? "" : "s") returned to Unassigned." }
+            if shifts > 0 { detail += " Open shift closed and hours kept." }
+            successMessage = detail
+            return true
+        } catch {
+            errorMessage = "Couldn't remove \(driver.name): \(error.localizedDescription)"
+            return false
+        }
+    }
+
     func cancelInvite(_ invite: Invite) {
         repo.cancelInvite(id: invite.id)
     }
@@ -102,6 +157,11 @@ struct ManageEmployeesView: View {
     @State private var renamingDriver: Driver?
     @State private var renameText = ""
     @State private var licenseViewerDriver: Driver?
+    /// Offboarding is irreversible for the current season, so it is
+    /// confirmed with the real consequences named rather than a generic
+    /// "are you sure".
+    @State private var pendingRemoval: Driver?
+    @State private var isRemoving = false
 
     var body: some View {
         NavigationStack {
@@ -119,6 +179,12 @@ struct ManageEmployeesView: View {
             }
             .navigationTitle("Team")
             .onAppear { vm.startListening() }
+            .sheet(isPresented: $vm.hitDriverLimit) {
+                UpgradeRequiredView(
+                    featureName: "More than \(FeatureAccessManager.shared.driverLimit ?? 1) driver",
+                    requiredTier: .premium
+                )
+            }
             .alert("Driver Name", isPresented: Binding(
                 get: { renamingDriver != nil },
                 set: { if !$0 { renamingDriver = nil } }
@@ -136,6 +202,24 @@ struct ManageEmployeesView: View {
             }
             .sheet(item: $licenseViewerDriver) { driver in
                 DriverLicenseViewerSheet(driver: driver)
+            }
+            .confirmationDialog(
+                pendingRemoval.map { "Remove \($0.name)?" } ?? "Remove",
+                isPresented: Binding(
+                    get: { pendingRemoval != nil },
+                    set: { if !$0 { pendingRemoval = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove from company", role: .destructive) {
+                    guard let driver = pendingRemoval else { return }
+                    pendingRemoval = nil
+                    isRemoving = true
+                    Task { await vm.revoke(driver); isRemoving = false }
+                }
+                Button("Cancel", role: .cancel) { pendingRemoval = nil }
+            } message: {
+                Text("They lose access immediately. Their logged hours are kept for payroll, any open shift is closed, and any route assigned to them returns to Unassigned.")
             }
         }
     }
@@ -176,6 +260,15 @@ struct ManageEmployeesView: View {
                             Image(systemName: "person.text.rectangle")
                                 .font(.subheadline)
                                 .foregroundColor(WRTheme.gold)
+                        }
+                        .padding(.leading, 4)
+
+                        Button(role: .destructive) {
+                            pendingRemoval = driver
+                        } label: {
+                            Image(systemName: "person.crop.circle.badge.xmark")
+                                .font(.subheadline)
+                                .foregroundColor(.red)
                         }
                         .padding(.leading, 4)
                     }

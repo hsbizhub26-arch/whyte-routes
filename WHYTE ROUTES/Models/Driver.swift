@@ -30,6 +30,16 @@ struct Driver: Identifiable {
     // StorageReference.getData(), which does enforce storage.rules.
     var licensePhotoPath: String?
 
+    /// "revoked" once an owner offboards this person. The record is
+    /// TOMBSTONED rather than deleted: Firestore subcollections survive
+    /// parent deletion, and the owner's only route to logged hours
+    /// iterates this collection - deleting would leave payroll intact
+    /// and permanently unreachable. Absent on every existing document,
+    /// which decodes to nil and reads as active.
+    var status: String?
+
+    var isRevoked: Bool { status == "revoked" }
+
     // MARK: - Map Coordinate Helper
     var coordinate: CLLocationCoordinate2D? {
         guard let lat = latitude, let lng = longitude else { return nil }
@@ -76,6 +86,7 @@ extension Driver {
         self.activeRoute = dict["activeRoute"] as? String
         self.colorHex = dict["colorHex"] as? String
         self.licensePhotoPath = dict["licensePhotoPath"] as? String
+        self.status = dict["status"] as? String
 
         // Latitude (new or legacy)
         if let lat = dict["latitude"] as? Double {

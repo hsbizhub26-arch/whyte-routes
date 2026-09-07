@@ -109,9 +109,16 @@ final class FeatureAccessManager: ObservableObject {
     // nil at any tier means unlimited.
 
     private static let customerLimits: [SubscriptionTier: Int] = [
-        .starter: 5,
-        .premium: 30
-        // premiumPlus/enterprise intentionally absent - unlimited
+        .starter: 5
+        // premium/premiumPlus/enterprise intentionally absent - UNLIMITED.
+        //
+        // Premium was capped at 30 customers, which made it unsellable to
+        // the exact operator the listing targets: a snow or landscaping
+        // contractor runs 50-150+ driveways, so every real prospect hit
+        // the wall in week one and had to be pushed to Premium Plus. That
+        // made the middle tier a decoy and read as bait-and-switch to
+        // anyone who paid for it. A PAYING fleet gets real commercial
+        // capacity; the ceiling belongs on the free tier only.
     ]
 
     private static let routeLimits: [SubscriptionTier: Int] = [
