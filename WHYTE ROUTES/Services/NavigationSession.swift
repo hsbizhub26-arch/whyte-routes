@@ -34,6 +34,10 @@ final class NavigationSession: NSObject, ObservableObject {
     private var stepIndex = 0
     private var spokenThresholdsForStep: Set<Int> = []
     private var consecutiveOffRouteFixes = 0
+    /// Closest the driver has come to the CURRENT maneuver. A step can
+    /// then be completed by driving PAST the turn, not only by landing
+    /// inside stepCompleteRadius.
+    private var closestToManeuver: CLLocationDistance = .greatestFiniteMagnitude
     private var cancellables = Set<AnyCancellable>()
 
     private let synthesizer = AVSpeechSynthesizer()
@@ -48,7 +52,16 @@ final class NavigationSession: NSObject, ObservableObject {
     // ever spoken bare twice.
     private static let announceThresholds: [CLLocationDistance] = [100_000, 250, 40]
     /// Treated as "this maneuver is done, move to the next one".
-    private static let stepCompleteRadius: CLLocationDistance = 25
+    /// 35 not 25: the maneuver point is the last coordinate of the step
+    /// polyline, and ordinary GPS error in a truck means the measured
+    /// distance often bottoms out around 30m without ever going under 25.
+    private static let stepCompleteRadius: CLLocationDistance = 35
+    /// Having come at least this close counts as having reached the turn,
+    /// so moving away again means it is behind us.
+    private static let passedNearRadius: CLLocationDistance = 80
+    /// Growing this far beyond the closest approach means the turn is
+    /// genuinely behind the driver, not GPS jitter.
+    private static let passedGrowth: CLLocationDistance = 25
     /// How far off the line before we consider the driver to have left the route.
     private static let offRouteDistance: CLLocationDistance = 60
     /// Requires several consecutive bad fixes, so one GPS bounce in a
@@ -133,6 +146,7 @@ final class NavigationSession: NSObject, ObservableObject {
             route = best
             stepIndex = 0
             spokenThresholdsForStep.removeAll()
+            closestToManeuver = .greatestFiniteMagnitude
             consecutiveOffRouteFixes = 0
             remainingDistance = best.distance
             remainingTime = best.expectedTravelTime
@@ -191,8 +205,22 @@ final class NavigationSession: NSObject, ObservableObject {
         let distance = here.distance(from: maneuverLocation)
         distanceToManeuver = distance
 
-        // Reached this maneuver - advance and announce the next one.
-        if distance <= Self.stepCompleteRadius {
+        closestToManeuver = min(closestToManeuver, distance)
+
+        // A step completes EITHER by landing inside the radius, OR by the
+        // driver having got close and then moved away again - i.e. they
+        // drove past the turn.
+        //
+        // Radius-only was the bug behind "voice spoke through the first
+        // turn then never again": if a fix never landed within 25m of the
+        // exact maneuver point - GPS drift, or 28m/s of travel between two
+        // 1Hz fixes - stepIndex never advanced. Every threshold for step 0
+        // stays marked spoken, so no further callout can ever fire, and the
+        // banner freezes on the first instruction for the rest of the route.
+        let landedOnIt = distance <= Self.stepCompleteRadius
+        let drovePastIt = closestToManeuver <= Self.passedNearRadius
+            && distance > closestToManeuver + Self.passedGrowth
+        if landedOnIt || drovePastIt {
             advanceStep()
             return
         }
@@ -206,6 +234,7 @@ final class NavigationSession: NSObject, ObservableObject {
         guard let route else { return }
         stepIndex += 1
         spokenThresholdsForStep.removeAll()
+        closestToManeuver = .greatestFiniteMagnitude
 
         guard stepIndex < route.steps.count else {
             currentInstruction = "Arriving at your stop."

@@ -364,7 +364,12 @@ private struct NavMapCanvas: View, Equatable {
         }
         .frame(width: 40, height: 40)
         .padding(.trailing, 14)
-        .padding(.top, 130)
+        // Clears the maneuver banner even when the instruction wraps to
+        // two lines. At 130 the badge sat UNDER the banner - the needle
+        // and "N" poked out of its bottom-right corner and nothing else
+        // was visible. Banner math: ~59pt safe area + 8pt top padding +
+        // up to ~130pt of banner = ~197pt, so 210 clears it with margin.
+        .padding(.top, 210)
         .allowsHitTesting(false)
     }
 
