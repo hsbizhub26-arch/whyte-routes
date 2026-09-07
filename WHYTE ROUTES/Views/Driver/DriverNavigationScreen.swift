@@ -30,6 +30,19 @@ struct DriverNavigationScreen: View {
     let onEnd: () -> Void
     let onComplete: () -> Void
 
+    /// Measured height of the floating bottom card.
+    @State private var bottomCardHeight: CGFloat = 0
+
+    /// The strip of map the bottom card sits on top of. Handed to the
+    /// map as a camera inset so MapKit frames the truck inside what the
+    /// driver can actually SEE, instead of the middle of the glass -
+    /// which put the puck and the road immediately ahead of it directly
+    /// behind this card. Zero unless actually navigating, so the
+    /// viewport returns to full frame the moment the drive ends.
+    private var navigationBottomInset: CGFloat {
+        nav.isNavigating ? bottomCardHeight : 0
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             // The map, its camera and the follow loop live in their own
@@ -42,7 +55,8 @@ struct DriverNavigationScreen: View {
             NavMapCanvas(
                 stopCoordinate: stopCoordinate,
                 routePolyline: nav.route?.polyline,
-                zoomDistance: Self.zoomDistance(for: nav.distanceToManeuver)
+                zoomDistance: Self.zoomDistance(for: nav.distanceToManeuver),
+                bottomInset: navigationBottomInset
             )
             .equatable()
             .ignoresSafeArea()
@@ -53,6 +67,17 @@ struct DriverNavigationScreen: View {
                     .padding(.top, 8)
                 Spacer(minLength: 0)
                 bottomBar
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: BottomCardHeightKey.self,
+                                value: proxy.size.height
+                            )
+                        }
+                    )
+            }
+            .onPreferenceChange(BottomCardHeightKey.self) { height in
+                bottomCardHeight = height
             }
         }
         // The screen a driver stares at while moving should not also be
@@ -270,12 +295,19 @@ private struct NavMapCanvas: View, Equatable {
     let stopCoordinate: CLLocationCoordinate2D?
     let routePolyline: MKPolyline?
     let zoomDistance: CLLocationDistance
+    /// Height of the bottom card, as a camera inset.
+    let bottomInset: CGFloat
 
     // Skip re-rendering unless something the MAP actually draws changed.
     // Deliberately does NOT look at location/heading - those drive the
     // camera through @ObservedObject inside, not the parent's diffing.
     static func == (a: NavMapCanvas, b: NavMapCanvas) -> Bool {
-        a.zoomDistance == b.zoomDistance
+        // bottomInset MUST be compared. It arrives as 0 and is replaced
+        // by the measured height on the first layout pass; without it
+        // here, Equatable would swallow that update and the camera would
+        // stay centred on the glass for the whole drive.
+        a.bottomInset == b.bottomInset
+            && a.zoomDistance == b.zoomDistance
             && a.routePolyline === b.routePolyline
             && a.stopCoordinate?.latitude == b.stopCoordinate?.latitude
             && a.stopCoordinate?.longitude == b.stopCoordinate?.longitude
@@ -334,6 +366,20 @@ private struct NavMapCanvas: View, Equatable {
             }
         }
         .mapControlVisibility(.hidden)
+        // Camera inset for the bottom card. MapKit places an explicit
+        // MapCamera centreCoordinate at the centre of the INSET
+        // viewport, so this lifts the whole frame off the card and puts
+        // the truck in the lower third of the visible map with the road
+        // ahead in view. Measured in the simulator: with this inset the
+        // existing 0.28 look-ahead lands the puck at 633pt inside a
+        // 0-751pt visible region, 118pt clear of the card - and it is
+        // scale-invariant, identical at every zoom band.
+        //
+        // The .ignoresSafeArea() below is deliberate and load-bearing:
+        // it re-zeroes the safe area for the gestures and overlays that
+        // follow WITHOUT undoing the camera shift.
+        .safeAreaPadding(.bottom, bottomInset)
+        .ignoresSafeArea()
         // Break follow-mode only on a real finger gesture.
         .simultaneousGesture(
             DragGesture(minimumDistance: Self.deliberatePanDistance).onChanged { _ in userTookOverMap() }
@@ -436,5 +482,15 @@ private struct NavMapCanvas: View, Equatable {
             / (111_320 * cos(from.latitude * .pi / 180))
         return CLLocationCoordinate2D(latitude: from.latitude + latitudeDelta,
                                       longitude: from.longitude + longitudeDelta)
+    }
+}
+
+/// Reports the real rendered height of the bottom card, so the map
+/// can inset its camera by exactly what the card covers rather than a
+/// number guessed per device.
+private struct BottomCardHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
