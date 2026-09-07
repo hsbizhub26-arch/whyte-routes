@@ -171,6 +171,26 @@ final class NavigationSession: NSObject, ObservableObject {
         route.steps.first(where: { !$0.instructions.isEmpty })?.instructions
     }
 
+    /// The text to SPEAK for the step at `index`.
+    ///
+    /// MapKit routinely returns an EMPTY instruction for the first step of
+    /// a route, and sometimes for later ones. Both announcement paths used
+    /// `guard !instruction.isEmpty else { return }`, so such a step spoke
+    /// NOTHING - while the banner still showed a turn, because the banner
+    /// goes through firstMeaningfulInstruction above and skips the blanks.
+    /// That is "no voice at all" with a perfectly normal-looking screen.
+    /// Fall forward to the next step that actually has words; the maneuver
+    /// being measured is the end of the current step, which is precisely
+    /// where that instruction applies.
+    private func announceableInstruction(from index: Int) -> String? {
+        guard let route else { return nil }
+        guard index >= 0, index < route.steps.count else { return nil }
+        for i in index..<route.steps.count where !route.steps[i].instructions.isEmpty {
+            return route.steps[i].instructions
+        }
+        return nil
+    }
+
     // MARK: - Progress
 
     private func observeLocation() {
@@ -225,7 +245,8 @@ final class NavigationSession: NSObject, ObservableObject {
             return
         }
 
-        announceIfCrossingThreshold(distance: distance, instruction: step.instructions)
+        announceIfCrossingThreshold(distance: distance,
+                                    instruction: announceableInstruction(from: stepIndex) ?? "")
         updateRemaining(from: here)
         checkOffRoute(from: here)
     }
@@ -265,8 +286,7 @@ final class NavigationSession: NSObject, ObservableObject {
               let maneuverPoint = route.steps[stepIndex].polyline.coordinates.last
         else { return }
 
-        let instruction = route.steps[stepIndex].instructions
-        guard !instruction.isEmpty else { return }
+        guard let instruction = announceableInstruction(from: stepIndex) else { return }
 
         let distance = CLLocation(latitude: here.latitude, longitude: here.longitude)
             .distance(from: CLLocation(latitude: maneuverPoint.latitude,
