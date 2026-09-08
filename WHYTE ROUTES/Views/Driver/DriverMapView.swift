@@ -43,8 +43,12 @@ final class DriverMapViewModel: ObservableObject {
         session.$activeStops
             .map { $0.sorted { $0.order < $1.order } }
             .receive(on: DispatchQueue.main)
-            .assign(to: \.stops, on: self)
-            .store(in: &cancellables)
+            // assign(to: &$stops), NOT assign(to:\.stops, on: self). The
+            // latter captures self strongly and, stored in cancellables,
+            // forms a retain cycle that leaks this view model for the life
+            // of the app. The &$ form is lifetime-managed by the
+            // @Published property and holds no strong reference back.
+            .assign(to: &$stops)
     }
 
     // Observes whatever LocationService is already publishing - actual
