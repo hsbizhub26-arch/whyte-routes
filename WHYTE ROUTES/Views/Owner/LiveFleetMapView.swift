@@ -36,6 +36,14 @@ struct LiveFleetMapView: View {
     // the stat widgets around it share one live driver listener
     // instead of running two independent ones for the same data.
     @ObservedObject var driverVM: DriverViewModel
+
+    /// Height (measured up from the physical bottom) of any bottom sheet
+    /// the caller lays over this map - e.g. OwnerDashboardView's
+    /// "Dashboard" panel when it's open. The map control column is
+    /// lifted above it so the locate/zoom buttons are never hidden
+    /// behind the drawer. 0 when nothing is overlaid.
+    var bottomInset: CGFloat = 0
+
     @ObservedObject private var access = FeatureAccessManager.shared
 
     @State private var cameraPosition: MapCameraPosition = .region(
@@ -160,7 +168,17 @@ struct LiveFleetMapView: View {
                 MapCompass()
                 MapScaleView()
             }
-            .overlay(alignment: .trailing) { mapControlColumn }
+            // Bottom-trailing, not vertically centred. Centred put the
+            // locate button squarely behind the "Dashboard" panel the
+            // moment it slid up (and near the selected-driver card),
+            // hiding the one control a dispatcher reaches for. Anchored
+            // low on the right with clearance below, it stays clear of
+            // the collapsed drawer, the open panel and the driver card -
+            // and reads like every other map app.
+            .overlay(alignment: .bottomTrailing) {
+                mapControlColumn
+                    .padding(.bottom, controlColumnBottomPadding)
+            }
 
             // The pills are the actual fleet feature - picking one
             // truck out of several. With a single driver there is
@@ -224,10 +242,25 @@ struct LiveFleetMapView: View {
     }
 
     // MARK: - Driver pin (live GPS position)
-    // Same control column as the driver map, for the same reasons:
-    // right edge and vertically centred rather than a top corner level
-    // with the Dynamic Island, and zoom buttons because pinching needs
-    // two hands. Pinch still works; these are the one-handed version.
+
+    // How far up from the physical bottom the control column sits (the
+    // map bleeds under the tab bar via ignoresSafeArea, so this must
+    // clear it itself):
+    //  - base: tab bar (~49) + home indicator (~34) + a small gap.
+    //  - selectedLift: above the selected-driver detail card.
+    //  - bottomInset: above the Dashboard panel when the caller opens it.
+    // Whichever obstruction is tallest wins, so the locate button is
+    // always fully visible and tappable.
+    private var controlColumnBottomPadding: CGFloat {
+        let base: CGFloat = 100
+        let selectedLift: CGFloat = selectedDriverId != nil ? 200 : 0
+        return max(base, max(selectedLift, bottomInset))
+    }
+
+    // Right edge, low where a thumb rests rather than a top corner level
+    // with the Dynamic Island (which swallows touches). Zoom buttons sit
+    // with the locate button because pinching needs two hands; pinch
+    // still works, these are the one-handed version.
     private var mapControlColumn: some View {
         VStack(spacing: 12) {
             VStack(spacing: 0) {

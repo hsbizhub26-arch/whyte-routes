@@ -47,7 +47,10 @@ struct OwnerDashboardView: View {
         // already is and where it cannot collide with the map controls
         // on the right.
         ZStack(alignment: .bottom) {
-            LiveFleetMapView(driverVM: driverVM)
+            // Tell the map how much of its bottom the open panel covers,
+            // so its locate/zoom controls ride above the drawer instead
+            // of hiding behind it. ~380pt sheet + the pill + safe area.
+            LiveFleetMapView(driverVM: driverVM, bottomInset: isPanelOpen ? 430 : 0)
 
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
