@@ -106,19 +106,25 @@ struct DriverMapView: View {
 
     @StateObject private var vm = DriverMapViewModel()
 
+    /// Height (from the bottom safe area) of any card the parent lays
+    /// over this map - e.g. DriverDashboardView's status card. The
+    /// control column lifts above it so the locate/zoom buttons are
+    /// never swallowed by the drawer. 0 when nothing overlays the map.
+    var bottomInset: CGFloat = 0
+
     var body: some View {
         ZStack {
             mapLayer
                 .ignoresSafeArea()
 
-            // topButtons/stopSheet/waitingForGPSBanner deliberately do
-            // NOT ignore the safe area - the map filling the whole
+            // mapControlColumn/stopSheet/waitingForGPSBanner deliberately
+            // do NOT ignore the safe area - the map filling the whole
             // screen is correct, but UI overlays need the safe-area
             // padding to stay clear of the tab bar. Applying
             // ignoresSafeArea() to this entire ZStack (old code) made
             // the banner lose that padding and render on top of the
             // tab bar instead of above it.
-            topButtons
+            mapControlColumn
             stopSheet
 
             if let trackingError = LocationService.shared.trackingError {
@@ -274,28 +280,42 @@ struct DriverMapView: View {
             .contentShape(Rectangle())
     }
 
-    private var topButtons: some View {
-        // Right edge, vertically centred - see mapControls for why the
-        // top corner was the wrong place for both of these.
-        HStack {
-            Spacer()
-            VStack(spacing: 12) {
-                mapControls
+    // How far up from the bottom safe area the control column sits.
+    // These controls respect the safe area (they are NOT part of the
+    // full-bleed map layer), so a small gap clears the tab bar; lift
+    // further to clear the status card the parent overlays (bottomInset).
+    private var controlColumnBottomPadding: CGFloat {
+        bottomInset > 0 ? bottomInset + 12 : 16
+    }
 
-                Button {
-                    vm.centerOnDriver()
-                } label: {
-                    Image(systemName: "location.fill")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.black)
-                        .frame(width: 46, height: 46)
-                        .background(Color("WRThemeGold"))
-                        .clipShape(Circle())
-                        .shadow(radius: 6)
+    private var mapControlColumn: some View {
+        // Right edge, low where a thumb rests. Anchored to the bottom
+        // (not vertically centred) with clearance below, so the status
+        // card or route banner rising over the map can never swallow the
+        // locate button. See mapControls for why the top corner was wrong.
+        VStack {
+            Spacer(minLength: 0)
+            HStack {
+                Spacer(minLength: 0)
+                VStack(spacing: 12) {
+                    mapControls
+
+                    Button {
+                        vm.centerOnDriver()
+                    } label: {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(width: 46, height: 46)
+                            .background(Color("WRThemeGold"))
+                            .clipShape(Circle())
+                            .shadow(radius: 6)
+                    }
                 }
+                .padding(.trailing, 14)
             }
-            .padding(.trailing, 14)
         }
+        .padding(.bottom, controlColumnBottomPadding)
     }
 
     // MARK: - STOP DETAIL SHEET

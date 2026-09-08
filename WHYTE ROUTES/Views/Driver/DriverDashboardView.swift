@@ -1,6 +1,15 @@
 import SwiftUI
 import MapKit
 
+/// Reports the rendered height of the bottom status card, so the map
+/// can lift its locate/zoom controls above it rather than behind it.
+private struct StatusCardHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct DriverDashboardView: View {
 
     @ObservedObject var session = DriverSession.shared
@@ -14,6 +23,10 @@ struct DriverDashboardView: View {
 
     @State private var isTogglingShift = false
     @State private var activeSheet: ActiveSheet?
+
+    /// Measured height of the bottom status card, handed to the map so
+    /// its locate/zoom controls float above the card instead of behind it.
+    @State private var statusCardHeight: CGFloat = 0
 
     // ONE sheet modifier driven by an enum, rather than three chained
     // .sheet modifiers on the same view - stacking those silently drops
@@ -70,13 +83,22 @@ struct DriverDashboardView: View {
     // has its own tab.
     var body: some View {
         ZStack(alignment: .bottom) {
-            DriverMapView()
+            DriverMapView(bottomInset: statusCardHeight)
                 .ignoresSafeArea(edges: .top)
 
             statusCard
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: StatusCardHeightKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
         }
+        .onPreferenceChange(StatusCardHeightKey.self) { statusCardHeight = $0 }
         // EVERY ONE OF THESE WAS A DEAD END.
         //
         // All three are full-bleed ScrollViews with no navigation bar,
