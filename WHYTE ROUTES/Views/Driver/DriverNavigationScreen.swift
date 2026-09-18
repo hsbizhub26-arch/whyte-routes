@@ -25,8 +25,50 @@ struct DriverNavigationScreen: View {
     let stopCoordinate: CLLocationCoordinate2D?
     let stopIndex: Int
     let stopCount: Int
-    let isAtProperty: Bool
-    let atPropertyElapsed: String?
+    /// nil once the stop is arrived or completed, which hides the
+    /// fallback button rather than leaving a dead control on screen.
+    let onArrive: (() -> Void)?
+
+    /// How close the truck has to be before the manual "I've Arrived"
+    /// fallback appears. Wider than the 40m geofence - that is the point
+    /// of a fallback - but not the whole drive: arriving ends navigation,
+    /// stamps the visit start and hands the customer's tracking pin over
+    /// to the at-property state, none of which can be taken back, so a
+    /// gloved thumb brushing it 3km out would strand the driver without
+    /// directions and put the wrong time on the job.
+    ///
+    /// Two radii, latched: it appears inside 200m and only goes away past
+    /// 300m, so GPS jitter at the edge can't flap it. Each flap resizes
+    /// the card, which moves the map camera and the recentre chip.
+    private static let arriveShowWithin: CLLocationDistance = 200
+    private static let arriveHideBeyond: CLLocationDistance = 300
+
+    /// Latched state for the fallback - see arriveShowWithin.
+    @State private var arriveArmed = false
+
+    private var showArriveFallback: Bool {
+        onArrive != nil && arriveArmed
+    }
+
+    /// Straight-line distance from the truck to THIS stop's pin. Not
+    /// nav.remainingDistance: that measures to the road point the route
+    /// ends on, is nil with no route (no data in a storm), freezes once
+    /// the last step completes, and after a late reroute can even belong
+    /// to the previous stop's route.
+    private func updateArriveArmed(_ here: CLLocationCoordinate2D?) {
+        guard let here, let stopCoordinate else { return }
+        let distance = CLLocation(latitude: here.latitude, longitude: here.longitude)
+            .distance(from: CLLocation(latitude: stopCoordinate.latitude, longitude: stopCoordinate.longitude))
+        if !arriveArmed, distance <= Self.arriveShowWithin {
+            arriveArmed = true
+        } else if arriveArmed, distance > Self.arriveHideBeyond {
+            arriveArmed = false
+        }
+    }
+
+    /// Top edge of the bottom card in global coordinates, measured, so the
+    /// map's recentre chip can sit just above it at any card height.
+    @State private var bottomCardTopY: CGFloat = 0
     let onEnd: () -> Void
     let onComplete: () -> Void
 
@@ -56,7 +98,8 @@ struct DriverNavigationScreen: View {
                 stopCoordinate: stopCoordinate,
                 routePolyline: nav.route?.polyline,
                 zoomDistance: Self.zoomDistance(for: nav.distanceToManeuver),
-                bottomInset: navigationBottomInset
+                bottomInset: navigationBottomInset,
+                cardTopGlobalY: bottomCardTopY
             )
             .equatable()
             .ignoresSafeArea()
@@ -69,20 +112,34 @@ struct DriverNavigationScreen: View {
                 bottomBar
                     .background(
                         GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: BottomCardHeightKey.self,
-                                value: proxy.size.height
-                            )
+                            Color.clear
+                                .preference(
+                                    key: BottomCardHeightKey.self,
+                                    value: proxy.size.height
+                                )
+                                .preference(
+                                    key: BottomCardTopKey.self,
+                                    value: proxy.frame(in: .global).minY
+                                )
                         }
                     )
             }
             .onPreferenceChange(BottomCardHeightKey.self) { height in
                 bottomCardHeight = height
             }
+            .onPreferenceChange(BottomCardTopKey.self) { top in
+                bottomCardTopY = top
+            }
         }
         // The screen a driver stares at while moving should not also be
         // the screen that dims and locks itself.
         .persistentSystemOverlays(.hidden)
+        // Runs on every GPS fix WITHOUT observing location: the closure
+        // only writes arriveArmed when it actually flips, so the card
+        // re-renders at the threshold, not once a second.
+        .onReceive(LocationService.shared.$currentLocation) { here in
+            updateArriveArmed(here)
+        }
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
@@ -202,13 +259,27 @@ struct DriverNavigationScreen: View {
                 }
             }
 
-            if isAtProperty, let elapsed = atPropertyElapsed {
-                Text("At property: \(elapsed)")
-                    .font(.footnote.bold())
-                    .foregroundColor(Color("WRThemeGold"))
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 14)
-                    .background(Capsule().fill(Color.black.opacity(0.5)))
+            // Fallback for when the 40m geofence does not trip - a GPS
+            // fix drifting wide, or a yard entrance set back from the
+            // pin. Without it the only way to arrive was to back out of
+            // navigation to the stop screen first. Only offered near the
+            // stop (see arriveFallbackRadius), and outlined rather than
+            // solid gold so it never reads as the Mark Completed button
+            // directly beneath it.
+            if showArriveFallback, let onArrive {
+                Button(action: onArrive) {
+                    Label("I've Arrived", systemImage: "mappin.circle.fill")
+                        .font(.headline)
+                        .foregroundColor(Color("WRThemeGold"))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.black.opacity(0.4))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color("WRThemeGold"), lineWidth: 2)
+                        )
+                }
             }
 
             HStack(spacing: 10) {
@@ -297,6 +368,8 @@ private struct NavMapCanvas: View, Equatable {
     let zoomDistance: CLLocationDistance
     /// Height of the bottom card, as a camera inset.
     let bottomInset: CGFloat
+    /// Global Y of the bottom card's top edge, for the recentre chip.
+    let cardTopGlobalY: CGFloat
 
     // Skip re-rendering unless something the MAP actually draws changed.
     // Deliberately does NOT look at location/heading - those drive the
@@ -307,6 +380,7 @@ private struct NavMapCanvas: View, Equatable {
         // here, Equatable would swallow that update and the camera would
         // stay centred on the glass for the whole drive.
         a.bottomInset == b.bottomInset
+            && a.cardTopGlobalY == b.cardTopGlobalY
             && a.zoomDistance == b.zoomDistance
             && a.routePolyline === b.routePolyline
             && a.stopCoordinate?.latitude == b.stopCoordinate?.latitude
@@ -321,6 +395,8 @@ private struct NavMapCanvas: View, Equatable {
     /// stops yanking itself back while they look ahead down the route.
     /// Re-armed by the recentre button.
     @State private var isFollowing = true
+    /// Global Y of this map's bottom edge. See recentreClearance.
+    @State private var mapBottomY: CGFloat = 0
 
     /// When this map appeared. Follow-mode is immune to gestures for a
     /// moment after it does: the tap that started navigation lands on
@@ -387,7 +463,21 @@ private struct NavMapCanvas: View, Equatable {
         .simultaneousGesture(
             MagnificationGesture().onChanged { _ in userTookOverMap() }
         )
-        .overlay(alignment: .bottomTrailing) { recentreButton }
+        // Measures where this full-bleed map ends on screen. A background,
+        // not an overlay: a full-size layer on top of the map could claim
+        // the pans and pinches meant for it.
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: MapBottomKey.self, value: proxy.frame(in: .global).maxY)
+            }
+        )
+        .onPreferenceChange(MapBottomKey.self) { bottom in
+            mapBottomY = bottom
+        }
+        .overlay(alignment: .bottomTrailing) {
+            recentreButton
+                .padding(.bottom, recentreClearance)
+        }
         .overlay(alignment: .topTrailing) { compassBadge }
         .onAppear {
             appearedAt = Date()
@@ -438,7 +528,21 @@ private struct NavMapCanvas: View, Equatable {
                 .shadow(color: .black.opacity(0.4), radius: 5)
         }
         .padding(.trailing, 18)
-        .padding(.bottom, 210)
+    }
+
+    /// Distance of the recentre chip above the bottom of the map: 12pt
+    /// clear of the bottom card, whatever height the card is. It used to
+    /// be a fixed 210, which left 2pt at the card's shortest - so a
+    /// wrapped stop name, larger text, or the arrive button pushed the
+    /// card over the chip, the same locate-button-behind-the-drawer bug
+    /// already fixed on the other maps. 210 remains the floor and the
+    /// value for the first frame, before the card has been measured.
+    ///
+    /// Both edges are global coordinates, so this holds whatever the safe
+    /// area: the map ignores it, the card respects it.
+    private var recentreClearance: CGFloat {
+        guard cardTopGlobalY > 0, mapBottomY > 0 else { return 210 }
+        return max(210, mapBottomY - cardTopGlobalY + 12)
     }
 
     private func updateCamera() {
@@ -488,6 +592,22 @@ private struct NavMapCanvas: View, Equatable {
 /// Reports the real rendered height of the bottom card, so the map
 /// can inset its camera by exactly what the card covers rather than a
 /// number guessed per device.
+/// Global Y of the navigation map's bottom edge. See recentreClearance.
+private struct MapBottomKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Global Y of the bottom card's top edge. See recentreClearance.
+private struct BottomCardTopKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private struct BottomCardHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {

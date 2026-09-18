@@ -134,6 +134,32 @@ final class DriverStopViewModel: ObservableObject {
         JobStatus(rawValue: stop.status) ?? .scheduled
     }
 
+    /// When to run the at-property timer, or nil for no timer.
+    ///
+    /// Guards on STATUS, not just on arrivedAt being present. A stop can
+    /// carry an old arrivedAt while it is merely scheduled - the owner's
+    /// reset in EditRouteView writes through setData(merge: true), and
+    /// toDict() omits nil fields, so the reset never actually deletes
+    /// the timestamp - and the stop screen then counted up from it:
+    /// "At property: 163:49:38" on a driveway nobody was standing in.
+    ///
+    /// Deliberately no age ceiling. A crew can hold a commercial lot for
+    /// the whole of a 20-hour storm; the owner's fleet map has no cap
+    /// either, and the two should agree. An arrived stop showing a huge
+    /// number is also the one visible sign that a visit was never
+    /// closed out, which a silent cap would hide.
+    var atPropertyStart: Date? {
+        guard jobStatus == .arrived else { return nil }
+        return stop.arrivedAt
+    }
+
+    /// False once arrived or completed - or while a completion is still
+    /// saving - so the navigation screen hides its fallback button
+    /// instead of offering a tap that does nothing, or worse.
+    var canMarkArrived: Bool {
+        !isCompleting && !stop.isCompleted && jobStatus != .arrived
+    }
+
     /// "Stop 12 of 47" - position within the route's stops in their
     /// assigned order, not just however many are left.
     var stopPosition: (current: Int, total: Int)? {
@@ -166,6 +192,20 @@ final class DriverStopViewModel: ObservableObject {
 
     func markArrived() async {
         guard let route else { return }
+        // Arriving is idempotent. Three paths land here now - the
+        // geofence (observeGeofenceArrival), the button on this screen,
+        // and the fallback button on the navigation screen - so without
+        // this guard a driver who taps "I've Arrived" seconds after the
+        // geofence already fired restamps arrivedAt and resets the
+        // at-property timer to zero, losing the minutes they were
+        // actually on the driveway.
+        //
+        // isCompleting closes a second hole: markCompleted only commits
+        // `stop` once Firestore confirms, so on a weak signal the stop
+        // still reads en route while its completion is in flight. An
+        // arrival queued in that window lands AFTER the completed write
+        // and leaves the stop arrived-but-not-completed.
+        guard !isCompleting, !stop.isCompleted, jobStatus != .arrived else { return }
         stop.status = JobStatus.arrived.rawValue
         stop.arrivedAt = Date()
         await routeService.updateStop(routeId: route.id, stop: stop)
@@ -415,8 +455,12 @@ struct DriverStopView: View {
                 stopCoordinate: vm.stop.coordinate,
                 stopIndex: vm.stopPosition?.current ?? 1,
                 stopCount: vm.stopPosition?.total ?? 1,
-                isAtProperty: vm.stop.arrivedAt != nil,
-                atPropertyElapsed: nil,
+                // Arriving ends navigation (the onChange on jobStatus
+                // below stops it, which is what releases the voice and
+                // the audio session once the crew is out of the truck),
+                // so the at-property timer runs on THIS screen after
+                // arrival, not on the navigation screen.
+                onArrive: vm.canMarkArrived ? { Task { await vm.markArrived() } } : nil,
                 onEnd: { nav.stop() },
                 onComplete: {
                     nav.stop()
@@ -788,6 +832,9 @@ extension DriverStopView {
                         .background(Color("WRThemeGold"))
                         .cornerRadius(14)
                 }
+                // Same rule as the navigation screen's fallback: not while
+                // a completion is still saving (see markArrived).
+                .disabled(!vm.canMarkArrived)
 
                 if let coordinate = vm.stop.coordinate {
                     Button {
@@ -822,7 +869,7 @@ extension DriverStopView {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if let arrivedAt = vm.stop.arrivedAt {
+            if let arrivedAt = vm.atPropertyStart {
                 TimerPill(arrivedAt: arrivedAt)
             }
         }
