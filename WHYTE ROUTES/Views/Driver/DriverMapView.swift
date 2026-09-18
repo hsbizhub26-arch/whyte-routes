@@ -106,9 +106,224 @@ final class DriverMapViewModel: ObservableObject {
     }
 }
 
+// MARK: - Route overview geometry
+
+/// Road-following lines for the My Route overview - replacing the single
+/// straight "connect the dots" line, which cut across highways, golf
+/// courses and houses and read as a mess next to Waze's route preview.
+///
+/// What shapes this is cost. Directions come from Apple (MKDirections, the
+/// same service navigation uses), which throttles apps that ask too often:
+/// - Stop-to-stop legs are fetched once and cached by coordinates for the
+///   life of the app. They don't change as the truck moves.
+/// - The truck's own leg is NOT re-requested as the truck drives along it.
+///   It is trimmed to start at the truck instead, and only re-requested
+///   when the truck strays off it or the next stop changes - and even then
+///   no more than once every 20 seconds.
+/// - Requests go one at a time, the truck's leg first, and only the next
+///   `maxRoutedLegs` legs are routed. Anything not routed - not loaded yet,
+///   no signal, or no road route - is drawn as a faint dashed straight
+///   line, so an approximation never passes for a real road.
+final class RouteOverviewPlanner: ObservableObject {
+
+    enum Style { case current, upcoming, approximate }
+
+    struct Leg: Identifiable {
+        let id: String
+        let style: Style
+        let coordinates: [CLLocationCoordinate2D]
+    }
+
+    /// Drawn in order, so the truck's leg is last - on top.
+    @Published private(set) var legs: [Leg] = []
+
+    private static let maxRoutedLegs = 12
+    /// How far the truck can be from its drawn leg before that leg is
+    /// treated as stale. Measured to the nearest SEGMENT, not vertex -
+    /// a long straight road has vertices hundreds of metres apart.
+    private static let offRouteTolerance: CLLocationDistance = 120
+    private static let currentLegMinInterval: TimeInterval = 20
+    private static let throttleBackoff: TimeInterval = 60
+    private static let failureRetry: TimeInterval = 120
+
+    /// Shared across map instances, so re-opening the tab requests nothing.
+    private static var legCache: [String: [CLLocationCoordinate2D]] = [:]
+
+    private struct Job {
+        let key: String
+        let from: CLLocationCoordinate2D
+        let to: CLLocationCoordinate2D
+        /// Set for the truck's leg: the key of the stop it leads to.
+        let currentTargetKey: String?
+    }
+
+    private var currentLeg: (targetKey: String, coordinates: [CLLocationCoordinate2D])?
+    private var lastCurrentRequest = Date.distantPast
+
+    private var queue: [Job] = []
+    private var queuedKeys: Set<String> = []
+    private var retryAfter: [String: Date] = [:]
+    private var throttledUntil = Date.distantPast
+    private var worker: Task<Void, Never>?
+
+    private var stops: [Stop] = []
+    private var driver: CLLocationCoordinate2D?
+
+    func update(stops: [Stop], driver: CLLocationCoordinate2D?) {
+        self.stops = stops
+        self.driver = driver
+        rebuild()
+    }
+
+    private func rebuild() {
+        // The rest of the run only: completed and skipped stops keep their
+        // pins but no longer get a line.
+        let remaining = stops
+            .filter { !$0.isCompleted && !$0.isSkipped }
+            .compactMap { $0.coordinate }
+
+        var result: [Leg] = []
+
+        for (index, pair) in zip(remaining, remaining.dropFirst()).enumerated() {
+            let (from, to) = pair
+            // Two stops at one address (e.g. front and back of a lot).
+            guard Self.distance(from, to) > 5 else { continue }
+            let key = Self.key(from) + ">" + Self.key(to)
+            if let road = Self.legCache[key] {
+                result.append(Leg(id: "leg-\(index)", style: .upcoming, coordinates: road))
+            } else {
+                result.append(Leg(id: "leg-\(index)", style: .approximate, coordinates: [from, to]))
+                if index < Self.maxRoutedLegs {
+                    enqueue(Job(key: key, from: from, to: to, currentTargetKey: nil))
+                }
+            }
+        }
+
+        if let driver, let next = remaining.first {
+            let targetKey = Self.key(next)
+            if let leg = currentLeg, leg.targetKey == targetKey,
+               let ahead = Self.remainder(of: leg.coordinates, from: driver) {
+                result.append(Leg(id: "current", style: .current, coordinates: ahead))
+            } else {
+                result.append(Leg(id: "current", style: .approximate, coordinates: [driver, next]))
+                let newTarget = currentLeg?.targetKey != targetKey
+                if newTarget || Date().timeIntervalSince(lastCurrentRequest) >= Self.currentLegMinInterval {
+                    enqueue(Job(key: "current>" + targetKey, from: driver, to: next, currentTargetKey: targetKey))
+                }
+            }
+        }
+
+        legs = result
+    }
+
+    private func enqueue(_ job: Job) {
+        guard !queuedKeys.contains(job.key) else { return }
+        if let until = retryAfter[job.key], until > Date() { return }
+        queuedKeys.insert(job.key)
+        // The truck's leg jumps the queue - it is the one the driver needs.
+        if job.currentTargetKey != nil { queue.insert(job, at: 0) } else { queue.append(job) }
+        guard worker == nil else { return }
+        worker = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let job = self?.dequeue() else { break }
+                if let wait = self?.throttledUntil.timeIntervalSinceNow, wait > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                }
+                await self?.fetch(job)
+                // Paced, so a long route never bursts requests at Apple.
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            self?.worker = nil
+        }
+    }
+
+    private func dequeue() -> Job? {
+        queue.isEmpty ? nil : queue.removeFirst()
+    }
+
+    private func fetch(_ job: Job) async {
+        defer { queuedKeys.remove(job.key) }
+
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: job.from))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: job.to))
+        request.transportType = .automobile
+        // Same preferences as NavigationSession, so the overview never shows
+        // a different road than the one navigation will then guide along.
+        let settings = CompanySession.shared.currentCompany?.navigationSettings ?? NavigationSettings()
+        request.tollPreference = settings.avoidTolls ? .avoid : .any
+        request.highwayPreference = settings.avoidHighways ? .avoid : .any
+
+        if job.currentTargetKey != nil { lastCurrentRequest = Date() }
+
+        do {
+            let response = try await MKDirections(request: request).calculate()
+            guard let road = response.routes.first?.polyline.coordinates, road.count > 1 else {
+                retryAfter[job.key] = Date().addingTimeInterval(Self.failureRetry)
+                return
+            }
+            if let targetKey = job.currentTargetKey {
+                currentLeg = (targetKey, road)
+            } else {
+                Self.legCache[job.key] = road
+            }
+            rebuild()
+        } catch {
+            if (error as? MKError)?.code == .loadingThrottled {
+                throttledUntil = Date().addingTimeInterval(Self.throttleBackoff)
+                retryAfter[job.key] = throttledUntil
+            } else {
+                retryAfter[job.key] = Date().addingTimeInterval(Self.failureRetry)
+            }
+        }
+    }
+
+    /// The part of `road` still ahead of the truck, starting at the truck -
+    /// or nil when the truck is too far from it to trust (it has left the
+    /// route), which makes rebuild() request a fresh one.
+    private static func remainder(
+        of road: [CLLocationCoordinate2D],
+        from truck: CLLocationCoordinate2D
+    ) -> [CLLocationCoordinate2D]? {
+        guard road.count > 1 else { return nil }
+        let here = MKMapPoint(truck)
+        var bestDistance = CLLocationDistance.greatestFiniteMagnitude
+        var bestSegment = 0
+        var bestPoint = here
+
+        for index in 0..<(road.count - 1) {
+            let a = MKMapPoint(road[index])
+            let b = MKMapPoint(road[index + 1])
+            let dx = b.x - a.x, dy = b.y - a.y
+            let lengthSquared = dx * dx + dy * dy
+            var t = lengthSquared > 0 ? ((here.x - a.x) * dx + (here.y - a.y) * dy) / lengthSquared : 0
+            t = min(max(t, 0), 1)
+            let projected = MKMapPoint(x: a.x + t * dx, y: a.y + t * dy)
+            let distance = here.distance(to: projected)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestSegment = index
+                bestPoint = projected
+            }
+        }
+
+        guard bestDistance <= offRouteTolerance else { return nil }
+        return [truck, bestPoint.coordinate] + road[(bestSegment + 1)...]
+    }
+
+    private static func key(_ c: CLLocationCoordinate2D) -> String {
+        String(format: "%.5f,%.5f", c.latitude, c.longitude)
+    }
+
+    private static func distance(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> CLLocationDistance {
+        MKMapPoint(a).distance(to: MKMapPoint(b))
+    }
+}
+
 struct DriverMapView: View {
 
     @StateObject private var vm = DriverMapViewModel()
+    @StateObject private var overview = RouteOverviewPlanner()
 
     /// Height (from the bottom safe area) of any card the parent lays
     /// over this map - e.g. DriverDashboardView's status card. The
@@ -196,10 +411,24 @@ struct DriverMapView: View {
         Map(position: $vm.cameraPosition) {
             UserAnnotation()
 
-            let routeCoordinates = ([vm.driverCoordinate] + orderedStops.compactMap { $0.coordinate }).compactMap { $0 }
-            if routeCoordinates.count > 1 {
-                MapPolyline(coordinates: routeCoordinates)
-                    .stroke(Color("WRThemeGold"), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+            // Road-following, not straight lines - see RouteOverviewPlanner.
+            // The leg the truck is driving now is bold with a dark casing so
+            // it reads cleanly on the dark map; later legs are lighter; any
+            // leg not routed yet is a faint dashed straight line.
+            ForEach(overview.legs) { leg in
+                switch leg.style {
+                case .current:
+                    MapPolyline(coordinates: leg.coordinates)
+                        .stroke(Color.black.opacity(0.55), style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
+                    MapPolyline(coordinates: leg.coordinates)
+                        .stroke(Color("WRThemeGold"), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                case .upcoming:
+                    MapPolyline(coordinates: leg.coordinates)
+                        .stroke(Color("WRThemeGold").opacity(0.5), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                case .approximate:
+                    MapPolyline(coordinates: leg.coordinates)
+                        .stroke(Color("WRThemeGold").opacity(0.45), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 7]))
+                }
             }
 
             ForEach(Array(orderedStops.enumerated()), id: \.element.id) { index, stop in
@@ -237,6 +466,12 @@ struct DriverMapView: View {
         // without this the buttons would have nothing to work from.
         .onMapCameraChange { context in
             vm.visibleRegion = context.region
+        }
+        .onReceive(vm.$stops) { stops in
+            overview.update(stops: stops, driver: vm.driverCoordinate)
+        }
+        .onReceive(vm.$driverCoordinate) { driver in
+            overview.update(stops: vm.stops, driver: driver)
         }
     }
 
