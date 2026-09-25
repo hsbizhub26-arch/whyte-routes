@@ -25,7 +25,7 @@ struct SettingsView: View {
     // Worth moving to a support@ address on an owned domain once one
     // exists; until then this reaches a real monitored inbox, which is
     // what Apple's support-contact requirement actually needs.
-    private static let supportEmail = "hopeseneoudom@icloud.com"
+    private static let supportEmail = "hsbizhub26@gmail.com"
 
     /// Version and build, so a support mail says which build it came
     /// from without asking the user to go find it.
