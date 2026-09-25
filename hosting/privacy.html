@@ -15,7 +15,7 @@
 </head>
 <body>
 <h1>WHYTE ROUTES Privacy Policy</h1>
-<p class="updated">Last updated: September 1, 2026</p>
+<p class="updated">Last updated: September 25, 2026</p>
 
 <p>WHYTE ROUTES ("we," "our," "the app") is a fleet dispatch and route management platform for landscaping, snow removal, and property service businesses. This policy explains what information we collect, why, and how it's handled.</p>
 
@@ -24,22 +24,24 @@
 
 <h2>Information we collect</h2>
 <ul>
-  <li><strong>Account information:</strong> email address, and name if provided, when you create an account.</li>
-  <li><strong>Precise location:</strong> while a driver is actively working a route, we collect GPS location to show live position on the dispatch map, give the driver turn-by-turn directions and spoken guidance inside the app, calculate ETAs, and record arrival/completion times. Collection runs while the app is in the background as well as on screen, so a driver isn't required to hold the phone or keep the app open while driving. It starts when a driver starts their shift and stops when they end it - location is not collected outside an active shift.</li>
+  <li><strong>Account information:</strong> email address, and name if provided, when you create an account. You can sign up with an email and password, with Sign in with Apple, or with Google Sign-In. If you use Apple or Google, that provider shares your name and email address with us (Apple may give us a private relay address instead of your real one). We never see your Apple or Google password.</li>
+  <li><strong>Precise location:</strong> while a driver is actively working a route, we collect GPS location to show live position on the dispatch map, give the driver turn-by-turn directions and spoken guidance inside the app, calculate ETAs, and record arrival/completion times. Collection runs while the app is in the background as well as on screen, so a driver isn't required to hold the phone or keep the app open while driving. It starts when a driver starts their shift and stops when they end it - location is not collected outside an active shift. Because it has to keep working in the background, iOS asks drivers to allow location access "Always". A driver can change this at any time in iOS Settings &rarr; Privacy &amp; Security &rarr; Location Services; live tracking and in-app navigation stop working without it.</li>
   <li><strong>Customer contact information:</strong> name, address, phone number, and email, entered by a company's staff to schedule and route service - not collected directly from customers unless a customer signs up as an owner themselves.</li>
-  <li><strong>Operational data:</strong> routes, stops, service notes, shift times, and photos/notes staff choose to record. Service notes are free text written by a company's own staff and may include access instructions such as gate codes.</li>
+  <li><strong>Operational data:</strong> routes, stops, service notes, shift times, and notes staff choose to record. Service notes are free text written by a company's own staff and may include access instructions such as gate codes.</li>
+  <li><strong>Proof-of-work photos:</strong> at a stop, a driver can take a photo with the camera, or choose one from their photo library, to record the job before, after or on completion. The app only receives the single photo the driver takes or picks; it never reads the rest of the photo library. Each photo is uploaded to Google Firebase Cloud Storage, in an area that belongs to the driver's company, together with the time and the driver who took it. It can be viewed by that driver and by the owners and managers of their company - never by other drivers, and never by another company. These photos are company records (see Data retention and deletion).</li>
   <li><strong>Driver's licence photographs:</strong> a driver may upload a photo of their licence to their own profile. It is stored privately and can be viewed only by that driver and by the owners and managers of their own company - never by other drivers, and never by another company. It is deleted when the driver deletes their account.</li>
   <li><strong>Subscription status:</strong> your company's plan tier, managed through Apple's In-App Purchase system. We do not receive or store your payment card details - Apple handles all payment processing.</li>
 </ul>
 
 <h2>How we use this information</h2>
-<p>Strictly for operating the app: dispatching and tracking routes, showing drivers where to go, notifying customers about arrival/completion when they've opted in, and giving company owners reporting on completed work. We do not use your data for advertising, and we do not sell or rent personal information to third parties.</p>
+<p>Strictly for operating the app: dispatching and tracking routes, showing drivers where to go, notifying customers about arrival/completion when they've opted in, and giving company owners reporting on completed work. No data is sold or used for advertising. We do not sell or rent personal information to third parties.</p>
 
 <h2>Who we share information with</h2>
 <ul>
-  <li><strong>Google Firebase</strong> (Google Cloud) - our backend infrastructure provider, which stores account data, route data, and location data securely.</li>
-  <li><strong>Apple</strong> - handles subscription purchases and payment processing; we never see your card details. Apple's mapping service separately receives the coordinates and addresses needed to draw maps, suggest addresses as staff type them, and calculate the driving directions and ETAs the app's in-app navigation runs on.</li>
-  <li><strong>Twilio</strong> - delivers the text messages a company sends to its own customers. A customer's phone number and the message content are passed to Twilio in order to send it.</li>
+  <li><strong>Google Firebase</strong> (Google Cloud) - our backend infrastructure provider: Firebase Authentication (sign-in), Cloud Firestore (account, company, route and location data), Cloud Storage (photos), and Cloud Functions (our server code, which sends customer notifications and verifies subscriptions with Apple). Like any online service, these also receive technical data such as your IP address and app identifiers, which they need in order to operate.</li>
+  <li><strong>Google Sign-In</strong> - only if you choose to sign in with Google. Google authenticates you and shares your name and email address with us.</li>
+  <li><strong>Apple</strong> - handles subscription purchases and payment processing (StoreKit / In-App Purchase); we never see your card details. If you use Sign in with Apple, Apple authenticates you. Apple Maps (MapKit) receives the coordinates and addresses needed to draw maps, suggest addresses as staff type them, and calculate the driving directions and ETAs the app's in-app navigation runs on.</li>
+  <li><strong>Twilio</strong> - delivers the text messages a company sends to its own customers. A customer's phone number and the message content are passed to Twilio in order to send it. Staff can also choose to text a customer from their own phone's Messages app; that message is sent by their own phone and carrier, not by us.</li>
   <li><strong>Resend</strong> - delivers email notifications in the same way, where a company has chosen email rather than text.</li>
   <li>We do not share data with advertising networks, data brokers, or any other third party for marketing purposes. The app contains no analytics or advertising SDKs.</li>
 </ul>
@@ -55,6 +57,9 @@
 <p>Data belonging to a <em>company</em> - its customers, routes, stops and service history - is not removed by deleting one person's account, because it belongs to the business rather than to the individual. A company owner can request full deletion of their company's data by contacting us at the email below, and we will action it within 30 days.</p>
 <p>Live tracking data is short-lived by design: a driver's published position is deleted as soon as their stop is completed, and tracking links expire as described above.</p>
 
+<h2>Device permissions</h2>
+<p>The app asks for Location (for dispatch, live tracking and navigation), Camera and Photos (for proof-of-work and licence photos). You can grant, limit or withdraw each one at any time in iOS Settings. Declining Camera or Photos only turns off the photo features; everything else keeps working.</p>
+
 <h2>Children's privacy</h2>
 <p>WHYTE ROUTES is a business tool for service company operations and is not directed at, or knowingly used by, children under 13.</p>
 
@@ -62,6 +67,6 @@
 <p>If this policy changes, we'll update the date at the top of this page.</p>
 
 <h2>Contact</h2>
-<p>Questions about this policy or your data: <a href="mailto:hopeseneoudom@icloud.com">hopeseneoudom@icloud.com</a></p>
+<p>Questions about this policy or your data: <a href="mailto:hsbizhub26@gmail.com">hsbizhub26@gmail.com</a></p>
 </body>
 </html>
