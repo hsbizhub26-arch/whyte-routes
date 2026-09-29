@@ -59,6 +59,29 @@ struct Stop: Identifiable {
               let lng = longitude else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lng)
     }
+
+    /// Time on the property: arrivedAt -> completedAt, or nil when that
+    /// pair can't be trusted as one visit.
+    ///
+    /// Guards on STATUS as well as the two timestamps, for the same
+    /// reason DriverStopViewModel.atPropertyStart does: a stop reset
+    /// before the reset path deleted its timestamps can still carry an
+    /// old arrivedAt/completedAt while it is merely scheduled. Only a
+    /// stop that is actually completed right now gets a number. A
+    /// completion stamped before the arrival is a leftover from such a
+    /// reset, never a real visit, so that is refused too.
+    ///
+    /// No age ceiling, deliberately: a crew can hold a commercial lot
+    /// for a whole storm, and a huge number is the visible sign that a
+    /// visit was never closed out properly.
+    var dwellTime: TimeInterval? {
+        guard isCompleted,
+              status == JobStatus.completed.rawValue,
+              let arrived = arrivedAt,
+              let completed = completedAt,
+              completed >= arrived else { return nil }
+        return completed.timeIntervalSince(arrived)
+    }
 }
 
 extension Stop {

@@ -454,6 +454,13 @@ struct EditRouteView: View {
                     }
                 }
 
+                // How long the crew was actually on the property -
+                // nil (no badge) unless the stop is completed with a
+                // trustworthy arrival/completion pair; see Stop.dwellTime.
+                if let dwell = stop.dwellTime {
+                    DwellTimeBadge(duration: dwell)
+                }
+
                 if originalStopIds.contains(stop.id) {
                     rowActionButton("View Notification Log") {
                         historyStop = stop
@@ -785,5 +792,55 @@ struct EditRouteView: View {
                 dismiss()
             }
         }
+    }
+}
+
+// Time-on-property for a completed stop, flagged when it looks wrong:
+// - under 2 minutes: yellow - often an accidental Arrived/Complete
+//   double-tap rather than a cleared driveway;
+// - over 15 minutes: orange - a stop that ran long and held up the rest
+//   of the route.
+// Anything in between is a normal visit and stays neutral.
+struct DwellTimeBadge: View {
+
+    let duration: TimeInterval
+
+    static let shortThreshold: TimeInterval = 2 * 60
+    static let longThreshold: TimeInterval = 15 * 60
+
+    private var tint: Color {
+        if duration < Self.shortThreshold { return .yellow }
+        if duration > Self.longThreshold { return .orange }
+        return .secondary
+    }
+
+    private var note: String? {
+        if duration < Self.shortThreshold { return "possible accidental tap" }
+        if duration > Self.longThreshold { return "long visit" }
+        return nil
+    }
+
+    var body: some View {
+        Label(Self.formatted(duration), systemImage: "timer")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundColor(tint)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.15))
+            .clipShape(Capsule())
+            .accessibilityLabel("On site \(Self.formatted(duration))" + (note.map { ", \($0)" } ?? ""))
+    }
+
+    // "4m 07s" - minutes and seconds, as dispatch reads it. Rolls into
+    // hours past 60 minutes, for the same reason TimerPill does: "407m"
+    // is not a time anyone recognises at a glance.
+    static func formatted(_ duration: TimeInterval) -> String {
+        let total = max(0, Int(duration.rounded(.down)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        return hours > 0
+            ? String(format: "%dh %02dm", hours, minutes)
+            : String(format: "%dm %02ds", minutes, seconds)
     }
 }
