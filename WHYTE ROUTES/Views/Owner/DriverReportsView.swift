@@ -45,6 +45,7 @@ struct DriverReportsView: View {
                     .padding(.horizontal)
                     .padding(.top, 20)
                     .tint(WRTheme.gold)
+                    .readableContentWidth()
                 }
             }
             .onAppear { routeService.loadRoutesOnce() }

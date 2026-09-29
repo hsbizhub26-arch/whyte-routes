@@ -834,7 +834,7 @@ struct DriverMapView: View {
         Group {
             if vm.selectedStop != nil {
                 EmptyView()
-                    .sheet(item: Binding<Stop?>(
+                    .padFullScreenSheet(item: Binding<Stop?>(
                         get: { vm.selectedStop },
                         set: { vm.selectedStop = $0 }
                     )) { s in

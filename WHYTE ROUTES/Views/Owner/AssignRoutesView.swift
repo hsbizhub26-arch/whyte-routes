@@ -20,6 +20,7 @@ struct AssignRoutesView: View {
                     EditRouteView(routeId: route.id)
                 }
             }
+            .readableListWidth()
             .navigationTitle("Assign Routes")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {

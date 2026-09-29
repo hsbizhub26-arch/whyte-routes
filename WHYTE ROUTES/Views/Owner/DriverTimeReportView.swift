@@ -74,6 +74,7 @@ struct DriverTimeReportView: View {
                         }
                     }
                 }
+                .readableListWidth()
             }
         }
         .navigationTitle("\(driver.name) - Time")

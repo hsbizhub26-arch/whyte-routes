@@ -47,6 +47,7 @@ struct ManagerAssignDriverSheet: View {
                         .font(.footnote)
                 }
             }
+            .readableListWidth()
             .navigationTitle("Assign Driver")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

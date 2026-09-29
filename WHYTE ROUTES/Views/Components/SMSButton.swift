@@ -10,6 +10,7 @@ struct SMSButton: View {
 
     @State private var isPressed = false
     @State private var isLoading = false
+    @State private var showCannotText = false
 
     private var isDisabled: Bool {
         phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -49,6 +50,11 @@ struct SMSButton: View {
                 .onChanged { _ in if !isDisabled { isPressed = true } }
                 .onEnded { _ in isPressed = false }
         )
+        .alert("Can't send texts from this device", isPresented: $showCannotText) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("This device has no messaging set up. Send the tracking link from a phone instead.")
+        }
     }
 
     private func sendSMS() {
@@ -60,7 +66,11 @@ struct SMSButton: View {
             phone: phone,
             link: link,
             driverName: driverName,
-            etaMinutes: etaMinutes
+            etaMinutes: etaMinutes,
+            onFailure: {
+                isLoading = false
+                showCannotText = true
+            }
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {

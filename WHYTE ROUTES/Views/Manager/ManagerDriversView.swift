@@ -17,6 +17,7 @@ struct ManagerDriversView: View {
                 }
             }
         }
+        .readableListWidth()
         .onAppear(perform: loadDrivers)
         .navigationTitle("Drivers")
     }
@@ -49,6 +50,7 @@ struct ManagerDriverInfoView: View {
                 }
             }
         }
+        .readableListWidth()
         .navigationTitle(driver.name)
     }
 }

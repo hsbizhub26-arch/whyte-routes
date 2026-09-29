@@ -18,10 +18,36 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.1092024277372-rddk1bij01gjq3censt7sudt7ohg1o0n</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is needed to take photos as proof for deliveries and job completion.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>We use your location, even in the background, to track your progress for route management and delivery accuracy.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>We use your location, even in the background, to track your progress for route management and delivery accuracy.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We use your location to show your position on the map and provide route guidance.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo Library access is needed to allow you to choose images as proof for reports.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>audio</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIStatusBarStyle</key>
@@ -32,35 +58,6 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 		<string>UIInterfaceOrientationPortrait</string>
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-	</array>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>We use your location to show your position on the map and provide route guidance.</string>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>We use your location, even in the background, to track your progress for route management and delivery accuracy.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>We use your location, even in the background, to track your progress for route management and delivery accuracy.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>location</string>
-		<!-- Spoken turn instructions have to keep playing with the
-		     screen locked or the app backgrounded - a driver isn't
-		     holding the phone looking at it while making a turn. -->
-		<string>audio</string>
-	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>Camera access is needed to take photos as proof for deliveries and job completion.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Photo Library access is needed to allow you to choose images as proof for reports.</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>com.googleusercontent.apps.1092024277372-rddk1bij01gjq3censt7sudt7ohg1o0n</string>
-			</array>
-		</dict>
 	</array>
 </dict>
 </plist>

@@ -4,6 +4,7 @@ struct OwnerTabView: View {
 
     @EnvironmentObject var auth: AuthSession
     @State private var showReports = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,12 +58,25 @@ struct OwnerTabView: View {
                         Label("Team", systemImage: "person.badge.plus")
                     }
 
-                SettingsView()
+                settingsTab
                     .tabItem {
                         Label("Settings", systemImage: "gear")
                     }
             }
             .accentColor(WRTheme.gold)
+        }
+    }
+
+    // SettingsView relies on the system "More" screen for its navigation
+    // stack - but a full-width iPad shows every tab directly, with no More
+    // screen, which left Settings with no title and a dead Permissions
+    // Help link. iPhone and compact iPad keep the More path unchanged.
+    @ViewBuilder
+    private var settingsTab: some View {
+        if UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular {
+            NavigationStack { SettingsView() }
+        } else {
+            SettingsView()
         }
     }
 

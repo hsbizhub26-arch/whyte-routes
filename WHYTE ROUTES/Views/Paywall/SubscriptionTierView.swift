@@ -124,6 +124,7 @@ struct SubscriptionTierView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.vertical, 24)
+                    .readableContentWidth()
                 }
             }
             .toolbar {

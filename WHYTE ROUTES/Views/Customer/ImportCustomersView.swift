@@ -165,6 +165,7 @@ struct ImportCustomersView: View {
                         .listRowBackground(Color.black.opacity(0.25))
                 }
             }
+            .readableListWidth()
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
 

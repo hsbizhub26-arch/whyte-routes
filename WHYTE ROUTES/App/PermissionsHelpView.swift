@@ -34,6 +34,7 @@ struct PermissionsHelpView: View {
 #endif
             }
             .padding()
+            .readableContentWidth()
         }
         .background(Color.black.ignoresSafeArea())
     }

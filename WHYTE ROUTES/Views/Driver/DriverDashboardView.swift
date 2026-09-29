@@ -87,6 +87,7 @@ struct DriverDashboardView: View {
                 .ignoresSafeArea(edges: .top)
 
             statusCard
+                .padMaxWidth(560)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
                 .background(
@@ -117,7 +118,7 @@ struct DriverDashboardView: View {
         // inset. DriverProfileView draws its own "Profile" title at the
         // very top, which was colliding with the status bar clock -
         // that title now sits below the bar instead of under it.
-        .sheet(item: $activeSheet) { sheet in
+        .padFullScreenSheet(item: $activeSheet) { sheet in
             NavigationStack {
                 Group {
                     switch sheet {

@@ -1,6 +1,7 @@
 import Foundation
 import CoreLocation
 import Combine
+import UIKit
 
 @MainActor
 class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
@@ -48,7 +49,7 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     // passes normally; under heavy tree cover it won't, and the driver
     // taps Arrived by hand. Under-triggering is a mild annoyance -
     // texting the wrong customer that their driveway is done is not.
-    private static let maxUsableAccuracy: CLLocationAccuracy = 25
+    static let maxUsableAccuracy: CLLocationAccuracy = 25
 
     private var driverId: String = ""
     private var stopLat: Double?
@@ -124,7 +125,12 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         // DRIVER turns, before the truck moves - GPS course only knows
         // a direction once there is actual travel. Google/Waze feel
         // "attached to the phone" because of exactly this source.
-        if active { manager.startUpdatingHeading() } else { manager.stopUpdatingHeading() }
+        if active {
+            syncHeadingOrientation()
+            manager.startUpdatingHeading()
+        } else {
+            manager.stopUpdatingHeading()
+        }
         if active {
             // Navigation must not depend on the shift lifecycle having
             // started GPS - an owner trying the driver flow, or a driver
@@ -218,6 +224,34 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         )
 
         detectArrival(at: location)
+    }
+
+    /// iPad only. CoreLocation measures compass heading from the top edge
+    /// of the device held in PORTRAIT unless told otherwise, so on an iPad
+    /// mounted in landscape the heading-up nav map was turned 90 degrees
+    /// from the road whenever the compass owned the heading - every stop
+    /// sign, and the whole drive on a Wi-Fi-only iPad, which has no GPS
+    /// speed to hand the heading over to course. The customer's tracking
+    /// pin inherits the same value. Called when navigation starts and on
+    /// the navigation screen's 1Hz camera tick, which catches a rotation
+    /// mid-drive. iPhone keeps the default .portrait, unchanged.
+    func syncHeadingOrientation() {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
+        let orientation: CLDeviceOrientation
+        switch scene.effectiveGeometry.interfaceOrientation {
+        case .portrait: orientation = .portrait
+        case .portraitUpsideDown: orientation = .portraitUpsideDown
+        // Interface and device landscape are mirror images: the
+        // interface is landscapeLeft when the DEVICE is landscapeRight.
+        case .landscapeLeft: orientation = .landscapeRight
+        case .landscapeRight: orientation = .landscapeLeft
+        default: return  // .unknown - keep the last good value
+        }
+        if manager.headingOrientation != orientation {
+            manager.headingOrientation = orientation
+        }
     }
 
     // MARK: - Compass Heading (navigation mode only)

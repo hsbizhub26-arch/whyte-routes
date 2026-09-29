@@ -44,6 +44,7 @@ struct ManagerRoutesView: View {
                         }
                     }
                     .padding(.horizontal)
+                    .readableContentWidth()
                 }
 
                 Spacer()

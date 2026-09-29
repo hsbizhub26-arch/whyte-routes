@@ -388,6 +388,12 @@ struct DriverStopView: View {
                         header
                         mapSection
                         primaryAction
+                        // iPad without a usable GPS fix: say up front that
+                        // arrival is manual. Not once arrived - by then it
+                        // no longer matters. See GPSArrivalNotice.
+                        if vm.jobStatus == .scheduled || vm.jobStatus == .enRoute {
+                            GPSArrivalNotice()
+                        }
                         // The driver-side "Text Customer" button is GONE, not
                         // hidden. Its old comment said the tracking link had
                         // "no real destination yet" - that stopped being true
@@ -428,6 +434,7 @@ struct DriverStopView: View {
                         Spacer(minLength: 40)
                     }
                     .padding()
+                    .readableContentWidth()
                 }
             }
 

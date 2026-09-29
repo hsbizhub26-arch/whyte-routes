@@ -146,6 +146,7 @@ struct DriverProfileView: View {
                 Spacer(minLength: 30)
             }
             .padding()
+            .readableContentWidth()
             }
         }
         .sheet(isPresented: $showReportIssue) {
@@ -155,7 +156,7 @@ struct DriverProfileView: View {
                 routeId: session.assignedRoute?.id
             )
         }
-        .sheet(isPresented: $showCamera) {
+        .padFullScreenSheet(isPresented: $showCamera) {
             ImagePicker(image: $licenseImage) { picked in
                 Task { await uploadLicense(picked) }
             }

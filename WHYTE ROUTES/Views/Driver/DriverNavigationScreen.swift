@@ -106,10 +106,14 @@ struct DriverNavigationScreen: View {
 
             VStack(spacing: 0) {
                 maneuverBanner
+                    .padMaxWidth(600)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                 Spacer(minLength: 0)
+                // Capped BEFORE the measuring background, so the camera
+                // inset and recentre chip measure the card as drawn.
                 bottomBar
+                    .padMaxWidth(600)
                     .background(
                         GeometryReader { proxy in
                             Color.clear
@@ -485,7 +489,13 @@ private struct NavMapCanvas: View, Equatable {
             updateCamera()
         }
         .onDisappear { LocationService.shared.setNavigationMode(false) }
-        .onReceive(cameraTick) { _ in updateCamera() }
+        .onReceive(cameraTick) { _ in
+            // Before updateCamera, not inside it: that returns early
+            // while the driver has panned away, and the compass badge
+            // still needs the right orientation then.
+            LocationService.shared.syncHeadingOrientation()
+            updateCamera()
+        }
     }
 
     /// Google-style compass: the map is heading-up, so this shows where

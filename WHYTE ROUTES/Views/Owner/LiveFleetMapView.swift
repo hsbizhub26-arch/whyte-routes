@@ -43,6 +43,11 @@ struct LiveFleetMapView: View {
     /// lifted above it so the locate/zoom buttons are never hidden
     /// behind the drawer. 0 when nothing is overlaid.
     var bottomInset: CGFloat = 0
+    /// Width of any panel the caller lays down the LEFT edge - the iPad
+    /// owner dashboard's side panel. The selected-driver card is pushed
+    /// right of it rather than sliding underneath. 0 when nothing is
+    /// there (every iPhone layout).
+    var leadingInset: CGFloat = 0
 
     @ObservedObject private var access = FeatureAccessManager.shared
 
@@ -193,7 +198,9 @@ struct LiveFleetMapView: View {
 
             if let selectedDriverId, let driver = visibleDrivers.first(where: { $0.id == selectedDriverId }) {
                 driverDetailCard(driver: driver)
+                    .padMaxWidth(480)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.leading, leadingInset)
                     .padding(.bottom, 16)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .animation(.spring(response: 0.3, dampingFraction: 0.85), value: selectedDriverId)

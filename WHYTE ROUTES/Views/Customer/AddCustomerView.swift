@@ -112,6 +112,7 @@ struct AddCustomerView: View {
                         .font(.footnote)
                 }
             }
+            .readableListWidth()
             .navigationTitle(isEditing ? "Edit Customer" : "Add Customer")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -160,6 +160,7 @@ struct CreateRouteView: View {
                         .font(.footnote)
                 }
             }
+            .readableListWidth()
             .navigationTitle("New Route")
             .sheet(isPresented: $showStopLimitPrompt) {
                 UpgradeRequiredView(featureName: "More Stops Per Route", requiredTier: .premium)

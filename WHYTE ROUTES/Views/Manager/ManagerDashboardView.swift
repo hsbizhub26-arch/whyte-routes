@@ -42,6 +42,7 @@ struct ManagerDashboardView: View {
                         driverSection
                     }
                     .padding(.horizontal)
+                    .readableContentWidth()
                 }
 
                 Spacer(minLength: 20)

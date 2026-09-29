@@ -73,6 +73,7 @@ struct CustomerListView: View {
                 TextField("Search customers…", text: $vm.search)
                     .textFieldStyle(.roundedBorder)
                     .padding()
+                    .readableContentWidth()
 
                 if let limit = access.customerLimit {
                     Text("\(vm.customers.count) of \(limit) customers used (\(access.tier.displayName) plan)")
@@ -129,6 +130,7 @@ struct CustomerListView: View {
                             }
                         }
                     }
+                    .readableListWidth()
                 }
             }
             .navigationTitle("Customers")

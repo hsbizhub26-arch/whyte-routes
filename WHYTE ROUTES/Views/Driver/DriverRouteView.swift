@@ -45,6 +45,7 @@ struct DriverRouteView: View {
                             }
                         }
                         .padding(.horizontal)
+                        .readableContentWidth()
                     }
                 }
 
@@ -52,7 +53,7 @@ struct DriverRouteView: View {
             }
             .padding(.top)
         }
-        .sheet(item: $selectedStop) { stop in
+        .padFullScreenSheet(item: $selectedStop) { stop in
             DriverStopView(stop: stop)
         }
     }

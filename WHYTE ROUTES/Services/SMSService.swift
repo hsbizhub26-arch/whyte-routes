@@ -14,7 +14,8 @@ final class SMSService: NSObject, MFMessageComposeViewControllerDelegate {
     func sendSMS(phone: String,
                  link: String,
                  driverName: String? = nil,
-                 etaMinutes: Int? = nil) {
+                 etaMinutes: Int? = nil,
+                 onFailure: @escaping () -> Void = {}) {
 
         let body = buildMessageBody(link: link, driverName: driverName, eta: etaMinutes)
 
@@ -25,7 +26,7 @@ final class SMSService: NSObject, MFMessageComposeViewControllerDelegate {
         }
 
         // Fallback:
-        openURLSMS(phone: phone, body: body)
+        openURLSMS(phone: phone, body: body, onFailure: onFailure)
     }
 
     // MARK: - Build SMS Body
@@ -67,15 +68,25 @@ final class SMSService: NSObject, MFMessageComposeViewControllerDelegate {
 
     // MARK: - URL Fallback
 
-    private func openURLSMS(phone: String, body: String) {
+    // Reports failure instead of doing nothing. A Wi-Fi-only iPad with
+    // no iMessage lands here and cannot text at all; the old version
+    // just returned and the button looked broken. canOpenURL is gone
+    // on purpose: "sms" isn't in LSApplicationQueriesSchemes, so it
+    // answered false on every device and this path never opened
+    // anything. open()'s own completion is the real answer.
+    private func openURLSMS(phone: String, body: String, onFailure: @escaping () -> Void) {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: "+&=?#%")
 
         let encodedBody = body.addingPercentEncoding(withAllowedCharacters: allowed) ?? body
         let urlString = "sms:\(phone)?&body=\(encodedBody)"
 
-        if let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
-            UIApplication.shared.open(url)
+        guard let url = URL(string: urlString) else {
+            onFailure()
+            return
+        }
+        UIApplication.shared.open(url) { opened in
+            if !opened { onFailure() }
         }
     }
 

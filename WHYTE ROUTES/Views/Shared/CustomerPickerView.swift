@@ -62,6 +62,7 @@ struct CustomerPickerView: View {
                             }
                         }
                     }
+                    .readableListWidth()
                 }
             }
             .navigationTitle("Select Customer")

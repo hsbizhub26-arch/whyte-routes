@@ -59,7 +59,7 @@ struct PhotoProofView: View {
             }
         }
         .padding()
-        .sheet(isPresented: $showCamera) {
+        .padFullScreenSheet(isPresented: $showCamera) {
             ImagePicker(image: $selectedImage)
         }
     }

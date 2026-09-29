@@ -54,6 +54,7 @@ struct NotificationHistoryView: View {
                         }
                         .padding(.vertical, 2)
                     }
+                    .readableListWidth()
                 }
             }
             .navigationTitle(stop.customerName ?? "Notifications")

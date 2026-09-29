@@ -214,6 +214,7 @@ struct SettingsView: View {
                         .foregroundColor(.gray)
                 }
             }
+            .readableListWidth()
             .listStyle(.insetGrouped)
             .background(Color.black.ignoresSafeArea())
             .scrollContentBackground(.hidden)

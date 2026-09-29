@@ -77,7 +77,9 @@ struct OwnerLoginView: View {
                         Spacer(minLength: 16)
                     }
                     .padding(.vertical, 24)
+                    .authColumn()
                 }
+                .padCenteredScroll()
             }
         }
         .onAppear {

@@ -59,6 +59,7 @@ struct ManagerPhotoProofView: View {
                 }
             }
             .padding()
+            .readableContentWidth()
         }
         .navigationTitle("Photo Proof")
         .navigationBarTitleDisplayMode(.inline)

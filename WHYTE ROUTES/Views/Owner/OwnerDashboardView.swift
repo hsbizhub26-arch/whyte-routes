@@ -12,6 +12,7 @@ struct OwnerDashboardView: View {
     /// Closed by default. The map is the screen; the panel is something
     /// you ask for.
     @State private var isPanelOpen = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var totalCompletedStops: Int {
         driverVM.drivers.reduce(0) { $0 + routeService.reportFor($1).completedStops }
@@ -50,43 +51,21 @@ struct OwnerDashboardView: View {
             // Tell the map how much of its bottom the open panel covers,
             // so its locate/zoom controls ride above the drawer instead
             // of hiding behind it. ~380pt sheet + the pill + safe area.
-            LiveFleetMapView(driverVM: driverVM, bottomInset: isPanelOpen ? 430 : 0)
+            // The iPad side panel sits on the left, clear of the
+            // bottom-right controls, so it covers nothing they need.
+            LiveFleetMapView(
+                driverVM: driverVM,
+                bottomInset: isPanelOpen && !useSidePanel ? 430 : 0,
+                // Panel + its 14pt margin, so the driver card starts
+                // beside it instead of underneath.
+                leadingInset: isPanelOpen && useSidePanel ? Self.sidePanelWidth + 14 : 0
+            )
 
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-
-                HStack {
-                    panelTab
-                    Spacer(minLength: 0)
-                }
-                .padding(.leading, 14)
-
-                if isPanelOpen {
-                    widgetSheet
-                        .frame(maxHeight: 380)
-                        // CLIPPED, then backgrounded. Without the clip
-                        // the ScrollView's content drew straight past
-                        // the rounded corners of its own panel, so the
-                        // card at the bottom appeared to spill out and
-                        // then vanish under the tab bar - which read as
-                        // "it won't scroll" when it was scrolling into
-                        // a region nothing could see or touch.
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .background(
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(Color.black)
-                        )
-                        .shadow(color: .black.opacity(0.35), radius: 12, y: -4)
-                        .padding(.horizontal, 8)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+            if useSidePanel {
+                sidePanelOverlay
+            } else {
+                bottomPanelOverlay
             }
-            .padding(.bottom, 6)
-            // The map underneath deliberately bleeds past the bottom
-            // safe area; this overlay must not. Without it the panel
-            // ran under the tab bar and lost its last 80-odd points to
-            // something the finger can't reach.
-            .safeAreaPadding(.bottom)
         }
         .onAppear {
             driverVM.startLiveUpdates()
@@ -106,6 +85,90 @@ struct OwnerDashboardView: View {
                 requiredTier: SubscriptionTier(rawValue: access.tier.rawValue + 1) ?? .enterprise
             )
         }
+    }
+
+    /// Full-width iPad only. Gated on the idiom as well as the size
+    /// class: a Pro Max in landscape is also .regular and must keep the
+    /// iPhone panel; an iPad in a narrow split-screen slot is .compact
+    /// and gets the bottom panel too, since 380pt wouldn't fit beside
+    /// a usable map.
+    private var useSidePanel: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular
+    }
+
+    private static let sidePanelWidth: CGFloat = 380
+
+    /// iPad: the same widgets as a fixed-width column down the left
+    /// edge, full height instead of a 380pt drawer. It starts below the
+    /// map's driver chips (top row) and ends at the Dashboard tab, which
+    /// stays bottom-left where the phone layout puts it.
+    private var sidePanelOverlay: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                if isPanelOpen {
+                    widgetSheet
+                        .frame(width: Self.sidePanelWidth)
+                        .frame(maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Color.black)
+                        )
+                        .shadow(color: .black.opacity(0.35), radius: 12, x: 4)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                } else {
+                    Spacer(minLength: 0)
+                }
+
+                panelTab
+            }
+            .padding(.leading, 14)
+            // Clears LiveFleetMapView's driver legend chips.
+            .padding(.top, 64)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.bottom, 6)
+        .safeAreaPadding(.bottom)
+    }
+
+    /// iPhone (and compact-width iPad): the original tap-to-open drawer.
+    private var bottomPanelOverlay: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            HStack {
+                panelTab
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 14)
+
+            if isPanelOpen {
+                widgetSheet
+                    .frame(maxHeight: 380)
+                    // CLIPPED, then backgrounded. Without the clip
+                    // the ScrollView's content drew straight past
+                    // the rounded corners of its own panel, so the
+                    // card at the bottom appeared to spill out and
+                    // then vanish under the tab bar - which read as
+                    // "it won't scroll" when it was scrolling into
+                    // a region nothing could see or touch.
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Color.black)
+                    )
+                    .shadow(color: .black.opacity(0.35), radius: 12, y: -4)
+                    .padding(.horizontal, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .padding(.bottom, 6)
+        // The map underneath deliberately bleeds past the bottom
+        // safe area; this overlay must not. Without it the panel
+        // ran under the tab bar and lost its last 80-odd points to
+        // something the finger can't reach.
+        .safeAreaPadding(.bottom)
     }
 
     /// Small, labelled, and it says which way it will go. A bare

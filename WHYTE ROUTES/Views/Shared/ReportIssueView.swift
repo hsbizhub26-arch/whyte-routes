@@ -46,6 +46,7 @@ struct ReportIssueView: View {
                     }
                 }
             }
+            .readableListWidth()
             .navigationTitle("Report Issue")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

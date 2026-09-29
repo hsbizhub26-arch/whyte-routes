@@ -175,6 +175,7 @@ struct ManageEmployeesView: View {
                         pendingInvitesSection
                     }
                     .padding()
+                    .readableContentWidth()
                 }
             }
             .navigationTitle("Team")

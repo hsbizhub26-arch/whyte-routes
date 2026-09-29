@@ -106,6 +106,7 @@ struct CreateCompanyView: View {
                         .padding(.top, 8)
                 }
                 .padding()
+                .readableContentWidth()
             }
         }
         .sheet(isPresented: $showPaywallAfterCreate) {
