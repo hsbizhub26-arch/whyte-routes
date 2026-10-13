@@ -11,6 +11,12 @@ final class AuthSession: ObservableObject {
     @Published var user: User? = nil
     @Published var role: UserRole = .none
     @Published var isLoading: Bool = true
+    /// True when a signed-in user's role/company has been resolving for
+    /// longer than `loadTimeout`. isLoading stays true (the router must
+    /// not fall through to the login screen for someone who IS signed
+    /// in), but the UI can offer Retry / Sign out instead of an endless
+    /// spinner. Cleared the moment loading finishes.
+    @Published var loadTimedOut: Bool = false
     @Published var isPlatformAdmin: Bool = false
 
     /// True when an owner/manager has also opted into driving routes
@@ -30,7 +36,40 @@ final class AuthSession: ObservableObject {
 
     private var authListener: AuthStateDidChangeListenerHandle?
 
+    /// How long a signed-in user's permissions/company lookup may run
+    /// before the loading screen offers Retry / Sign out. The lookup is
+    /// several sequential Firestore reads with no timeout of their own,
+    /// so on a bad connection it can otherwise spin indefinitely.
+    private static let loadTimeout: Duration = .seconds(15)
+    private var loadWatchdog: Task<Void, Never>?
+
     private init() {}
+
+    private func startLoadWatchdog() {
+        loadWatchdog?.cancel()
+        loadWatchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.loadTimeout)
+            guard !Task.isCancelled, let self, self.isLoading else { return }
+            self.loadTimedOut = true
+        }
+    }
+
+    private func stopLoadWatchdog() {
+        loadWatchdog?.cancel()
+        loadWatchdog = nil
+        loadTimedOut = false
+    }
+
+    /// Re-runs the sign-in resolution from scratch (Firebase re-fires the
+    /// auth listener immediately with the current user). The original,
+    /// still-pending attempt is not cancelled; whichever finishes first
+    /// wins and both write the same values.
+    @MainActor
+    func retryLoad() {
+        isLoading = true
+        loadTimedOut = false
+        listenForAuthChanges()
+    }
 
     /// Watches this account's own permissions document so an offboarded
     /// person is signed out instead of sitting on a cached route.
@@ -86,7 +125,11 @@ final class AuthSession: ObservableObject {
         authListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
                 self?.user = user
-                defer { self?.isLoading = false }
+                if user != nil { self?.startLoadWatchdog() }
+                defer {
+                    self?.isLoading = false
+                    self?.stopLoadWatchdog()
+                }
 
                 if user == nil { self?.stopMembershipWatch() }
 
