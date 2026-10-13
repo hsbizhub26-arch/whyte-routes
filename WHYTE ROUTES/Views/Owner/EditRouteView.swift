@@ -274,6 +274,7 @@ struct EditRouteView: View {
                                 .font(.footnote)
                         }
                     }
+                    .readableListWidth()
                 }
             }
             .navigationTitle("Edit Route")

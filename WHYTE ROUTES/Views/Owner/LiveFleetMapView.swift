@@ -48,6 +48,15 @@ struct LiveFleetMapView: View {
     /// right of it rather than sliding underneath. 0 when nothing is
     /// there (every iPhone layout).
     var leadingInset: CGFloat = 0
+    /// Which driver is isolated on the map. A binding so the iPad
+    /// dispatch split view can drive it from its sidebar list; every
+    /// other caller passes its own @State.
+    @Binding var selectedDriverId: String?
+    /// iPad split view: the sidebar list replaces the chip row.
+    var showsLegend = true
+    /// iPad split view: fly to the driver when one is picked from outside
+    /// the map (the sidebar), instead of leaving the camera where it was.
+    var focusesOnSelection = false
 
     @ObservedObject private var access = FeatureAccessManager.shared
 
@@ -65,7 +74,6 @@ struct LiveFleetMapView: View {
     @State private var stopsByDriver: [String: [Stop]] = [:]
     @State private var routesByDriver: [String: Route] = [:]
     @State private var subscribedDriverIds: Set<String> = []
-    @State private var selectedDriverId: String?
     @State private var selectedDriverShift: Shift?
     /// What the map is actually showing, so the zoom buttons have a
     /// span to scale - cameraPosition is often not a plain region.
@@ -192,7 +200,7 @@ struct LiveFleetMapView: View {
             // than a capability. Hidden rather than locked, because a
             // padlock over a control that would do nothing anyway
             // reads as a smaller app, not a bigger upsell.
-            if access.canAccessLiveFleetMap() {
+            if showsLegend && access.canAccessLiveFleetMap() {
                 driverLegend
             }
 
@@ -217,6 +225,22 @@ struct LiveFleetMapView: View {
         }
         .onChange(of: visibleDrivers.map(\.id)) { _, _ in
             fitCameraToDriversIfNeeded()
+        }
+        .onChange(of: selectedDriverId) { _, id in
+            loadShift(for: id)
+            if focusesOnSelection { focusCamera(on: id) }
+        }
+    }
+
+    private func focusCamera(on id: String?) {
+        guard let id, let coordinate = visibleDrivers.first(where: { $0.id == id })?.coordinate else { return }
+        withAnimation(.easeInOut(duration: 0.4)) {
+            cameraPosition = .region(
+                MKCoordinateRegion(
+                    center: coordinate,
+                    span: MKCoordinateSpan(latitudeDelta: 0.04, longitudeDelta: 0.04)
+                )
+            )
         }
     }
 
@@ -367,7 +391,6 @@ struct LiveFleetMapView: View {
             HStack(spacing: 8) {
                 legendChip(title: "All", color: .white, isSelected: selectedDriverId == nil) {
                     selectedDriverId = nil
-                    selectedDriverShift = nil
                 }
 
                 ForEach(visibleDrivers) { driver in
@@ -417,10 +440,12 @@ struct LiveFleetMapView: View {
 
     // MARK: - Driver selection (pin tap or legend chip - same action)
     private func selectDriver(_ id: String) {
-        let wasSelected = selectedDriverId == id
-        selectedDriverId = wasSelected ? nil : id
+        selectedDriverId = selectedDriverId == id ? nil : id
+    }
+
+    private func loadShift(for id: String?) {
         selectedDriverShift = nil
-        guard !wasSelected else { return }
+        guard let id else { return }
         driverRepo.fetchActiveShift(driverId: id) { shift in
             Task { @MainActor in
                 // Only apply if the owner hasn't already tapped a

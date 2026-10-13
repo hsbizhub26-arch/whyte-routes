@@ -12,6 +12,7 @@ struct OwnerDashboardView: View {
     /// Closed by default. The map is the screen; the panel is something
     /// you ask for.
     @State private var isPanelOpen = false
+    @State private var selectedDriverId: String?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var totalCompletedStops: Int {
@@ -58,7 +59,8 @@ struct OwnerDashboardView: View {
                 bottomInset: isPanelOpen && !useSidePanel ? 430 : 0,
                 // Panel + its 14pt margin, so the driver card starts
                 // beside it instead of underneath.
-                leadingInset: isPanelOpen && useSidePanel ? Self.sidePanelWidth + 14 : 0
+                leadingInset: isPanelOpen && useSidePanel ? Self.sidePanelWidth + 14 : 0,
+                selectedDriverId: $selectedDriverId
             )
 
             if useSidePanel {

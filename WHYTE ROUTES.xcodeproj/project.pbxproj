@@ -111,6 +111,7 @@
 				Views/Owner/DriverReportsView.swift,
 				Views/Owner/DriverTimeReportView.swift,
 				Views/Owner/EditRouteView.swift,
+				Views/Owner/FleetDispatchSplitView.swift,
 				Views/Owner/LiveFleetMapView.swift,
 				Views/Owner/ManageEmployeesView.swift,
 				Views/Owner/NotificationHistoryView.swift,

@@ -15,7 +15,7 @@ struct OwnerTabView: View {
 
             TabView {
 
-                OwnerDashboardView()
+                homeTab
                     .tabItem {
                         Label("Home", systemImage: "house")
                     }
@@ -64,6 +64,18 @@ struct OwnerTabView: View {
                     }
             }
             .accentColor(WRTheme.gold)
+        }
+    }
+
+    // Full-width iPad gets the split-view dispatch screen (fleet list +
+    // map). Anything else - iPhone, or an iPad in a narrow Split View
+    // slot - keeps the map-first dashboard with its drawer.
+    @ViewBuilder
+    private var homeTab: some View {
+        if UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular {
+            FleetDispatchSplitView()
+        } else {
+            OwnerDashboardView()
         }
     }
 

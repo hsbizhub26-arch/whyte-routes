@@ -3,6 +3,7 @@ import SwiftUI
 struct ManagerTabView: View {
 
     @EnvironmentObject var auth: AuthSession
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         TabView {
@@ -13,6 +14,16 @@ struct ManagerTabView: View {
             .tabItem {
                 Image(systemName: "speedometer")
                 Text("Dashboard")
+            }
+
+            // iPad only: managers had no live map at all. Full-width
+            // regular size class, same gate as the owner's Home tab.
+            if UIDevice.current.userInterfaceIdiom == .pad && horizontalSizeClass == .regular {
+                FleetDispatchSplitView()
+                    .tabItem {
+                        Image(systemName: "map.circle")
+                        Text("Live Map")
+                    }
             }
 
             NavigationStack {
