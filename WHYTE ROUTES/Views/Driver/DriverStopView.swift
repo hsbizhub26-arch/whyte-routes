@@ -68,7 +68,7 @@ final class DriverStopViewModel: ObservableObject {
     /// the driver shouldn't stop the next one from registering.
     func otherStopCoordinates(excluding stop: Stop) -> [CLLocationCoordinate2D] {
         session.activeStops
-            .filter { $0.id != stop.id && !$0.isCompleted }
+            .filter { $0.id != stop.id && $0.isPending }
             .compactMap { $0.coordinate }
     }
 
@@ -170,7 +170,7 @@ final class DriverStopViewModel: ObservableObject {
 
     var nextStopPreview: Stop? {
         session.activeStops
-            .filter { !$0.isCompleted && $0.id != stop.id }
+            .filter { $0.isPending && $0.id != stop.id }
             .sorted { $0.order < $1.order }
             .first
     }
@@ -249,6 +249,49 @@ final class DriverStopViewModel: ObservableObject {
         // drive on to other people's homes for the rest of the shift.
         trackingRepo.closeOut(stopId: stop.id)
 
+        advanceToNextPendingStop(in: route)
+
+        isCompleting = false
+    }
+
+    // MARK: - SKIP STOP
+    // For a stop the driver can't or won't service (blocked driveway,
+    // customer cancelled, out of time). Without this a bypassed stop
+    // sat at the head of the queue and every customer behind it kept a
+    // count that included it. No text is sent: nothing was done.
+    func markSkipped() async {
+        guard let route else { return }
+
+        isCompleting = true
+        completionError = nil
+
+        // Same discipline as markCompleted: persist a COPY first and only
+        // commit it once Firestore confirms. Status goes back to
+        // scheduled so a skipped en-route stop doesn't keep an en-route
+        // badge.
+        var updated = stop
+        updated.isSkipped = true
+        updated.status = JobStatus.scheduled.rawValue
+
+        let saved = await routeService.updateStop(routeId: route.id, stop: updated)
+        guard saved else {
+            isCompleting = false
+            completionError = "Couldn't skip this stop - check your connection and tap again."
+            return
+        }
+        stop = updated
+
+        // This customer is no longer being served: end their live link
+        // without marking it completed.
+        trackingRepo.closeOutSkipped(stopId: stop.id)
+
+        advanceToNextPendingStop(in: route)
+
+        isCompleting = false
+    }
+
+    // Shared tail of markCompleted and markSkipped.
+    private func advanceToNextPendingStop(in route: Route) {
         // Real bug found during a full-workday audit: nothing anywhere
         // ever marked a Route itself "completed" once every stop on it
         // was done - RouteRepository.updateStatus existed but had zero
@@ -260,9 +303,9 @@ final class DriverStopViewModel: ObservableObject {
         // plus the rest of the session's last-known stop state, not a
         // re-fetch - the snapshot listener updating activeStops with
         // THIS stop's change is async and not guaranteed to have
-        // landed yet.
+        // landed yet. A skipped stop counts as finished here too.
         let others = session.activeStops.filter { $0.id != stop.id }
-        let allDone = others.allSatisfy { $0.isCompleted }
+        let allDone = others.allSatisfy { !$0.isPending }
         if allDone {
             routeService.updateStatus(for: route.id, status: "completed")
         }
@@ -270,7 +313,7 @@ final class DriverStopViewModel: ObservableObject {
         // Auto-advance: load the next stop into this same screen so
         // the driver can tap Navigate immediately - no back-and-forth
         // to Dashboard and re-opening a stop required.
-        if let next = others.filter({ !$0.isCompleted }).sorted(by: { $0.order < $1.order }).first {
+        if let next = others.filter({ $0.isPending }).sorted(by: { $0.order < $1.order }).first {
             stop = next
             etaMinutes = nil
             LocationService.shared.setArrivalTarget(
@@ -282,8 +325,6 @@ final class DriverStopViewModel: ObservableObject {
         } else {
             routeCompleted = true
         }
-
-        isCompleting = false
     }
 
     /// Driver's own ETA to the current stop - on-device MKDirections,
@@ -361,6 +402,7 @@ struct DriverStopView: View {
     @ObservedObject private var access = FeatureAccessManager.shared
     @State private var showPhotoCapture = false
     @State private var proofPhotoURL: String?
+    @State private var showSkipConfirm = false
     /// The map was `initialPosition:`, which means exactly what it says
     /// - it framed the stop once and then never moved again, so during
     /// navigation the driver watched their own dot walk off the edge.
@@ -429,6 +471,16 @@ struct DriverStopView: View {
                             }
                             completeButton
                             completionErrorBanner
+                        }
+
+                        // Available at every stage before completion: a
+                        // blocked driveway is found on arrival, but a
+                        // cancelled job is found before setting off.
+                        if vm.jobStatus != .completed && !vm.stop.isCompleted && !vm.stop.isSkipped {
+                            skipButton
+                            if vm.jobStatus != .arrived {
+                                completionErrorBanner
+                            }
                         }
 
                         Spacer(minLength: 40)
@@ -936,6 +988,42 @@ extension DriverStopView {
         .disabled(vm.isCompleting || vm.stop.isCompleted)
         .opacity(vm.stop.isCompleted ? 0.4 : 1)
         .padding(.top, 10)
+    }
+
+    // MARK: SKIP BUTTON
+    private var skipButton: some View {
+        Button {
+            showSkipConfirm = true
+        } label: {
+            HStack {
+                Image(systemName: "forward.end.fill")
+                Text("Skip Stop")
+            }
+            .font(.headline)
+            .foregroundColor(.white)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.black.opacity(0.25))
+            .cornerRadius(14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color("WRThemeGold"), lineWidth: 1)
+            )
+        }
+        .disabled(vm.isCompleting)
+        .padding(.top, 6)
+        .confirmationDialog(
+            "Skip this stop?",
+            isPresented: $showSkipConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Skip Stop", role: .destructive) {
+                Task { await vm.markSkipped() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The customer won't get a completion text and their tracking link will close.")
+        }
     }
 
     @ViewBuilder

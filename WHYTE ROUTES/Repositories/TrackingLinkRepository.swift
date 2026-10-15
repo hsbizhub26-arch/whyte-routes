@@ -250,6 +250,27 @@ final class TrackingLinkRepository {
         }
     }
 
+    // MARK: - Close a Skipped Stop's Links
+    // The driver passed this stop without servicing it. Unlike closeOut
+    // this sets neither `completed` nor `completedAt`: the customer must
+    // not be told "Service complete" for a visit that never happened.
+    // With active:false and no completedAt the rule denies the read and
+    // the page falls to its "no longer available" state.
+    func closeOutSkipped(stopId: String) {
+        guard let companyId = CompanySession.shared.currentCompanyId else { return }
+
+        activeLinks(forStopId: stopId) { links in
+            for link in links {
+                self.goDark(
+                    companyId: companyId,
+                    linkId: link.id,
+                    context: "skipped stop \(stopId)",
+                    fields: ["active": false]
+                )
+            }
+        }
+    }
+
     // MARK: - Supersede a Stop's Links (staff re-pointed the stop)
     // Called when a stop stops meaning the person its links were minted
     // for - the owner's "Change Customer" picker. Everything that was

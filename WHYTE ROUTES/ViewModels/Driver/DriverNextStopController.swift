@@ -16,12 +16,12 @@ final class DriverNextStopController: ObservableObject {
 
     // MARK: - The next stop
     var nextStop: Stop? {
-        session.activeStops.first { !$0.isCompleted }
+        session.activeStops.first { $0.isPending }
     }
 
     // MARK: - All remaining stops
     var remainingStops: [Stop] {
-        session.activeStops.filter { !$0.isCompleted }
+        session.activeStops.filter { $0.isPending }
     }
 
     // MARK: - Completed count

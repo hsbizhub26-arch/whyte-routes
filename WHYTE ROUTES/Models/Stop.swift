@@ -44,6 +44,10 @@ struct Stop: Identifiable {
     var order: Int = 0
     var isCompleted: Bool = false
     var isSkipped: Bool = false
+
+    /// Still ahead of the driver: neither done nor skipped.
+    var isPending: Bool { !isCompleted && !isSkipped }
+
     var driverId: String? = nil
     var status: String = JobStatus.scheduled.rawValue
 

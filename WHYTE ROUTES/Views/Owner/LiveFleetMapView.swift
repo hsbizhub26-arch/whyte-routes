@@ -462,7 +462,7 @@ struct LiveFleetMapView: View {
     // themselves sees on their own dashboard.
     private func driverDetailCard(driver: Driver) -> some View {
         let stops = stopsByDriver[driver.id] ?? []
-        let currentStop = stops.first { !$0.isCompleted }
+        let currentStop = stops.first { $0.isPending }
         let stopPosition = currentStop.flatMap { stop in stops.firstIndex(where: { $0.id == stop.id }).map { ($0 + 1, stops.count) } }
         let isWorking = selectedDriverShift?.isActive ?? false
 

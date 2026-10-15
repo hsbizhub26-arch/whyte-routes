@@ -230,7 +230,7 @@ final class DriverSession: ObservableObject {
 
     // MARK: Next stop
     var nextStop: Stop? {
-        activeStops.first { !$0.isCompleted }
+        activeStops.first { $0.isPending }
     }
 }
 
