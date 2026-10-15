@@ -7,3 +7,4 @@ firebase-debug.log
 .firebase/
 firestore-tests/node_modules/
 firestore-tests/firestore.rules
+firestore-tests/firestore-debug.log
