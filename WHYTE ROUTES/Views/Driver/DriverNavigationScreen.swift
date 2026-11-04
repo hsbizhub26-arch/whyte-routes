@@ -470,6 +470,10 @@ private struct NavMapCanvas: View, Equatable {
                 }
             }
         }
+        // Waze-like: dark, muted, no shop/restaurant pins, live traffic
+        // colours; 3D buildings kept for turn-by-turn. Free (Apple Maps).
+        .mapStyle(.standard(elevation: .realistic, emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: true))
+        .environment(\.colorScheme, .dark)
         .onMapCameraChange(frequency: .continuous) { context in
             mapHeading = context.camera.heading
         }

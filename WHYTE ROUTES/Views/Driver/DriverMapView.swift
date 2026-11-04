@@ -691,6 +691,10 @@ struct DriverMapView: View {
                 UserAnnotation()
             }
         }
+        // Clean, Waze-like: dark, muted, no shop/restaurant pins, live
+        // traffic colours on the roads. All free (Apple Maps).
+        .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: true))
+        .environment(\.colorScheme, .dark)
         // Feeds DriverMapViewModel.visibleRegion so the zoom buttons
         // have a span to scale. cameraPosition is normally
         // .userLocation(...), which carries no region of its own -

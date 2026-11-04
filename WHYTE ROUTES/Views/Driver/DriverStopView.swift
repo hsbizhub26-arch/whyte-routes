@@ -875,6 +875,20 @@ extension DriverStopView {
                         .cornerRadius(14)
                 }
 
+                // Same "starting this stop" gesture, but directions come
+                // from the driver's own nav app - Waze for its police /
+                // construction / closure alerts, which no other app may
+                // show. Our tracking keeps running in the background, so
+                // the customer link and texts still work.
+                if let coordinate = vm.stop.coordinate {
+                    ExternalNavigationButtons(coordinate: coordinate) {
+                        if DriverSession.shared.activeShift == nil {
+                            _ = await DriverSession.shared.startShift()
+                        }
+                        await vm.startDriving()
+                    }
+                }
+
             case .enRoute:
                 // Now that they're on the way, arriving is the primary
                 // action. Navigation becomes a secondary control so a
@@ -896,6 +910,10 @@ extension DriverStopView {
                 .disabled(!vm.canMarkArrived)
 
                 if let coordinate = vm.stop.coordinate {
+                    // Already en route: just hand off directions, no
+                    // second "on my way" text.
+                    ExternalNavigationButtons(coordinate: coordinate) { }
+
                     Button {
                         if nav.isNavigating { nav.stop() } else { nav.start(to: coordinate) }
                     } label: {
@@ -1053,6 +1071,53 @@ extension DriverStopView {
                 .padding(.horizontal, 40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Navigate with Waze / Google Maps / Apple Maps
+//
+// Free hand-off to the driver's own navigation app. Waze is the only way
+// a driver gets police, construction and road-closure alerts - Waze does
+// not let any other app display them. Universal https links: each opens
+// the installed app straight into turn-by-turn, or the website if the app
+// isn't installed, so no Info.plist URL-scheme entries are needed.
+// `beforeOpen` runs first (e.g. clock in + mark the stop en route), so the
+// customer's link and texts are live before the driver leaves this screen.
+struct ExternalNavigationButtons: View {
+    let coordinate: CLLocationCoordinate2D
+    var beforeOpen: () async -> Void
+
+    @Environment(\.openURL) private var openURL
+
+    private var lat: String { String(format: "%.6f", coordinate.latitude) }
+    private var lng: String { String(format: "%.6f", coordinate.longitude) }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            navButton("Waze", "https://waze.com/ul?ll=\(lat),\(lng)&navigate=yes")
+            navButton("Google Maps", "https://www.google.com/maps/dir/?api=1&destination=\(lat),\(lng)&travelmode=driving")
+            navButton("Apple Maps", "https://maps.apple.com/?daddr=\(lat),\(lng)&dirflg=d")
+        }
+    }
+
+    private func navButton(_ title: String, _ link: String) -> some View {
+        Button {
+            Task {
+                await beforeOpen()
+                if let url = URL(string: link) { openURL(url) }
+            }
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.12))
+                .cornerRadius(12)
+        }
+        .accessibilityLabel("Navigate with \(title)")
     }
 }
 
