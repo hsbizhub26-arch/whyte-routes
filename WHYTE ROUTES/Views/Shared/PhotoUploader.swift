@@ -8,6 +8,17 @@ class PhotoUploader: ObservableObject {
     private let storage = Storage.storage()
     private let db = Firestore.firestore()
 
+    // EVERY UPLOAD WAS BEING REFUSED. storage.rules only accepts files whose
+    // contentType is image/* (isReasonableImage), and putDataAsync without
+    // metadata uploads as application/octet-stream - so proof-of-work and
+    // license photos both failed with "User does not have permission"
+    // (found on the Nov 4 drive test; the bucket held zero photos).
+    private static var jpegMetadata: StorageMetadata {
+        let metadata = StorageMetadata()
+        metadata.contentType = "image/jpeg"
+        return metadata
+    }
+
     func uploadPhoto(image: UIImage, companyId: String, routeId: String, stopId: String, driverId: String, type: String) async throws -> String {
 
         guard let imageData = image.jpegData(compressionQuality: 0.7) else {
@@ -21,7 +32,7 @@ class PhotoUploader: ObservableObject {
 
         let storageRef = storage.reference().child(path)
 
-        let _ = try await storageRef.putDataAsync(imageData)
+        let _ = try await storageRef.putDataAsync(imageData, metadata: Self.jpegMetadata)
 
         let url = try await storageRef.downloadURL()
 
@@ -57,7 +68,7 @@ class PhotoUploader: ObservableObject {
 
         let path = "companies/\(companyId)/licenses/\(driverId)/license.jpg"
         let storageRef = storage.reference().child(path)
-        _ = try await storageRef.putDataAsync(imageData)
+        _ = try await storageRef.putDataAsync(imageData, metadata: Self.jpegMetadata)
 
         return path
     }
