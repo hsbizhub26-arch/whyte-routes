@@ -94,6 +94,13 @@ final class DriverSession: ObservableObject {
             if let routeId = assignedRoute?.id {
                 Task.detached {
                     await NotificationService.shared.notifyShiftStart(routeId: routeId)
+                    // The shift-start texts are what CREATE each customer's
+                    // tracking link, and they finish a few seconds after
+                    // the publisher's first link lookup above. Look again
+                    // now so the first customer's page goes live straight
+                    // away (the 20s retry in TrackingBroadcastService is
+                    // the backstop).
+                    await MainActor.run { TrackingBroadcastService.shared.refreshLinks() }
                 }
             }
             return true

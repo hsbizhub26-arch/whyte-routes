@@ -84,6 +84,29 @@ final class TrackingBroadcastService {
     /// linkId -> what was last written for a link with no coordinates,
     /// and when. Lets an unchanged "3 stops before yours" skip the write.
     private var lastWaitingPayload: [String: (signature: String, at: Date)] = [:]
+
+    // LINKS CREATED AFTER START. Found on the Nov 4 drive test: Start
+    // Shift calls start() -> refreshLinks() at 22:27:55, and the
+    // shift-start text that MINTS each customer's tracking link landed
+    // at 22:27:58. Links were only ever looked up again when the stop
+    // list reloaded or a stop was completed, so the first customer of
+    // every shift - the one who just got "we're on our way" - watched a
+    // blank tracking page while the driver drove to them. The same goes
+    // for a link the owner sends mid-shift from Edit Route.
+    //
+    // So while the CURRENT destination has no link, look again - at most
+    // every 20s, and only as GPS fixes arrive (i.e. while on shift).
+    private var lastLinkRefreshAt: Date?
+    private static let linkRetryInterval: TimeInterval = 20
+
+    private func retryLinksIfCurrentStopHasNone() {
+        let current = DriverSession.shared.activeStops
+            .filter { !$0.isCompleted && !$0.isSkipped }
+            .min { $0.order < $1.order }
+        guard let current, linksByStopId[current.id] == nil else { return }
+        if let last = lastLinkRefreshAt, Date().timeIntervalSince(last) < Self.linkRetryInterval { return }
+        refreshLinks()
+    }
     // Directions requests are rate-limited and far more expensive than
     // a write, so the ETA refreshes on its own slower cadence and is
     // reused in between.
@@ -128,6 +151,7 @@ final class TrackingBroadcastService {
         cancellables.removeAll()
         linksByStopId.removeAll()
         lastWaitingPayload.removeAll()
+        lastLinkRefreshAt = nil
         lastPublishedAt = nil
         lastEtaComputedAt = nil
         cachedEtaMinutes = nil
@@ -139,6 +163,7 @@ final class TrackingBroadcastService {
     func refreshLinks() {
         let stops = DriverSession.shared.activeStops
         guard !stops.isEmpty else { return }
+        lastLinkRefreshAt = Date()
         forceNextPublish = true
         for stop in stops {
             // Matched on the CUSTOMER the stop points at now, not on
@@ -186,7 +211,9 @@ final class TrackingBroadcastService {
     // MARK: - Publishing
 
     private func handleLocation(_ coordinate: CLLocationCoordinate2D, allowCoordinates: Bool = true) {
-        guard isRunning, !linksByStopId.isEmpty else { return }
+        guard isRunning else { return }
+        retryLinksIfCurrentStopHasNone()
+        guard !linksByStopId.isEmpty else { return }
 
         if let last = lastPublishedAt, Date().timeIntervalSince(last) < Self.publishInterval {
             return
