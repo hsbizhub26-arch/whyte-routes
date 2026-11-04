@@ -82,7 +82,11 @@
   .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--gold); margin-right:7px; vertical-align:middle; }
   .leaflet-container { background: #1a1a1a; }
   /* OSM tiles are bright; dim them so the page stays dark-themed. */
-  .leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+  /* Neutral charcoal night map. The old invert + hue-rotate turned parks
+     bright green and highways pink, which read as muddy and fought the
+     gold route line. Greyscale first removes all of that, so only the
+     car (blue) and the route (gold) carry colour - Uber/Google night look. */
+  .leaflet-tile { filter: grayscale(1) invert(1) brightness(.72) contrast(1.2); }
 </style>
 </head>
 <body>
@@ -226,6 +230,17 @@ function ensureMap() {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap"
   }).addTo(map);
+  // The customer touching the map pauses auto-framing for 20s, so the
+  // page never yanks the view away from something they're looking at.
+  let userTimer = null;
+  const userMoved = () => {
+    userIsMovingMap = true;
+    clearTimeout(userTimer);
+    userTimer = setTimeout(() => { userIsMovingMap = false; }, 20000);
+  };
+  map.on("dragstart", userMoved);
+  map.getContainer().addEventListener("wheel", userMoved, { passive: true });
+  map.getContainer().addEventListener("touchstart", userMoved, { passive: true });
 }
 
 const goldIcon = () => L.divIcon({
@@ -482,16 +497,28 @@ function updateRouteLine(shouldShow) {
   }
 }
 
+// Frame the car and the home pin together - once at the start, and again
+// whenever the car is about to leave the visible map (it used to drive
+// straight off the edge and stay there), or the pin moves (an address
+// corrected mid-route). Never re-frames while the customer is panning or
+// zooming themselves.
+let userIsMovingMap = false, lastStopKey = null;
 function fitIfPossible() {
-  if (hasFitBounds || !map) return;
+  if (!map) return;
   const pts = [];
   if (driverMarker) pts.push(driverMarker.getLatLng());
   if (stopMarker) pts.push(stopMarker.getLatLng());
+  const stopKey = stopMarker ? stopMarker.getLatLng().toString() : null;
+  const pinMoved = hasFitBounds && stopKey !== lastStopKey;
+  lastStopKey = stopKey;
   if (pts.length === 2) {
-    map.fitBounds(L.latLngBounds(pts).pad(0.35));
-    hasFitBounds = true;
-  } else if (pts.length === 1) {
-    map.setView(pts[0], 14);
+    const carNearEdge = !map.getBounds().pad(-0.15).contains(pts[0]);
+    if (!hasFitBounds || pinMoved || (carNearEdge && !userIsMovingMap)) {
+      map.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: 16, animate: hasFitBounds });
+      hasFitBounds = true;
+    }
+  } else if (pts.length === 1 && !hasFitBounds) {
+    map.setView(pts[0], 15);
   }
 }
 </script>

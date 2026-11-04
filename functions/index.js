@@ -15,6 +15,7 @@
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { SignedDataVerifier, Environment } = require("@apple/app-store-server-library");
@@ -1659,6 +1660,52 @@ exports.sendTrackingLink = onCall(
     );
 
     return { deliveryStatus, url, linkId, method, failureReason: result.failureReason || null };
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────
+// A STOP'S ADDRESS CHANGED -> ITS LIVE CUSTOMER LINK FOLLOWS.
+//
+// A tracking link keeps its own copy of the address and home-pin
+// coordinates, taken when it is minted (at Start Shift, inside the
+// shift-start text). On the Nov 4 drive test the owner corrected the
+// stop to 157 Crosby 20 seconds after the link was minted for 802 Pam:
+// the driver app and the ETA used the new address, but the customer's
+// page kept drawing the old pin and line - "5 min" from Richmond Hill to
+// Newmarket, and the wrong service address on screen.
+//
+// This runs on every stop update but only writes when the address or
+// coordinates actually changed, and only to links still active for that
+// stop. A completed or superseded link is left alone (it's history).
+// Only the address/pin fields are touched - never the token, customer
+// name or active flags that ensureTrackingLink owns.
+exports.syncTrackingLinkAddress = onDocumentUpdated(
+  "companies/{companyId}/routes/{routeId}/stops/{stopId}",
+  async (event) => {
+    const before = (event.data && event.data.before.data()) || {};
+    const after = (event.data && event.data.after.data()) || {};
+    if (before.address === after.address
+        && before.latitude === after.latitude
+        && before.longitude === after.longitude) {
+      return;
+    }
+
+    const { companyId, stopId } = event.params;
+    const links = await admin.firestore()
+      .collection(`companies/${companyId}/trackingLinks`)
+      .where("stopId", "==", stopId)
+      .where("active", "==", true)
+      .get();
+    if (links.empty) return;
+
+    const del = admin.firestore.FieldValue.delete();
+    const update = {
+      address: after.address || "",
+      stopLatitude: typeof after.latitude === "number" ? after.latitude : del,
+      stopLongitude: typeof after.longitude === "number" ? after.longitude : del,
+    };
+    await Promise.all(links.docs.map((d) => d.ref.update(update)));
+    console.log(`📍 stop ${stopId} (company ${companyId}) address changed -> updated ${links.size} live tracking link(s)`);
   }
 );
 
