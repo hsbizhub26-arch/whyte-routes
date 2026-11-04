@@ -8,8 +8,9 @@ struct SettingsView: View {
     @State private var showSubscription = false
     @State private var alsoDrivesToggle = false
     @State private var testPhone = ""
-    @State private var testResult: String?
+    @State private var testOutcome: TestSmsOutcome?
     @State private var isSendingTest = false
+    @State private var isCheckingTest = false
     @State private var quietHoursToggle = false
     @ObservedObject private var companySession = CompanySession.shared
     private let companyRepo = CompanyRepository()
@@ -142,16 +143,44 @@ struct SettingsView: View {
                     Button {
                         sendTest()
                     } label: {
-                        Text(isSendingTest ? "Sending…" : "Send Test SMS")
+                        Text(isSendingTest ? "Sending… waiting for the carrier's answer" : "Send Test SMS")
                     }
-                    .disabled(isSendingTest || testPhone.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(isSendingTest || isCheckingTest || testPhone.trimmingCharacters(in: .whitespaces).isEmpty)
                     .listRowBackground(Color.black.opacity(0.2))
 
-                    if let testResult {
-                        Text(testResult)
-                            .font(.footnote)
-                            .foregroundColor(testResult.hasPrefix("✅") ? .green : .red)
+                    if let testOutcome {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(testOutcome.headline)
+                                .font(.footnote.weight(.semibold))
+                                .foregroundColor(testOutcome.color)
+                            if let detail = testOutcome.detail {
+                                Text(detail)
+                                    .font(.footnote)
+                                    .foregroundColor(testOutcome.color)
+                            }
+                            if let from = testOutcome.from {
+                                Text("Sent from \(from)")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            }
+                            if let sid = testOutcome.sid {
+                                // Selectable, so it can be pasted into
+                                // Twilio's message log search.
+                                Text("Twilio SID: \(sid)")
+                                    .font(.caption.monospaced())
+                                    .foregroundColor(.gray)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .listRowBackground(Color.black.opacity(0.2))
+
+                        if testOutcome.kind == .pending, testOutcome.sid != nil {
+                            Button(isCheckingTest ? "Checking…" : "Check Again") {
+                                recheckTest()
+                            }
+                            .disabled(isCheckingTest)
                             .listRowBackground(Color.black.opacity(0.2))
+                        }
                     }
                 } header: {
                     Text("Test Notifications")
@@ -235,26 +264,50 @@ struct SettingsView: View {
         }
     }
 
+    // THE SCREEN USED TO LIE. It showed "✅ Sent" whenever Twilio
+    // accepted the API request - which it does instantly, before any
+    // carrier has seen the text. On Nov 3 every test was then blocked
+    // by the carrier (error 30007) a second later and the screen stayed
+    // green. The function now waits for Twilio's final status and this
+    // shows exactly that: green ONLY for a confirmed delivery.
     private func sendTest() {
         let phone = testPhone.trimmingCharacters(in: .whitespaces)
         isSendingTest = true
-        testResult = nil
+        testOutcome = nil
         Task {
             do {
                 let result = try await Functions.functions().httpsCallable("sendTestNotification").call(["phone": phone])
-                let data = result.data as? [String: Any]
-                let accepted = data?["accepted"] as? Bool ?? false
-                let failureReason = data?["failureReason"] as? String
+                let outcome = TestSmsOutcome(data: result.data as? [String: Any])
                 await MainActor.run {
-                    testResult = accepted
-                        ? "✅ Sent - check that phone for the text."
-                        : "⚠️ Failed - \(failureReason ?? "unknown error")"
+                    testOutcome = outcome
                     isSendingTest = false
                 }
             } catch {
                 await MainActor.run {
-                    testResult = "⚠️ Failed - \(error.localizedDescription)"
+                    testOutcome = TestSmsOutcome(kind: .failed, headline: "❌ Not sent", detail: error.localizedDescription)
                     isSendingTest = false
+                }
+            }
+        }
+    }
+
+    private func recheckTest() {
+        guard let sid = testOutcome?.sid else { return }
+        isCheckingTest = true
+        Task {
+            do {
+                let result = try await Functions.functions().httpsCallable("getTestNotificationStatus").call(["sid": sid])
+                let outcome = TestSmsOutcome(data: result.data as? [String: Any])
+                await MainActor.run {
+                    testOutcome = outcome
+                    isCheckingTest = false
+                }
+            } catch {
+                await MainActor.run {
+                    // Keep the last known outcome on screen; only say the
+                    // check itself failed.
+                    testOutcome?.detail = "Couldn't check right now: \(error.localizedDescription)"
+                    isCheckingTest = false
                 }
             }
         }
@@ -271,6 +324,62 @@ struct SettingsView: View {
             if newValue {
                 await auth.ensureDriverSessionBridged()
             }
+        }
+    }
+}
+
+/// What the test-SMS screen shows, built from sendTestNotification /
+/// getTestNotificationStatus. Three states and only three: confirmed
+/// delivered (green), definitely not delivered (red, with Twilio's
+/// error code), or still waiting on the carrier (orange + Check Again).
+private struct TestSmsOutcome {
+    enum Kind { case delivered, failed, pending }
+
+    let kind: Kind
+    let headline: String
+    var detail: String?
+    var sid: String?
+    var from: String?
+
+    var color: Color {
+        switch kind {
+        case .delivered: return .green
+        case .failed: return .red
+        case .pending: return .orange
+        }
+    }
+
+    init(kind: Kind, headline: String, detail: String? = nil, sid: String? = nil, from: String? = nil) {
+        self.kind = kind
+        self.headline = headline
+        self.detail = detail
+        self.sid = sid
+        self.from = from
+    }
+
+    init(data: [String: Any]?) {
+        let status = data?["status"] as? String ?? "unknown"
+        // `final` is new; a server older than this build won't send it.
+        // Treat its plain "accepted" as unconfirmed rather than green.
+        let final = data?["final"] as? Bool ?? false
+        let delivered = data?["delivered"] as? Bool ?? false
+        let errorCode = (data?["errorCode"] as? NSNumber)?.intValue
+        let reason = data?["failureReason"] as? String
+        sid = data?["providerMessageId"] as? String
+        from = data?["from"] as? String
+
+        if delivered {
+            kind = .delivered
+            headline = "✅ Delivered - the carrier confirmed it reached the phone."
+            detail = nil
+        } else if final {
+            kind = .failed
+            headline = "❌ Not delivered (status: \(status)\(errorCode.map { ", error \($0)" } ?? ""))"
+            detail = reason
+        } else {
+            kind = .pending
+            headline = "⏳ Handed to the carrier, delivery not confirmed yet (status: \(status))"
+            detail = reason
         }
     }
 }

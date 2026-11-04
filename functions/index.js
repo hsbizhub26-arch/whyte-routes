@@ -507,7 +507,14 @@ async function sendSms(to, body) {
 
   const result = await response.json();
   if (!response.ok) {
-    return { accepted: false, providerStatus: result.status || "error", failureReason: result.message || "Twilio request failed" };
+    return {
+      accepted: false,
+      providerStatus: result.status || "error",
+      // Twilio's numeric code (e.g. 21610 = recipient replied STOP), so
+      // a caller can show it rather than just the prose message.
+      errorCode: result.code || null,
+      failureReason: result.message || "Twilio request failed",
+    };
   }
   // Twilio accepts the request synchronously (status "queued"/"sending") -
   // actual carrier delivery confirmation needs a status callback
@@ -1054,6 +1061,106 @@ exports.sendMorningSummaries = onSchedule(
 // accidental way to run up a Twilio bill.
 const TEST_SENDS_PER_DAY = 10;
 
+// ── The REAL outcome of a message, not just "Twilio took the request".
+//
+// The Nov 3 bug: Twilio answers the send request at once with status
+// "queued", and that answer was reported as "✅ Sent". The carrier then
+// rejected every one of those texts about a second later (status
+// "undelivered", error 30007) and nothing ever looked again. Twilio's
+// own log showed the failure; the app showed green.
+//
+// For the test path we now wait for the final status before
+// answering. Measured on the Nov 3 messages, Twilio reached the final
+// status 1-2 seconds after the send, so a 20s cap is generous and
+// costs nothing on the success path.
+const TWILIO_FINAL_STATUSES = { delivered: true, undelivered: true, failed: true, canceled: true };
+const TEST_STATUS_WAIT_MS = 20000;
+const TEST_STATUS_POLL_MS = 1500;
+
+// Plain-language meaning of the codes this app has actually hit or is
+// about to (the toll-free switch). Anything else falls back to Twilio's
+// own error_message plus the docs link.
+const TWILIO_ERROR_HELP = {
+  21610: "This phone replied STOP to our number, so Twilio won't text it. Reply START from that phone to undo.",
+  21211: "Twilio says this isn't a valid phone number.",
+  30003: "The phone was unreachable (switched off, no signal, or out of service).",
+  30005: "The number doesn't exist or isn't active on a carrier.",
+  30006: "That number is a landline or can't receive texts.",
+  30007: "The carrier blocked this message as filtered/spam. It's the sender number, not the phone you're texting.",
+  30008: "The carrier rejected it for an unknown reason.",
+  30032: "Our toll-free sender number isn't verified yet, so carriers block it until verification is approved.",
+  30034: "Our sender number isn't registered for business texting (A2P 10DLC).",
+};
+
+function describeTwilioError(code, twilioMessage) {
+  if (!code) return null;
+  const help = TWILIO_ERROR_HELP[code] || twilioMessage || "See Twilio's docs for this code.";
+  return `Twilio error ${code}: ${help}`;
+}
+
+async function fetchTwilioMessage(sid) {
+  const accountSid = TWILIO_ACCOUNT_SID.value();
+  const authToken = TWILIO_AUTH_TOKEN.value();
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
+  const response = await fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${encodeURIComponent(sid)}.json`,
+    { headers: { "Authorization": `Basic ${auth}` } }
+  );
+  const m = await response.json();
+  if (!response.ok) throw new Error(m.message || `Twilio lookup failed (${response.status})`);
+  return m;
+}
+
+// Polls until Twilio reports a final status or the wait runs out.
+// Returns the last thing Twilio said, with `final` telling the caller
+// whether that is the end of the story.
+async function waitForFinalTwilioStatus(sid, maxWaitMs = TEST_STATUS_WAIT_MS) {
+  const deadline = Date.now() + maxWaitMs;
+  let m = null;
+  for (;;) {
+    try {
+      m = await fetchTwilioMessage(sid);
+    } catch (err) {
+      console.warn(`⚠️ status lookup for ${sid} failed: ${err.message}`);
+    }
+    if (m && TWILIO_FINAL_STATUSES[m.status]) break;
+    if (Date.now() + TEST_STATUS_POLL_MS > deadline) break;
+    await new Promise((r) => setTimeout(r, TEST_STATUS_POLL_MS));
+  }
+  return testOutcomeFrom(sid, m);
+}
+
+// One shape for both the first answer and "Check again".
+//
+// `accepted` is kept for builds already installed (build 56 and older
+// read only that field and show green when it's true). It is now true
+// ONLY when the carrier confirmed delivery, so even the old screen can
+// no longer show "✅ Sent" for a filtered text - it shows "⚠️ Failed"
+// with the real reason in failureReason instead.
+function testOutcomeFrom(sid, m) {
+  const status = (m && m.status) || "unknown";
+  const errorCode = (m && m.error_code) || null;
+  const final = !!TWILIO_FINAL_STATUSES[status];
+  const delivered = status === "delivered";
+  let failureReason = null;
+  if (!delivered) {
+    failureReason = describeTwilioError(errorCode, m && m.error_message)
+      || (final
+        ? `Twilio status "${status}" - the message did not reach the phone.`
+        : `Not confirmed yet - Twilio status "${status}". The carrier hasn't reported delivery; tap Check Again in a minute.`);
+  }
+  return {
+    accepted: delivered,
+    delivered,
+    final,
+    status,
+    errorCode,
+    failureReason,
+    providerMessageId: sid,
+    from: (m && m.from) || null,
+  };
+}
+
 exports.sendTestNotification = onCall(
   { secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER] },
   async (request) => {
@@ -1084,7 +1191,13 @@ exports.sendTestNotification = onCall(
     }
     const companyId = userData.companyId;
 
-    const today = new Date().toISOString().slice(0, 10);
+    // The company's own calendar day, not UTC's. The UTC key rolled
+    // over at 7 PM Eastern, so the Nov 3 evening tests were counted as
+    // "Nov 4" - harmless that night, but "10 per day" should mean the
+    // day the owner is living in. Same helper the per-stop texts use.
+    const companySnap = await admin.firestore().doc(`companies/${companyId}`).get();
+    const timeZone = (companySnap.data() && companySnap.data().timeZoneIdentifier) || "America/Toronto";
+    const today = serviceDayKey(timeZone);
     const usageRef = admin.firestore().doc(`companies/${companyId}/testNotificationUsage/${today}`);
 
     const allowed = await admin.firestore().runTransaction(async (tx) => {
@@ -1122,17 +1235,78 @@ exports.sendTestNotification = onCall(
       result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
     }
 
+    // Twilio refused the request outright (bad number, STOP, auth):
+    // there is no message to follow, so that IS the outcome.
+    if (!result.accepted) {
+      console.log(
+        `⚠️ test notification (company ${companyId}) -> rejected by Twilio` +
+        (result.errorCode ? ` [${result.errorCode}]` : "") +
+        ` (${result.failureReason})`
+      );
+      return {
+        accepted: false,
+        delivered: false,
+        final: true,
+        status: result.providerStatus || "rejected",
+        errorCode: result.errorCode || null,
+        failureReason: describeTwilioError(result.errorCode, result.failureReason) || result.failureReason,
+        providerMessageId: null,
+      };
+    }
+
+    // Twilio took it. Now find out what actually happened to it.
+    const outcome = await waitForFinalTwilioStatus(result.providerMessageId);
+
+    // The SID is what makes a test traceable: paste it into Twilio
+    // Console > Monitor > Logs > Messaging to see the carrier's side.
     console.log(
-      `${result.accepted ? "✅" : "⚠️"} test notification (company ${companyId}) -> ` +
-      `${result.accepted ? "accepted" : "failed"}` +
-      (result.failureReason ? ` (${result.failureReason})` : "")
+      `${outcome.delivered ? "✅" : outcome.final ? "❌" : "⏳"} test notification ` +
+      `(company ${companyId}) sid=${outcome.providerMessageId} from=${outcome.from} ` +
+      `status=${outcome.status}` +
+      (outcome.errorCode ? ` error=${outcome.errorCode}` : "")
     );
 
-    return {
-      accepted: result.accepted,
-      failureReason: result.failureReason || null,
-      providerMessageId: result.providerMessageId || null,
-    };
+    // Remembered so "Check Again" can look this message up later - and
+    // only messages this company sent, never an arbitrary SID.
+    await admin.firestore()
+      .doc(`companies/${companyId}/testNotifications/${outcome.providerMessageId}`)
+      .set({
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        status: outcome.status,
+        errorCode: outcome.errorCode,
+      });
+
+    return outcome;
+  }
+);
+
+// "Check Again" on the test screen, for a message whose carrier
+// receipt hadn't arrived inside the first 20 seconds. Read-only; sends
+// nothing and costs nothing.
+exports.getTestNotificationStatus = onCall(
+  { secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign in required.");
+    }
+    const sid = (request.data && request.data.sid || "").trim();
+    if (!/^SM[0-9a-f]{32}$/.test(sid)) {
+      throw new HttpsError("invalid-argument", "A Twilio message SID is required.");
+    }
+    const userSnap = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+    const userData = userSnap.data();
+    if (!userData || !userData.companyId || userData.platformAdmin !== true) {
+      throw new HttpsError("permission-denied", "Test notifications are not available on this account.");
+    }
+    const recordRef = admin.firestore().doc(`companies/${userData.companyId}/testNotifications/${sid}`);
+    if (!(await recordRef.get()).exists) {
+      throw new HttpsError("not-found", "That test message wasn't sent from this company.");
+    }
+    const outcome = testOutcomeFrom(sid, await fetchTwilioMessage(sid));
+    await recordRef.update({ status: outcome.status, errorCode: outcome.errorCode });
+    console.log(`🔎 test notification recheck sid=${sid} status=${outcome.status}` +
+      (outcome.errorCode ? ` error=${outcome.errorCode}` : ""));
+    return outcome;
   }
 );
 
