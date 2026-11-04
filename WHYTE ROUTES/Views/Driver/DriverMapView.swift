@@ -554,6 +554,8 @@ struct DriverMapView: View {
     @StateObject private var overview = RouteOverviewPlanner()
     @Environment(\.scenePhase) private var scenePhase
     @State private var mapVisible = false
+    /// Map rotation, so the car points its true direction on screen.
+    @State private var myRouteMapHeading: CLLocationDirection = 0
 
     /// Height (from the bottom safe area) of any card the parent lays
     /// over this map - e.g. DriverDashboardView's status card. The
@@ -639,8 +641,6 @@ struct DriverMapView: View {
     // map too instead of unlabeled dots.
     private var mapLayer: some View {
         Map(position: $vm.cameraPosition) {
-            UserAnnotation()
-
             // Road-following, not straight lines - see RouteOverviewPlanner.
             // Later legs first, the truck's leg last so it draws on top.
             ForEach(overview.stopLegs) { leg in
@@ -650,8 +650,10 @@ struct DriverMapView: View {
                 legOverlay(truckLeg)
             }
 
+            // Finished and skipped stops drop off the map - it shows what's
+            // ahead, not what's been done. Numbers stay their route position.
             ForEach(Array(orderedStops.enumerated()), id: \.element.id) { index, stop in
-                if let coordinate = stop.coordinate {
+                if let coordinate = stop.coordinate, !stop.isCompleted, !stop.isSkipped {
                     Annotation("", coordinate: coordinate) {
                         VStack(spacing: 2) {
                             Text("\(index + 1)")
@@ -678,6 +680,16 @@ struct DriverMapView: View {
                     }
                 }
             }
+
+            // The car, last so it sits on top of lines and pins, pointing
+            // the way it's travelling - not the system blue dot.
+            if let driver = vm.driverCoordinate {
+                Annotation("", coordinate: driver, anchor: .center) {
+                    CarMarker(rotation: (LocationService.shared.currentHeading ?? myRouteMapHeading) - myRouteMapHeading)
+                }
+            } else {
+                UserAnnotation()
+            }
         }
         // Feeds DriverMapViewModel.visibleRegion so the zoom buttons
         // have a span to scale. cameraPosition is normally
@@ -685,6 +697,7 @@ struct DriverMapView: View {
         // without this the buttons would have nothing to work from.
         .onMapCameraChange { context in
             vm.visibleRegion = context.region
+            myRouteMapHeading = context.camera.heading
         }
         .onReceive(vm.$stops) { stops in
             overview.update(stops: stops, driver: vm.driverCoordinate)

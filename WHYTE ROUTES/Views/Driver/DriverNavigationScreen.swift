@@ -95,6 +95,7 @@ struct DriverNavigationScreen: View {
             // the map only rebuilds when the route line or the zoom band
             // actually change, not every time the ETA text ticks.
             NavMapCanvas(
+                nav: nav,
                 stopCoordinate: stopCoordinate,
                 routePolyline: nav.route?.polyline,
                 zoomDistance: Self.zoomDistance(for: nav.distanceToManeuver),
@@ -367,6 +368,9 @@ struct DriverNavigationScreen: View {
 // road ahead) - which is what "like Waze" actually means.
 private struct NavMapCanvas: View, Equatable {
 
+    /// Only for the voice mute button, which observes it itself - so it
+    /// is deliberately left out of == below (same object for the drive).
+    let nav: NavigationSession
     let stopCoordinate: CLLocationCoordinate2D?
     let routePolyline: MKPolyline?
     let zoomDistance: CLLocationDistance
@@ -401,6 +405,9 @@ private struct NavMapCanvas: View, Equatable {
     @State private var isFollowing = true
     /// Global Y of this map's bottom edge. See recentreClearance.
     @State private var mapBottomY: CGFloat = 0
+    /// The map's current rotation, so the car can point the right way
+    /// when the driver has panned off the heading-up camera.
+    @State private var mapHeading: CLLocationDirection = 0
 
     /// When this map appeared. Follow-mode is immune to gestures for a
     /// moment after it does: the tap that started navigation lands on
@@ -427,7 +434,31 @@ private struct NavMapCanvas: View, Equatable {
 
     var body: some View {
         Map(position: $camera) {
-            UserAnnotation()
+            // Route first so the car draws on top of it. Only the part
+            // still ahead of the car - see RouteAhead.
+            if let routePolyline {
+                let ahead = location.currentLocation.map { RouteAhead.coordinates(of: routePolyline, from: $0) }
+                if let ahead, ahead.count > 1 {
+                    MapPolyline(coordinates: ahead)
+                        .stroke(Color("WRThemeGold"),
+                                style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
+                } else {
+                    MapPolyline(routePolyline)
+                        .stroke(Color("WRThemeGold"),
+                                style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
+                }
+            }
+
+            // The car, not the system blue dot. The camera is heading-up,
+            // so the car's on-screen angle is travel heading minus the
+            // map's heading - straight up while following.
+            if let here = location.currentLocation {
+                Annotation("", coordinate: here, anchor: .center) {
+                    CarMarker(rotation: (location.currentHeading ?? mapHeading) - mapHeading, size: 38)
+                }
+            } else {
+                UserAnnotation()
+            }
 
             if let stopCoordinate {
                 Annotation("", coordinate: stopCoordinate) {
@@ -438,12 +469,9 @@ private struct NavMapCanvas: View, Equatable {
                         .shadow(color: .black.opacity(0.35), radius: 4)
                 }
             }
-
-            if let routePolyline {
-                MapPolyline(routePolyline)
-                    .stroke(Color("WRThemeGold"),
-                            style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
-            }
+        }
+        .onMapCameraChange(frequency: .continuous) { context in
+            mapHeading = context.camera.heading
         }
         .mapControlVisibility(.hidden)
         // Camera inset for the bottom card. MapKit places an explicit
@@ -483,6 +511,12 @@ private struct NavMapCanvas: View, Equatable {
                 .padding(.bottom, recentreClearance)
         }
         .overlay(alignment: .topTrailing) { compassBadge }
+        // Directly under the compass (210pt + 40pt badge + 12pt gap).
+        .overlay(alignment: .topTrailing) {
+            VoiceMuteButton(nav: nav)
+                .padding(.trailing, 14)
+                .padding(.top, 262)
+        }
         .onAppear {
             appearedAt = Date()
             LocationService.shared.setNavigationMode(true)
@@ -603,6 +637,100 @@ private struct NavMapCanvas: View, Equatable {
 /// can inset its camera by exactly what the card covers rather than a
 /// number guessed per device.
 /// Global Y of the navigation map's bottom edge. See recentreClearance.
+// MARK: - Car marker (shared by every map that shows a truck)
+//
+// A top-down car, front at the top, rotated to the direction of travel -
+// the Waze/Google Maps look. Replaces the system blue dot on the driver's
+// maps and the plain coloured dot on the owner's fleet map, which sat in
+// the SAME colour as the route line under it and read as a smudge.
+// Default: blue body, white windows - deliberately not gold, so it never
+// blends into the gold route lines.
+struct CarMarker: View {
+    /// Degrees clockwise, relative to the screen (heading minus map heading).
+    var rotation: Double = 0
+    var color: Color = Color(red: 0.10, green: 0.45, blue: 0.95)
+    var windows: Color = .white
+    var outline: Color = .white
+    var size: CGFloat = 34
+
+    var body: some View {
+        let w = size * 0.56, h = size
+        return ZStack {
+            RoundedRectangle(cornerRadius: w * 0.38)
+                .fill(color)
+                .frame(width: w, height: h)
+                .overlay(RoundedRectangle(cornerRadius: w * 0.38).stroke(outline, lineWidth: 2.5))
+            // Windshield: the front, so the top of the car.
+            RoundedRectangle(cornerRadius: 3)
+                .fill(windows.opacity(0.9))
+                .frame(width: w * 0.68, height: h * 0.2)
+                .offset(y: -h * 0.17)
+            // Rear window.
+            RoundedRectangle(cornerRadius: 2)
+                .fill(windows.opacity(0.6))
+                .frame(width: w * 0.6, height: h * 0.12)
+                .offset(y: h * 0.27)
+        }
+        .rotationEffect(.degrees(rotation))
+        .shadow(color: .black.opacity(0.45), radius: 4, y: 2)
+        .frame(width: size + 8, height: size + 8)
+    }
+}
+
+// MARK: - Voice mute (Google Maps style speaker button)
+//
+// Observes the session itself, so it updates on tap even though the
+// map canvas around it only re-renders when the route or zoom change.
+private struct VoiceMuteButton: View {
+    @ObservedObject var nav: NavigationSession
+
+    var body: some View {
+        Button {
+            nav.toggleVoice()
+        } label: {
+            Image(systemName: nav.voiceMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(nav.voiceMuted ? Color.black : Color.white)
+                .frame(width: 40, height: 40)
+                .background(Circle().fill(nav.voiceMuted ? Color("WRThemeGold") : Color.black.opacity(0.55)))
+                .shadow(color: .black.opacity(0.4), radius: 4)
+        }
+        .accessibilityLabel(nav.voiceMuted ? "Unmute voice directions" : "Mute voice directions")
+    }
+}
+
+// MARK: - Route ahead only
+//
+// The navigation line used to be the whole route from where the drive
+// started, so everything already driven stayed painted behind the car.
+// This keeps only what's ahead: from the point on the route nearest the
+// car, onward. Planar maths in MKMapPoint space - exact enough at street
+// scale, and cheap enough to run on every fix.
+enum RouteAhead {
+    static func coordinates(of polyline: MKPolyline, from here: CLLocationCoordinate2D) -> [CLLocationCoordinate2D] {
+        let count = polyline.pointCount
+        guard count > 1 else { return [] }
+        let pts = polyline.points()
+        let p = MKMapPoint(here)
+        var bestIndex = 0
+        var bestPoint = pts[0]
+        var bestDist = Double.greatestFiniteMagnitude
+        for i in 0..<(count - 1) {
+            let a = pts[i], b = pts[i + 1]
+            let dx = b.x - a.x, dy = b.y - a.y
+            let len2 = dx * dx + dy * dy
+            var t = len2 > 0 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0
+            t = max(0, min(1, t))
+            let proj = MKMapPoint(x: a.x + t * dx, y: a.y + t * dy)
+            let d = (proj.x - p.x) * (proj.x - p.x) + (proj.y - p.y) * (proj.y - p.y)
+            if d < bestDist { bestDist = d; bestIndex = i; bestPoint = proj }
+        }
+        var out = [bestPoint.coordinate]
+        for i in (bestIndex + 1)..<count { out.append(pts[i].coordinate) }
+        return out
+    }
+}
+
 private struct MapBottomKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {

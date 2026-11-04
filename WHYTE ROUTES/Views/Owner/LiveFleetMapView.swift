@@ -78,6 +78,8 @@ struct LiveFleetMapView: View {
     /// What the map is actually showing, so the zoom buttons have a
     /// span to scale - cameraPosition is often not a plain region.
     @State private var visibleRegion: MKCoordinateRegion?
+    /// Map rotation, so each car points its true direction on screen.
+    @State private var fleetMapHeading: CLLocationDirection = 0
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -130,24 +132,31 @@ struct LiveFleetMapView: View {
                         let startCoordinate = route?.startCoordinate
                         let endCoordinate = route?.endCoordinate
 
-                        // Full path including the explicit depot legs
-                        // when set, so the line actually shows the
-                        // drive to/from them instead of just the
-                        // stops in between.
-                        let fullPath = ([startCoordinate] + stops.compactMap { $0.coordinate } + [endCoordinate]).compactMap { $0 }
-                        if fullPath.count > 1 {
-                            MapPolyline(coordinates: fullPath)
+                        // ROAD AHEAD ONLY, like Waze/Google Maps. The line
+                        // used to run from the depot through every stop -
+                        // finished ones included - so it showed where the
+                        // truck HAD been. Now: from the truck, through the
+                        // stops still to do, to the end point. The depot
+                        // start only counts before the truck has a position.
+                        let remaining = stops.filter { !$0.isCompleted && !$0.isSkipped }
+                        let origin = driver.coordinate ?? startCoordinate
+                        let aheadPath = ([origin] + remaining.compactMap { $0.coordinate } + [endCoordinate]).compactMap { $0 }
+                        if aheadPath.count > 1 {
+                            MapPolyline(coordinates: aheadPath)
                                 .stroke(driver.color, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
                         }
 
-                        if let startCoordinate {
+                        if driver.coordinate == nil, let startCoordinate {
                             Annotation("", coordinate: startCoordinate) {
                                 endpointPin(systemImage: "flag.fill", color: .green)
                             }
                         }
 
+                        // Finished and skipped stops drop off the map.
+                        // Numbers stay their position in the whole route,
+                        // so a stop keeps its number as earlier ones go.
                         ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
-                            if let coordinate = stop.coordinate {
+                            if let coordinate = stop.coordinate, !stop.isCompleted, !stop.isSkipped {
                                 Annotation("", coordinate: coordinate) {
                                     numberedStopPin(index: index + 1, color: driver.color, completed: stop.isCompleted)
                                 }
@@ -171,6 +180,7 @@ struct LiveFleetMapView: View {
             .ignoresSafeArea(edges: [.horizontal, .bottom])
             .onMapCameraChange { context in
                 visibleRegion = context.region
+                fleetMapHeading = context.camera.heading
             }
             // MapUserLocationButton is gone from here on purpose - the
             // control column below replaces it, so the owner map works
@@ -344,11 +354,17 @@ struct LiveFleetMapView: View {
 
     private func driverPin(_ driver: Driver) -> some View {
         VStack(spacing: 2) {
-            Circle()
-                .fill(driver.color)
-                .frame(width: 16, height: 16)
-                .overlay(Circle().stroke(.white, lineWidth: 2))
-                .shadow(color: .black.opacity(0.4), radius: 4)
+            // A car pointing the way it's driving, not a dot in the same
+            // colour as its own route line. White body so it stands out
+            // from every driver's line colour; the windows carry the
+            // driver's colour so trucks are still told apart.
+            CarMarker(
+                rotation: (driver.heading ?? 0) - fleetMapHeading,
+                color: .white,
+                windows: driver.color,
+                outline: .black.opacity(0.6),
+                size: 30
+            )
 
             Text(driver.name)
                 .font(.caption2.bold())

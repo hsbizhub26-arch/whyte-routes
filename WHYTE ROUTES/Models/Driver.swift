@@ -17,6 +17,7 @@ struct Driver: Identifiable {
     var latitude: Double?
     var longitude: Double?
     var lastUpdated: Date?
+    var heading: Double?
     var colorHex: String?
 
     // Driver's license photo - set by the driver themselves (see
@@ -112,6 +113,10 @@ extension Driver {
         } else {
             self.lastUpdated = nil
         }
+
+        // Direction of travel (degrees from north), written by build 57+
+        // alongside each GPS fix. Points the fleet map's car the right way.
+        self.heading = (dict["heading"] as? NSNumber)?.doubleValue
     }
 }
 

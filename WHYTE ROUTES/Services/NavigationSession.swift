@@ -42,6 +42,20 @@ final class NavigationSession: NSObject, ObservableObject {
 
     private let synthesizer = AVSpeechSynthesizer()
 
+    // MUTE, like Google Maps' speaker button. Remembered on this phone
+    // between drives; directions still show on screen either way.
+    private static let voiceMutedKey = "navVoiceMuted"
+    @Published var voiceMuted: Bool = UserDefaults.standard.bool(forKey: NavigationSession.voiceMutedKey) {
+        didSet {
+            UserDefaults.standard.set(voiceMuted, forKey: Self.voiceMutedKey)
+            // Cut off a sentence already being spoken - muting mid-
+            // instruction shouldn't wait for it to finish.
+            if voiceMuted { synthesizer.stopSpeaking(at: .immediate) }
+        }
+    }
+
+    func toggleVoice() { voiceMuted.toggle() }
+
     // Announce at a far, near, and immediate distance, the way a
     // driver actually needs it: once with time to change lanes, once
     // to commit, once at the turn itself.
@@ -393,6 +407,7 @@ final class NavigationSession: NSObject, ObservableObject {
     }
 
     private func speak(_ text: String) {
+        guard !voiceMuted else { return }
         // Re-arm the session on every utterance. End Navigation
         // deactivates it, and a resume that races that deactivation
         // would otherwise speak into a dead session - silence, with no

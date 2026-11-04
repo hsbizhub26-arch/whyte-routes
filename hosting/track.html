@@ -233,6 +233,31 @@ const goldIcon = () => L.divIcon({
   html: '<div style="width:18px;height:18px;border-radius:50%;background:#F5C451;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.5)"></div>',
   iconSize: [18, 18], iconAnchor: [9, 9]
 });
+// The driver as a top-down car pointing the way it's travelling - not a
+// gold dot sitting on the gold route line. Blue body, white windows, the
+// same marker the app draws.
+const carIcon = () => L.divIcon({
+  className: "",
+  html: '<div class="wr-car" style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;transition:transform .8s linear;filter:drop-shadow(0 2px 3px rgba(0,0,0,.55))">' +
+        '<svg viewBox="0 0 20 34" width="20" height="34" aria-label="Driver">' +
+        '<rect x="1.5" y="1.5" width="17" height="31" rx="7" fill="#1A73F2" stroke="#fff" stroke-width="2.5"/>' +
+        '<rect x="4.5" y="7.5" width="11" height="6.5" rx="2" fill="#fff" opacity=".92"/>' +
+        '<rect x="5" y="24" width="10" height="4" rx="1.5" fill="#fff" opacity=".6"/>' +
+        '</svg></div>',
+  iconSize: [40, 40], iconAnchor: [20, 20]
+});
+// Turn the car to the published heading. Rotation is accumulated the
+// short way round, so 359 -> 2 degrees turns 3 degrees, not 357 backwards.
+let carRotation = null;
+function setCarHeading(heading) {
+  if (!driverMarker || typeof heading !== "number") return;
+  const el = driverMarker.getElement && driverMarker.getElement();
+  const car = el && el.querySelector(".wr-car");
+  if (!car) return;
+  if (carRotation === null) carRotation = heading;
+  else carRotation += ((heading - carRotation) % 360 + 540) % 360 - 180;
+  car.style.transform = `rotate(${carRotation}deg)`;
+}
 const homeIcon = () => L.divIcon({
   className: "",
   html: '<div style="width:16px;height:16px;border-radius:4px;background:#fff;border:3px solid #F5C451;box-shadow:0 0 0 2px rgba(0,0,0,.5)"></div>',
@@ -311,8 +336,9 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   // marker if coordinates go away.
   if (typeof d.latitude === "number" && typeof d.longitude === "number") {
     const pos = [d.latitude, d.longitude];
-    if (!driverMarker) driverMarker = L.marker(pos, { icon: goldIcon() }).addTo(map);
+    if (!driverMarker) { driverMarker = L.marker(pos, { icon: carIcon() }).addTo(map); carRotation = null; }
     else glideDriverTo(pos);
+    setCarHeading(d.heading);
     fitIfPossible();
   } else if (driverMarker) {
     stopGlide();
