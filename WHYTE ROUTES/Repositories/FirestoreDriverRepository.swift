@@ -129,12 +129,26 @@ final class FirestoreDriverRepository: DriverRepository {
     func updateDriverLocation(driverId: String,
                               latitude: Double,
                               longitude: Double) {
+        updateDriverLocation(driverId: driverId, latitude: latitude, longitude: longitude,
+                             heading: nil, speed: nil)
+    }
 
+    /// heading (degrees from north) and speed (m/s) let the fleet map
+    /// glide the pin between fixes instead of jumping. Written as
+    /// delete-when-unknown so a stale course from minutes ago can't
+    /// point a parked truck the wrong way.
+    func updateDriverLocation(driverId: String,
+                              latitude: Double,
+                              longitude: Double,
+                              heading: Double?,
+                              speed: Double?) {
         driversRef?
             .document(driverId)
             .updateData([
                 "latitude": latitude,
                 "longitude": longitude,
+                "heading": heading.map { $0 as Any } ?? FieldValue.delete(),
+                "speed": speed.map { $0 as Any } ?? FieldValue.delete(),
                 "lastUpdated": FieldValue.serverTimestamp()
             ])
     }

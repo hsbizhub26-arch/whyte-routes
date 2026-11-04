@@ -61,14 +61,47 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
-        // Without this, CoreLocation reports on essentially every GPS
-        // tick - a real battery and Firestore-write cost over an
-        // overnight shift, with no map/ETA benefit: a vehicle moving
-        // 20m hasn't meaningfully changed which stop it's near.
-        manager.distanceFilter = 20
+        // Tells CoreLocation this is a vehicle on roads: it snaps fixes
+        // to the road network and filters the sideways wobble that made
+        // the truck "jump around" on the Nov 3 test. It was never set,
+        // so the default (.other) was being used.
+        manager.activityType = .automotiveNavigation
+        // 5m, not 20m. The 20m filter was one cause of the lag: below
+        // ~25 km/h (residential streets, plowing a lot) a fix only
+        // arrived every few seconds, and each one landed as a 20m hop.
+        // The GPS chip runs at full accuracy either way, so this costs
+        // almost no battery - and Firestore writes are throttled on
+        // their own in didUpdateLocations, not by this number.
+        manager.distanceFilter = Self.shiftDistanceFilter
         manager.allowsBackgroundLocationUpdates = true
         manager.pausesLocationUpdatesAutomatically = false
+        // The blue pill in the status bar while tracking in the
+        // background. Keeps iOS from treating an all-night "Always"
+        // session as suspicious, and tells the driver it is running.
+        manager.showsBackgroundLocationIndicator = true
     }
+
+    private static let shiftDistanceFilter: CLLocationDistance = 5
+
+    // MARK: - Firestore write throttle
+    // Near-real-time without flooding Firestore. A write goes out when
+    // the truck has moved a little AND a few seconds have passed, plus
+    // a heartbeat while parked so the owner's map and the "10 minutes
+    // away" check both know the phone is still alive.
+    //   Driving 50 km/h: ~1 write / 3 s  (~1,200 writes per driving hour)
+    //   Parked at a stop: 1 write / 30 s
+    // An 8-hour shift is well under 10k writes - pennies, and far below
+    // what Uber-style tracking spends.
+    private static let minWriteInterval: TimeInterval = 3
+    private static let minWriteDistance: CLLocationDistance = 8
+    private static let heartbeatInterval: TimeInterval = 30
+    /// A fix vaguer than this is never written. Those are the "jumps":
+    /// one 80m-off fix in a tunnel, parking garage or under trees, then
+    /// a snap back. Looser than maxUsableAccuracy (25m, arrival
+    /// geofence) because a pin on a map tolerates more than "which
+    /// house am I at" does.
+    private static let maxWritableAccuracy: CLLocationAccuracy = 50
+    private var lastWrittenAt: Date?
 
     // MARK: - Start Tracking
     // Tied to the driver's shift lifecycle (see DriverSession.startShift) -
@@ -89,6 +122,8 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     func stopTracking() {
         manager.stopUpdatingLocation()
         driverId = ""
+        lastWrittenLocation = nil
+        lastWrittenAt = nil
         stopLat = nil
         stopLng = nil
         print("🛑 Location tracking stopped")
@@ -113,14 +148,15 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
 
     func setNavigationMode(_ active: Bool) {
         navigationModeActive = active
-        // 5m while navigating (not kCLDistanceFilterNone). The camera is
+        // 5m in and out of navigation now (see shiftDistanceFilter); the
+        // old 20m outside navigation was part of the lag. The camera is
         // driven by its own 2Hz timer now, so it no longer needs a fix
         // on every GPS tick - and the unfiltered firehose was the lag:
         // every fix re-ran the whole navigation view's body, a Firestore
         // write, the arrival geofence and the customer-tracking publish.
         // 5m keeps following smooth at driving speed while cutting that
         // downstream work by an order of magnitude.
-        manager.distanceFilter = active ? 5 : 20
+        manager.distanceFilter = Self.shiftDistanceFilter
         // The magnetometer heading is what turns the map when the
         // DRIVER turns, before the truck moves - GPS course only knows
         // a direction once there is actual travel. Google/Waze feel
@@ -191,6 +227,14 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
 
+        // CoreLocation hands back a CACHED fix first when updates start
+        // - wherever the phone last was, possibly across town. Writing
+        // it put the truck somewhere wrong for a few seconds and then
+        // "teleported" it. Anything older than 10s is history, not a
+        // live position. Invalid fixes (negative accuracy) go too.
+        guard abs(location.timestamp.timeIntervalSinceNow) < 10,
+              location.horizontalAccuracy >= 0 else { return }
+
         currentLocation = location.coordinate
         lastLocationUpdate = Date()
         // Negative course means CoreLocation couldn't determine a
@@ -209,21 +253,31 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         currentAccuracy = location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil
 
         guard !driverId.isEmpty else { return }
-        // Same 20m granularity the distanceFilter used to enforce for
-        // everything - now enforced here so navigation mode's per-tick
-        // fixes never become per-tick Firestore writes.
-        if let last = lastWrittenLocation, location.distance(from: last) < 20 {
-            detectArrival(at: location)
-            return
+        detectArrival(at: location)
+
+        // Throttled write - see minWriteInterval. Replaces a pure "20m
+        // moved" rule, which had no clock in it: crawling along a street
+        // it could go long stretches without writing, and parked at a
+        // stop it NEVER wrote, so lastUpdated went stale and the server
+        // refused the 10-minutes-away text as "gps_stale".
+        guard location.horizontalAccuracy <= Self.maxWritableAccuracy else { return }
+        let now = Date()
+        if let last = lastWrittenLocation, let lastAt = lastWrittenAt {
+            let elapsed = now.timeIntervalSince(lastAt)
+            let moved = location.distance(from: last)
+            let movedEnough = elapsed >= Self.minWriteInterval && moved >= Self.minWriteDistance
+            let heartbeatDue = elapsed >= Self.heartbeatInterval
+            guard movedEnough || heartbeatDue else { return }
         }
         lastWrittenLocation = location
+        lastWrittenAt = now
         driverRepo.updateDriverLocation(
             driverId: driverId,
             latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude
+            longitude: location.coordinate.longitude,
+            heading: location.course >= 0 ? location.course : nil,
+            speed: location.speed >= 0 ? location.speed : nil
         )
-
-        detectArrival(at: location)
     }
 
     /// iPad only. CoreLocation measures compass heading from the top edge

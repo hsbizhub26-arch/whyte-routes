@@ -68,11 +68,22 @@ final class TrackingBroadcastService {
     private var lastEtaComputedAt: Date?
     private var cachedEtaMinutes: Int?
 
-    // A customer map doesn't need per-second precision, and every
-    // publish is a Firestore write multiplied by the number of
-    // customers watching. 25s keeps the pin feeling live without
-    // turning one route into thousands of writes.
-    private static let publishInterval: TimeInterval = 25
+    // 3s, down from 25s. At 25s a truck doing 50 km/h moved ~350m
+    // between updates, so the customer's pin sat still and then jumped
+    // a block - the "late and jumpy" Nov 3 report. The page now glides
+    // the pin between fixes (hosting/track.html), which only looks right
+    // when fixes arrive every few seconds.
+    //
+    // Cost stays sane because only ONE link per driver gets coordinates
+    // (the current destination). Every other link carries just a queue
+    // position, and is now written only when that changes or once a
+    // minute (see waitingLinkRefreshInterval) - before, all ~30 links on
+    // a route were rewritten on every publish.
+    private static let publishInterval: TimeInterval = 3
+    private static let waitingLinkRefreshInterval: TimeInterval = 60
+    /// linkId -> what was last written for a link with no coordinates,
+    /// and when. Lets an unchanged "3 stops before yours" skip the write.
+    private var lastWaitingPayload: [String: (signature: String, at: Date)] = [:]
     // Directions requests are rate-limited and far more expensive than
     // a write, so the ETA refreshes on its own slower cadence and is
     // reused in between.
@@ -116,6 +127,7 @@ final class TrackingBroadcastService {
         isRunning = false
         cancellables.removeAll()
         linksByStopId.removeAll()
+        lastWaitingPayload.removeAll()
         lastPublishedAt = nil
         lastEtaComputedAt = nil
         cachedEtaMinutes = nil
@@ -335,6 +347,23 @@ final class TrackingBroadcastService {
             // nothing else - no coordinates, no heading. The map only
             // starts moving once the truck is genuinely theirs, at
             // which point the only address it can reveal is their own.
+            // A link with no coordinates to share only needs writing when
+            // what it says has changed. Skipping the rest is what makes the
+            // 3s cadence affordable on a 30-stop route.
+            if !mayShareCoordinates {
+                let signature = "\(index)|\(isCurrent)|\(arrivedAndStillHere)"
+                if let last = lastWaitingPayload[link.id],
+                   last.signature == signature,
+                   Date().timeIntervalSince(last.at) < Self.waitingLinkRefreshInterval {
+                    continue
+                }
+                lastWaitingPayload[link.id] = (signature, Date())
+            } else {
+                // Sharing again: the next time this link goes quiet it
+                // must write once, to actively remove the coordinates.
+                lastWaitingPayload.removeValue(forKey: link.id)
+            }
+
             linkRepo.publishLocation(
                 companyId: companyId,
                 linkId: link.id,

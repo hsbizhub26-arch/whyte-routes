@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import CoreLocation
+import SwiftUI
 
 @MainActor
 final class DriverViewModel: ObservableObject {
@@ -50,7 +51,15 @@ final class DriverViewModel: ObservableObject {
 
         driverRepo.listenToDrivers { [weak self] drivers in
             Task { @MainActor in
-                self?.drivers = drivers
+                // Animated, so each driver's Annotation slides from its
+                // old coordinate to the new one instead of teleporting.
+                // Linear (constant speed, like a vehicle) and just under
+                // the driver app's ~3s write cadence, so one glide ends
+                // about when the next fix arrives - continuous motion
+                // rather than move-stop-move.
+                withAnimation(.linear(duration: 2.5)) {
+                    self?.drivers = drivers
+                }
                 self?.isLoading = false
             }
         }

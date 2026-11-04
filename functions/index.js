@@ -642,6 +642,7 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     }
     const ageMs = lastUpdated ? Date.now() - lastUpdated.toDate().getTime() : Infinity;
     if (ageMs > 5 * 60 * 1000) {
+      console.log(`⚠️ notification ${stopId}_${type} (company ${companyId}) -> gps_stale (driver location ${Math.round(ageMs / 1000)}s old)`);
       return { deliveryStatus: "gps_stale", notificationId: null };
     }
   }
@@ -662,9 +663,28 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
   // as "sending" BEFORE the real network call - deliberately
   // conservative: a crash mid-send risks one rare missed retry
   // rather than ever risking a second real SMS charge.
+  //
+  // OUTCOMES THAT NEVER REACHED TWILIO DO NOT BLOCK A RETRY.
+  //
+  // The key used to be claimed by ANY outcome, including "not_opted_in".
+  // On the Nov 3 test all 34 stops were not opted in; the owner can fix
+  // that in the app, but the second Start Shift that same day came back
+  // "duplicate_skipped" for every stop, because the first attempt had
+  // already written a doc for each one. Nothing was sent, nothing was
+  // charged, and the customer could still not get a text until tomorrow.
+  // Only a send that actually reached Twilio (accepted / sending /
+  // queued) may hold the key. A real "failed" is retryable too: Twilio
+  // rejected it synchronously, so no message exists and nothing was billed.
+  const RETRYABLE_STATUSES = {
+    not_opted_in: true,
+    type_disabled: true,
+    channel_disabled: true,
+    no_contact_on_file: true,
+    failed: true,
+  };
   const shouldSend = await admin.firestore().runTransaction(async (tx) => {
     const existing = await tx.get(notificationRef);
-    if (existing.exists) return false;
+    if (existing.exists && !RETRYABLE_STATUSES[existing.data().deliveryStatus]) return false;
     tx.set(notificationRef, {
       stopId, routeId, customerName, type,
       contactMethod: "pending",
@@ -679,13 +699,19 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     return { deliveryStatus: "duplicate_skipped", notificationId };
   }
 
+  // These early exits used to return silently, so the function log for
+  // a whole test showed nothing at all for a stop that was never texted.
+  // One line each makes "why didn't they get a text?" answerable from
+  // the log. Stop/company ids only, never the customer's phone or name.
   if (!optedIn) {
     await notificationRef.update({ deliveryStatus: "not_opted_in" });
+    console.log(`⚠️ notification ${notificationId} (company ${companyId}) -> not_opted_in (customer has not opted in to texts)`);
     return { deliveryStatus: "not_opted_in", notificationId };
   }
 
   if (!typePreferenceOk) {
     await notificationRef.update({ deliveryStatus: "type_disabled" });
+    console.log(`⚠️ notification ${notificationId} (company ${companyId}) -> type_disabled`);
     return { deliveryStatus: "type_disabled", notificationId };
   }
 

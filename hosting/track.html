@@ -259,6 +259,7 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId), (snap) => {
     // Remove the driver entirely rather than leaving a last-known pin
     // sitting on the map - their position is no longer this customer's
     // business once their own service is finished.
+    stopGlide();
     if (driverMarker && map) { map.removeLayer(driverMarker); driverMarker = null; }
     if (routeLine && map) { map.removeLayer(routeLine); routeLine = null; }
     showTracking();
@@ -311,9 +312,10 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   if (typeof d.latitude === "number" && typeof d.longitude === "number") {
     const pos = [d.latitude, d.longitude];
     if (!driverMarker) driverMarker = L.marker(pos, { icon: goldIcon() }).addTo(map);
-    else driverMarker.setLatLng(pos);
+    else glideDriverTo(pos);
     fitIfPossible();
   } else if (driverMarker) {
+    stopGlide();
     map.removeLayer(driverMarker);
     driverMarker = null;
     if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
@@ -388,6 +390,49 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     }
   }
 }, () => { /* location may legitimately not exist yet */ });
+
+// ── Smooth movement between GPS fixes
+//
+// setLatLng() on every update made the pin teleport from fix to fix -
+// the "jumps around" in the Nov 3 test. Instead the pin slides at a
+// constant speed from wherever it is DRAWN right now (possibly mid-
+// slide) to the new fix, taking about as long as the gap between the
+// last two fixes. With fixes every ~3s that reads as continuous
+// driving, the way delivery-tracking apps look. The position shown is
+// at most one update behind the truck, never ahead of it - no guessing
+// where it will go next.
+let glideFrame = null, lastFixAt = 0;
+function stopGlide() {
+  if (glideFrame) cancelAnimationFrame(glideFrame);
+  glideFrame = null;
+}
+function glideDriverTo(target) {
+  const now = performance.now();
+  const gap = lastFixAt ? now - lastFixAt : 3000;
+  lastFixAt = now;
+  stopGlide();
+  const from = driverMarker.getLatLng();
+  const to = L.latLng(target);
+  // Snap, don't slide, after a long silence (phone was out of signal,
+  // or this tab sat in the background): sliding 2 km across the map in
+  // three seconds would invent a route the truck never drove.
+  if (document.hidden || gap > 20000 || from.distanceTo(to) > 1500) {
+    driverMarker.setLatLng(to);
+    if (routeLine && stopMarker) routeLine.setLatLngs([to, stopMarker.getLatLng()]);
+    return;
+  }
+  const duration = Math.min(Math.max(gap * 0.95, 700), 6000);
+  const start = now;
+  const step = (t) => {
+    if (!driverMarker) { glideFrame = null; return; }
+    const k = Math.min(1, Math.max(0, (t - start) / duration));
+    const p = L.latLng(from.lat + (to.lat - from.lat) * k, from.lng + (to.lng - from.lng) * k);
+    driverMarker.setLatLng(p);
+    if (routeLine && stopMarker) routeLine.setLatLngs([p, stopMarker.getLatLng()]);
+    glideFrame = k < 1 ? requestAnimationFrame(step) : null;
+  };
+  glideFrame = requestAnimationFrame(step);
+}
 
 // A straight driver->destination line, drawn only when this customer
 // is next. Deliberately NOT the real road route: fetching directions
