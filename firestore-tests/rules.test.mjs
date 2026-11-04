@@ -1,6 +1,6 @@
 import { initializeTestEnvironment, assertFails, assertSucceeds }
   from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { readFileSync } from "fs";
 
 const env = await initializeTestEnvironment({
@@ -87,6 +87,17 @@ await check("Driver B CANNOT repoint their own user doc at company A",
   assertFails(setDoc(doc(asDrvB, "users", driverB), { companyId: A, companyRole: "owner" })));
 await check("Driver B CANNOT overwrite another user's document",
   assertFails(setDoc(doc(asDrvB, "users", ownerA), { companyId: B, companyRole: "driver" })));
+
+// ---- Company settings an owner may change (SMS sender name) ----
+const asOwnerA = env.authenticatedContext(ownerA).firestore();
+await check("Owner A CAN turn off business name in texts on their own company",
+  assertSucceeds(updateDoc(doc(asOwnerA, "companies", A), { smsShowBusinessName: false })));
+await check("Driver A CANNOT change the SMS sender-name setting",
+  assertFails(updateDoc(doc(asDrvA, "companies", A), { smsShowBusinessName: true })));
+await check("Owner A CANNOT smuggle a tier upgrade in with the setting",
+  assertFails(updateDoc(doc(asOwnerA, "companies", A), { smsShowBusinessName: true, subscriptionTier: "premiumPlus" })));
+await check("Owner A CANNOT change company B's setting",
+  assertFails(updateDoc(doc(asOwnerA, "companies", B), { smsShowBusinessName: false })));
 
 console.log("\n================ FIRESTORE RULES TEST RESULTS ================");
 for (const [s, n] of results) console.log(`${s}  ${n}`);

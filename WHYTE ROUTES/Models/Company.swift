@@ -36,6 +36,11 @@ struct Company: Identifiable {
     // changes either way.
     var quietHoursEnabled: Bool = false
     var timeZoneIdentifier: String = "America/Toronto"
+    // Which sender name customer texts open with - the company's choice.
+    // true (default): "DW Landscaping: ...". false: "WHYTE ROUTES: ...".
+    // Read by smsBrand() in functions/index.js; every text names a
+    // sender either way, because carriers filter unidentified texts.
+    var smsShowBusinessName: Bool = true
 }
 
 extension Company {
@@ -55,6 +60,9 @@ extension Company {
         self.navigationSettings = NavigationSettings(from: dict["navigationSettings"] as? [String: Any])
         self.quietHoursEnabled = dict["quietHoursEnabled"] as? Bool ?? false
         self.timeZoneIdentifier = dict["timeZoneIdentifier"] as? String ?? "America/Toronto"
+        // Missing on every company created before this setting existed;
+        // treated as on, same as the server's default.
+        self.smsShowBusinessName = dict["smsShowBusinessName"] as? Bool ?? true
 
         if let ts = dict["createdAt"] as? Timestamp {
             self.createdAt = ts.dateValue()
@@ -73,7 +81,8 @@ extension Company {
             "createdAt": Timestamp(date: createdAt),
             "navigationSettings": navigationSettings.toDict(),
             "quietHoursEnabled": quietHoursEnabled,
-            "timeZoneIdentifier": timeZoneIdentifier
+            "timeZoneIdentifier": timeZoneIdentifier,
+            "smsShowBusinessName": smsShowBusinessName
         ]
     }
 

@@ -69,6 +69,20 @@ final class CompanyRepository {
         }
     }
 
+    /// Same narrow-field pattern again: whether customer texts open with
+    /// the company's own name or "WHYTE ROUTES". firestore.rules lets an
+    /// owner change exactly this field on their own company.
+    func updateSmsShowBusinessName(companyId: String, enabled: Bool) async -> Bool {
+        do {
+            try await db.collection("companies").document(companyId)
+                .updateData(["smsShowBusinessName": enabled])
+            return true
+        } catch {
+            safePrint("⚠️ CompanyRepository.updateSmsShowBusinessName(\(companyId)) failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     @discardableResult
     func create(_ company: Company) async -> Company? {
         let docRef = db.collection("companies").document()

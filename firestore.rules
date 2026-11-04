@@ -387,7 +387,7 @@ service cloud.firestore {
       allow delete: if isPlatformAdmin();
       allow update: if isPlatformAdmin()
                     || (isCompanyOwnerRole(companyId)
-                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['navigationSettings', 'quietHoursEnabled']));
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['navigationSettings', 'quietHoursEnabled', 'smsShowBusinessName']));
 
       // ── companies/{companyId}/drivers/{driverId} ─────────
       // Contains PII (name, phone) alongside location - authenticated

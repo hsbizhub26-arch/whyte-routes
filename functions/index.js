@@ -240,31 +240,57 @@ function tierRank(subscriptionTier) {
 // old (companyName, time) shape silently passed a clock time into a
 // slot that now holds an address.
 //
-// "WHYTE ROUTES" IS LITERAL HERE, AND DELIBERATELY SO.
+// WHO THE TEXT SAYS IT'S FROM - THE COMPANY'S CHOICE.
 //
-// It is not a placeholder for the tenant's company name and must not
-// be turned into one. WHYTE ROUTES is the product sending the message;
-// the company operating the route is a separate, independently owned
-// business, and interpolating its name here would put words in that
-// business's mouth to its own customers. If white-labelling is ever
-// wanted it will be asked for explicitly - until then, no substitution.
+// Every text opens with a sender name, because carriers expect a
+// business text to identify its sender and the toll-free verification
+// sample (submitted 2026-11-03) reads "DW Landscaping: ... Reply STOP
+// to opt out." Traffic that doesn't look like the approved sample is a
+// common cause of carrier filtering on a verified number.
+//
+// WHICH name is up to each company (Settings > "Show business name in
+// customer texts", field smsShowBusinessName):
+//   on  (default) -> "DW Landscaping: ..."  - their own business name
+//   off           -> "WHYTE ROUTES: ..."    - the product's name
+// There is no third "no name" option on purpose: an unidentified text
+// is exactly what gets filtered.
+const PRODUCT_SMS_BRAND = "WHYTE ROUTES";
+
+function smsBrand(companyData) {
+  if (!companyData || companyData.smsShowBusinessName === false) return PRODUCT_SMS_BRAND;
+  const name = typeof companyData.name === "string" ? companyData.name.trim() : "";
+  return name || PRODUCT_SMS_BRAND;
+}
+
+// Opt-out line on every customer SMS, as in the approved sample. Only
+// for SMS: "reply STOP" means nothing in an email, so the email copy of
+// the same message goes without it.
+const SMS_OPT_OUT = " Reply STOP to opt out.";
+function withOptOut(message) {
+  return message.endsWith(SMS_OPT_OUT) ? message : `${message}${SMS_OPT_OUT}`;
+}
+
+// Worded to stay within ONE 160-character SMS segment with the opt-out
+// line and a 44-character tracking link (a second segment doubles the
+// cost of every text). The customer's name was dropped for the same
+// reason - the approved sample doesn't carry one either.
 const MESSAGE_TEMPLATES = {
   shiftStart: (c) =>
-    `Hi ${c.customerName}, your driver has started their route today! Track live progress here: ${c.trackingUrl}`,
+    `${c.brand}: We're on our way for your service today. Track us live: ${c.trackingUrl}`,
   eta10: (c) =>
-    `Hi ${c.customerName}, your driver is approximately 10 minutes away from ${c.address}!`,
+    `${c.brand}: Your driver is about 10 minutes away from ${c.address}.`,
   // A RECEIPT, not just an announcement. The date and time are what
   // make it worth keeping: a customer asking "did they even come on
   // Tuesday?" has the answer in their own message history, and so does
   // the company if it is ever disputed. Stamped in the COMPANY's
   // timezone, not the Cloud Function's - see completedStamp below.
   completed: (c) =>
-    `Hi ${c.customerName}, your service at ${c.address} was completed ${c.completedStamp}. Thank you!`,
+    `${c.brand}: Your service at ${c.address} was completed ${c.completedStamp}. Thank you!`,
 };
 
 function buildMessage(type, ctx) {
   const template = MESSAGE_TEMPLATES[type];
-  if (!template) return `${ctx.companyName}: update on your service.`;
+  if (!template) return `${ctx.brand}: update on your service.`;
   return template(ctx);
 }
 
@@ -298,9 +324,11 @@ function serviceDayKey(timeZone) {
   return new Date().toLocaleDateString("en-CA", { timeZone });
 }
 
-function buildMorningSummaryMessage(companyName, completedAtDate, timeZone) {
-  const time = completedAtDate.toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", timeZone });
-  return `${companyName} cleared your driveway last night at ${time}.`;
+function buildMorningSummaryMessage(brand, completedAtDate, timeZone) {
+  // en-US for the same reason as completedStamp: en-CA renders
+  // "11:15 p.m." and the trailing period collides with the sentence's.
+  const time = completedAtDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+  return `${brand}: Your driveway was cleared last night at ${time}.`;
 }
 
 // Quiet Hours: 11 PM to 6 AM in the company's own local time, only
@@ -370,7 +398,7 @@ async function flushQueuedMorningSummaries(companyId) {
       method = "sms";
       contact = q.phone;
       try {
-        result = await sendSms(q.phone, q.message);
+        result = await sendSms(q.phone, withOptOut(q.message));
       } catch (err) {
         result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
       }
@@ -722,7 +750,9 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     return { deliveryStatus: "type_disabled", notificationId };
   }
 
-  const companyName = companyData.name || "Your service crew";
+  // The sender name every text opens with - the company's own name, or
+  // WHYTE ROUTES if they've chosen not to show it. See smsBrand.
+  const brand = smsBrand(companyData);
 
   // The shift-start text IS the tracking link - it is the only
   // message a customer gets before the crew is on their street, so
@@ -749,7 +779,7 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
   }
 
   const message = buildMessage(type, {
-    companyName,
+    brand,
     customerName,
     address: stopData.address || "your address",
     trackingUrl,
@@ -782,7 +812,7 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
   // whichever tenant's subscription this is - no separate per-
   // tenant lookup needed at flush time.
   if (quietHours && type === "completed") {
-    const summaryMessage = buildMorningSummaryMessage(companyName, new Date(), timeZone);
+    const summaryMessage = buildMorningSummaryMessage(brand, new Date(), timeZone);
     await admin.firestore().collection(`companies/${companyId}/queuedMorningSummaries`).add({
       phone: smsEnabled ? phone || null : null,
       email: emailEnabled ? email || null : null,
@@ -799,11 +829,15 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
   let contact = null;
   let result = { accepted: false, failureReason: "No contact information on file." };
 
+  // What was actually sent, for the notification history - the SMS
+  // copy carries the opt-out line, the email copy doesn't.
+  let sentMessage = message;
   if (smsEnabled && phone && phone.trim().length > 0) {
     method = "sms";
     contact = phone;
+    sentMessage = withOptOut(message);
     try {
-      result = await sendSms(phone, message);
+      result = await sendSms(phone, sentMessage);
     } catch (err) {
       result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
     }
@@ -831,7 +865,7 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     deliveryStatus,
     providerMessageId: result.providerMessageId || null,
     failureReason: result.failureReason || null,
-    message,
+    message: sentMessage,
   });
 
   // Usage/cost tracking - only for an actual attempted provider
@@ -1575,19 +1609,19 @@ exports.sendTrackingLink = onCall(
       companyId, stopId, stopData, customerName,
     });
 
-    const companyName = companyData.name || "Your service crew";
     // "Reply STOP to opt out" is not decoration. Its absence is one of
     // the signals carriers filter application traffic on, and campaign
-    // vetting requires it. Both messages that carry a link now say it.
-    const message =
-      `${companyName}: track your service in real time here - ${url}\n\nReply STOP to opt out.`;
+    // vetting requires it. Sender name per the company's choice - see
+    // smsBrand. The email copy drops the SMS-only STOP line.
+    const message = `${smsBrand(companyData)}: Track your service live: ${url}`;
+    const smsMessage = withOptOut(message);
 
     let result;
     const method = canSms ? "sms" : "email";
     const contact = canSms ? phone : email;
     try {
       result = canSms
-        ? await sendSms(phone, message)
+        ? await sendSms(phone, smsMessage)
         : await sendEmail(email, "Track your service in real time", message);
     } catch (err) {
       result = { accepted: false, failureReason: err.message || `${method} send threw an error.` };
@@ -1605,7 +1639,7 @@ exports.sendTrackingLink = onCall(
       deliveryStatus,
       providerMessageId: result.providerMessageId || null,
       failureReason: result.failureReason || null,
-      message,
+      message: canSms ? smsMessage : message,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
 

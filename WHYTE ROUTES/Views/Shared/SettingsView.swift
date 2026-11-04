@@ -12,6 +12,14 @@ struct SettingsView: View {
     @State private var isSendingTest = false
     @State private var isCheckingTest = false
     @State private var quietHoursToggle = false
+    @State private var smsBrandToggle = true
+
+    /// The name customer texts open with when the toggle is on - the
+    /// same fallback the server uses (smsBrand in functions/index.js).
+    private var smsBrandName: String {
+        let name = companySession.currentCompany?.name.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? "WHYTE ROUTES" : name
+    }
     @ObservedObject private var companySession = CompanySession.shared
     private let companyRepo = CompanyRepository()
 
@@ -126,6 +134,29 @@ struct SettingsView: View {
                             }
                     } footer: {
                         Text("While on: live ETA/status texts are held overnight and every completed job is batched into one morning-summary text per customer instead. Drivers don't do anything differently - same buttons, same taps.")
+                            .foregroundColor(.gray)
+                    }
+                }
+                // Owner only: firestore.rules lets just the owner change
+                // company settings, so a manager's tap would silently fail.
+                if auth.role == .owner {
+                    Section {
+                        // Custom binding so only a real tap saves - setting
+                        // the initial value in onAppear must not write.
+                        Toggle("Show business name in customer texts", isOn: Binding(
+                            get: { smsBrandToggle },
+                            set: { newValue in
+                                smsBrandToggle = newValue
+                                guard let companyId = companySession.currentCompanyId else { return }
+                                Task { await companyRepo.updateSmsShowBusinessName(companyId: companyId, enabled: newValue) }
+                            }
+                        ))
+                        .tint(WRTheme.gold)
+                        .listRowBackground(Color.black.opacity(0.2))
+                    } footer: {
+                        Text(smsBrandToggle
+                             ? "Texts start with \"\(smsBrandName):\" - e.g. \"\(smsBrandName): Your driver is about 10 minutes away…\""
+                             : "Texts start with \"WHYTE ROUTES:\" instead of your business name. Every text names a sender either way - carriers block texts that don't say who they're from.")
                             .foregroundColor(.gray)
                     }
                 }
@@ -261,6 +292,7 @@ struct SettingsView: View {
         .onAppear {
             alsoDrivesToggle = auth.alsoDrives
             quietHoursToggle = companySession.currentCompany?.quietHoursEnabled ?? false
+            smsBrandToggle = companySession.currentCompany?.smsShowBusinessName ?? true
         }
     }
 
