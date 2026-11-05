@@ -550,14 +550,55 @@ final class TrackingBroadcastService {
     /// seconds from the last by car, which never crossed the old
     /// drive-time-only threshold). Not under 5 minutes: by then the
     /// warning is useless, and "10 minutes" would be wrong.
+    //
+    // ONE TEXT PER STREET, NOT PER HOUSE (owner's call, Nov 5: every SMS
+    // costs money). Only the first house of each run of stops on the same
+    // street gets "about 10 minutes away"; the rest of that street are
+    // covered by their live tracking page, which shows their place in the
+    // queue for free. A 10-house street costs 1 text instead of 10.
     private func requestTenMinuteTexts(remaining: [Stop], queueETA: [String: TimeInterval]) {
         guard let routeId = DriverSession.shared.assignedRoute?.id else { return }
+        let leaders = streetLeaderIds(DriverSession.shared.activeStops.sorted { $0.order < $1.order })
         for stop in remaining where !tenMinuteRequested.contains(stop.id) {
+            guard leaders.contains(stop.id) else { continue }
             guard let seconds = queueETA[stop.id] else { continue }
             let minutes = seconds / 60
             guard minutes <= 10, minutes >= 5 else { continue }
             tenMinuteRequested.insert(stop.id)
             Task { _ = await NotificationService.shared.notify(stop: stop, routeId: routeId, type: "eta10") }
         }
+    }
+
+    /// Stops that START a run of consecutive stops on one street, in route
+    /// order (finished stops included, so the leader never shifts to house
+    /// 2 once house 1 is done). A street visited twice, non-consecutively,
+    /// gets a leader for each visit.
+    private func streetLeaderIds(_ ordered: [Stop]) -> Set<String> {
+        var leaders: Set<String> = []
+        var previousStreet: String?
+        for stop in ordered {
+            let street = Self.streetKey(stop.address)
+            if street == nil || street != previousStreet { leaders.insert(stop.id) }
+            previousStreet = street
+        }
+        return leaders
+    }
+
+    /// "157 Crosby Ave, Richmond Hill, ON" -> "crosby ave|richmond hill".
+    /// House number / unit dropped, town kept so the same street name in
+    /// two towns isn't treated as one street. nil if it can't be read
+    /// (then the stop is treated as its own street - never under-warned).
+    static func streetKey(_ address: String?) -> String? {
+        guard let address else { return nil }
+        let parts = address.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        guard let first = parts.first, !first.isEmpty else { return nil }
+        var words = first.split(separator: " ").map(String.init)
+        // Drop leading house number / unit tokens like "157", "12a", "#4", "unit".
+        while let w = words.first, w.first?.isNumber == true || w.hasPrefix("#") || w == "unit" {
+            words.removeFirst()
+        }
+        guard !words.isEmpty else { return nil }
+        let town = parts.count > 1 ? parts[1] : ""
+        return words.joined(separator: " ") + "|" + town
     }
 }
