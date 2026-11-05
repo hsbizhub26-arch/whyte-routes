@@ -316,7 +316,10 @@ struct EditRouteView: View {
                 get: { pickerTargetId != nil },
                 set: { if !$0 { pickerTargetId = nil } }
             )) {
-                CustomerPickerView { customer in
+                CustomerPickerView(
+                    currentRouteId: routeId,
+                    onThisRoute: Set(stops.filter { $0.id != pickerTargetId }.compactMap(\.customerId))
+                ) { customer in
                     apply(customer, toStopId: pickerTargetId)
                 }
             }

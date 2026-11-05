@@ -174,7 +174,10 @@ struct AddCustomerView: View {
             smsEnabled: smsEnabled,
             emailEnabled: emailEnabled,
             notifyEta: notifyEta,
-            notifyCompleted: notifyCompleted
+            notifyCompleted: notifyCompleted,
+            // Editing does a full-document write, so the original date
+            // must be carried over or every edit would erase it.
+            createdAt: existingCustomer?.createdAt ?? (isEditing ? nil : Date())
         )
 
         let onComplete: (Bool) -> Void = { success in

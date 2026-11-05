@@ -51,6 +51,12 @@ struct Customer: Identifiable {
     // are a record of what an owner chose under the old scheme.
     var notifyEta: Bool = true
     var notifyCompleted: Bool = true
+    // When the record was first added. Drives "newest first" in the
+    // Select Customer picker so an owner can see who they just added
+    // and haven't put on a route yet. Older records were backfilled
+    // from Firestore's own document createTime; nil only if that
+    // never happened, and those sort to the bottom.
+    var createdAt: Date? = nil
 }
 
 // MARK: - Firestore Decode
@@ -80,6 +86,7 @@ extension Customer {
         // and what a document missing the field decodes to.
         self.notifyEta = dict["notifyEta"] as? Bool ?? true
         self.notifyCompleted = dict["notifyCompleted"] as? Bool ?? true
+        self.createdAt = (dict["createdAt"] as? Timestamp)?.dateValue()
     }
 
     // MARK: - Encode
@@ -99,6 +106,7 @@ extension Customer {
         if let email { d["email"] = email }
         if let notes { d["notes"] = notes }
         if let consentTimestamp { d["consentTimestamp"] = Timestamp(date: consentTimestamp) }
+        if let createdAt { d["createdAt"] = Timestamp(date: createdAt) }
         return d
     }
 }

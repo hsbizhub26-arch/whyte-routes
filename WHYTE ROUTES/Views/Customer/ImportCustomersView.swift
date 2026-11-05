@@ -319,7 +319,8 @@ struct ImportCustomersView: View {
                     // requires provable consent, and a column in a CSV is
                     // not that - the owner turns notifications on per
                     // customer, which stamps consentTimestamp properly.
-                    notificationsOptIn: false
+                    notificationsOptIn: false,
+                    createdAt: Date()
                 )
                 batch.setData(customer.toDict(), forDocument: collection.document(customer.id))
                 written += 1
