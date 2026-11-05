@@ -110,7 +110,11 @@ final class TrackingBroadcastService {
     // Directions requests are rate-limited and far more expensive than
     // a write, so the ETA refreshes on its own slower cadence and is
     // reused in between.
-    private static let etaRefreshInterval: TimeInterval = 90
+    // 45s (was 90): the drive time is re-asked twice as often, and in
+    // between it now counts down on its own (see queueETAs), so the
+    // customer's number never sits frozen. Still far inside Apple's
+    // directions rate limits.
+    private static let etaRefreshInterval: TimeInterval = 45
     // No position is published while within this distance of an
     // already-completed stop - that is someone else's driveway.
     private static let completedStopShadowRadius: CLLocationDistance = 75
@@ -155,6 +159,9 @@ final class TrackingBroadcastService {
         lastPublishedAt = nil
         lastEtaComputedAt = nil
         cachedEtaMinutes = nil
+        cachedDriveSeconds = nil
+        cachedDriveAt = nil
+        tenMinuteRequested.removeAll()
     }
 
     /// Re-reads which stops on the current route have live links.
@@ -213,7 +220,6 @@ final class TrackingBroadcastService {
     private func handleLocation(_ coordinate: CLLocationCoordinate2D, allowCoordinates: Bool = true) {
         guard isRunning else { return }
         retryLinksIfCurrentStopHasNone()
-        guard !linksByStopId.isEmpty else { return }
 
         if let last = lastPublishedAt, Date().timeIntervalSince(last) < Self.publishInterval {
             return
@@ -227,6 +233,15 @@ final class TrackingBroadcastService {
         guard let currentDestination = remaining.first else { return }
 
         refreshEtaIfStale(to: currentDestination, from: coordinate)
+
+        // Queue-aware ETAs for EVERY stop still to do, and the "about 10
+        // minutes away" text for whichever of them has just reached 10 -
+        // before the links guard, because that text doesn't depend on a
+        // customer having a tracking link.
+        let queueETA = queueETAs(remaining: remaining, all: ordered)
+        requestTenMinuteTexts(remaining: remaining, queueETA: queueETA)
+
+        guard !linksByStopId.isEmpty else { return }
 
         let here = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
 
@@ -377,8 +392,23 @@ final class TrackingBroadcastService {
             // A link with no coordinates to share only needs writing when
             // what it says has changed. Skipping the rest is what makes the
             // 3s cadence affordable on a 30-stop route.
+            // The ETA this customer sees. Whoever is being driven to gets
+            // the live minute count (only while their pin is shown, as
+            // before). Everyone queued behind gets their QUEUE ETA -
+            // drive + time at each stop ahead - rounded up to 5 minutes:
+            // honest ("about 35 min" for the 10th house on a street, not
+            // "10 min" for all of them) and coarse enough that it doesn't
+            // reveal the truck's exact progress at other customers' homes.
+            let etaToPublish: Int? = {
+                guard let seconds = queueETA[stop.id] else { return nil }
+                if isCurrent {
+                    return mayShareCoordinates ? max(1, Int((seconds / 60).rounded(.up))) : nil
+                }
+                return max(5, Int((seconds / 300).rounded(.up)) * 5)
+            }()
+
             if !mayShareCoordinates {
-                let signature = "\(index)|\(isCurrent)|\(arrivedAndStillHere)"
+                let signature = "\(index)|\(isCurrent)|\(arrivedAndStillHere)|\(etaToPublish ?? -1)"
                 if let last = lastWaitingPayload[link.id],
                    last.signature == signature,
                    Date().timeIntervalSince(last.at) < Self.waitingLinkRefreshInterval {
@@ -416,7 +446,7 @@ final class TrackingBroadcastService {
                 // would be a guess presented as a fact - how long the
                 // driver spends at each property in between is exactly
                 // what can't be known.
-                etaMinutes: mayShareCoordinates ? cachedEtaMinutes : nil
+                etaMinutes: etaToPublish
             )
         }
     }
@@ -437,8 +467,97 @@ final class TrackingBroadcastService {
             if let eta = try? await MKDirections(request: request).calculateETA() {
                 await MainActor.run {
                     self.cachedEtaMinutes = max(0, Int(eta.expectedTravelTime / 60))
+                    self.cachedDriveSeconds = max(0, eta.expectedTravelTime)
+                    self.cachedDriveAt = Date()
                 }
             }
+        }
+    }
+
+    // MARK: - Queue-aware ETA
+    //
+    // 10 houses on one street are each seconds apart by car, but 30-40
+    // minutes apart in real time - the crew spends several minutes AT
+    // each one. So a customer's ETA is: drive to the current stop, plus
+    // time at every stop ahead of them, plus the short hops between.
+    //
+    // Time at a stop is learned from this route's own finished stops
+    // today (arrived -> completed, median), falling back to 5 minutes
+    // until there are at least two. Hops between stops use straight-line
+    // distance at a slow residential speed - on a street of driveways
+    // that's ~0, and it needs no routing requests at all.
+
+    private var cachedDriveSeconds: TimeInterval?
+    private var cachedDriveAt: Date?
+    /// Stops this shift has already asked the server to text "about 10
+    /// minutes away" (the server's per-day idempotency is the real guard).
+    private var tenMinuteRequested: Set<String> = []
+
+    private static let defaultSecondsAtStop: TimeInterval = 5 * 60
+    private static let hopSpeed: CLLocationSpeed = 30 / 3.6   // m/s
+    private static let hopDetour: Double = 1.4                 // roads aren't straight
+    /// Time left at a stop the crew is still working never drops below
+    /// this - a job running long shouldn't push the next customer's ETA
+    /// to "now".
+    private static let minRemainingAtStop: TimeInterval = 2 * 60
+
+    private func secondsAtStop(_ stops: [Stop]) -> TimeInterval {
+        let samples = stops.compactMap(\.dwellTime).filter { $0 >= 30 && $0 <= 2 * 3600 }.sorted()
+        guard samples.count >= 2 else { return Self.defaultSecondsAtStop }
+        return samples[samples.count / 2]
+    }
+
+    /// stopId -> seconds until the crew reaches that stop. Empty until the
+    /// first drive ETA has come back.
+    private func queueETAs(remaining: [Stop], all: [Stop]) -> [String: TimeInterval] {
+        guard let first = remaining.first else { return [:] }
+        let atStop = secondsAtStop(all)
+        var etas: [String: TimeInterval] = [:]
+        var clock: TimeInterval
+
+        if (JobStatus(rawValue: first.status) ?? .scheduled) == .arrived {
+            // Crew is at the first house now: the queue waits on the
+            // rest of that job.
+            etas[first.id] = 0
+            let spent = first.arrivedAt.map { Date().timeIntervalSince($0) } ?? 0
+            clock = max(atStop - spent, Self.minRemainingAtStop)
+        } else {
+            guard let drive = cachedDriveSeconds, let at = cachedDriveAt else { return [:] }
+            // Counts down between directions refreshes, so the page's
+            // number moves every few seconds instead of sitting frozen.
+            let toFirst = max(drive - Date().timeIntervalSince(at), 0)
+            etas[first.id] = toFirst
+            clock = toFirst + atStop
+        }
+
+        var previous = first
+        for stop in remaining.dropFirst() {
+            if let a = previous.coordinate, let b = stop.coordinate {
+                let metres = CLLocation(latitude: a.latitude, longitude: a.longitude)
+                    .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
+                clock += metres * Self.hopDetour / Self.hopSpeed
+            }
+            etas[stop.id] = clock
+            clock += atStop
+            previous = stop
+        }
+        return etas
+    }
+
+    /// "About 10 minutes away" for each customer when THEIR queue ETA
+    /// reaches 10 minutes - so the 6th house on a street is warned while
+    /// the crew is still on house 3, instead of never (each house is
+    /// seconds from the last by car, which never crossed the old
+    /// drive-time-only threshold). Not under 5 minutes: by then the
+    /// warning is useless, and "10 minutes" would be wrong.
+    private func requestTenMinuteTexts(remaining: [Stop], queueETA: [String: TimeInterval]) {
+        guard let routeId = DriverSession.shared.assignedRoute?.id else { return }
+        for stop in remaining where !tenMinuteRequested.contains(stop.id) {
+            guard let seconds = queueETA[stop.id] else { continue }
+            let minutes = seconds / 60
+            guard minutes <= 10, minutes >= 5 else { continue }
+            tenMinuteRequested.insert(stop.id)
+            Task { _ = await NotificationService.shared.notify(stop: stop, routeId: routeId, type: "eta10") }
         }
     }
 }

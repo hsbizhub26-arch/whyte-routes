@@ -372,7 +372,7 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   // everything else - an ETA or "on the way" while they're standing in
   // the driveway reads as broken.
   if (d.hasArrived === true) {
-    $("statusText").textContent = "Your driver is here";
+    $("statusText").textContent = "Your snow angels are here";
     $("queue").hidden = true;
     $("eta").hidden = true;
     $("etaSub").hidden = true;
@@ -395,14 +395,21 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     $("statusText").textContent = isNext ? "On the way to you" : "On the way";
   }
 
-  // An ETA is only published for the customer actually being driven
-  // to. For anyone further back it would be a guess dressed up as a
-  // fact - how long each property ahead takes is exactly what nobody
-  // can know yet - so the queue position is shown instead.
-  if (isNext && typeof d.etaMinutes === "number" && d.etaMinutes >= 0) {
+  // The customer being driven to gets the live minute count. Customers
+  // queued behind now get a QUEUE estimate from the driver's app - drive
+  // time plus time spent at each stop ahead, learned from today's stops,
+  // published in 5-minute steps - so the 10th house on a street reads
+  // "About 45 min", not "10 min" like its neighbours.
+  if (typeof d.etaMinutes === "number" && d.etaMinutes >= 0) {
     $("eta").hidden = false;
     $("etaSub").hidden = false;
-    $("eta").textContent = d.etaMinutes <= 1 ? "Arriving now" : `${d.etaMinutes} min`;
+    if (isNext) {
+      $("eta").textContent = d.etaMinutes <= 1 ? "Arriving now" : `${d.etaMinutes} min`;
+      $("etaSub").textContent = "estimated arrival";
+    } else {
+      $("eta").textContent = `About ${d.etaMinutes} min`;
+      $("etaSub").textContent = "estimated arrival · we'll update as each stop ahead is finished";
+    }
   } else {
     $("eta").hidden = true;
     $("etaSub").hidden = true;
