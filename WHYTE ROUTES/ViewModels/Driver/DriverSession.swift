@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CoreLocation
 import FirebaseAuth
+import FirebaseFirestore
 
 @MainActor
 final class DriverSession: ObservableObject {
@@ -33,6 +34,9 @@ final class DriverSession: ObservableObject {
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
     private let shiftRepo = ShiftRepository()
+    private let driverRepo = FirestoreDriverRepository()
+    /// The one live stops listener for the current route.
+    private var stopsListener: ListenerRegistration?
 
     // MARK: Load driver after login
     func setDriver(_ driver: Driver) {
@@ -48,6 +52,9 @@ final class DriverSession: ObservableObject {
 
     // MARK: Log out (clears local driver session state)
     func logout() {
+        stopsListener?.remove()
+        stopsListener = nil
+        assignedRoutes = []
         driver = nil
         assignedRoute = nil
         activeStops = []
@@ -141,28 +148,64 @@ final class DriverSession: ObservableObject {
     // stops/rules chain use the one identical value, for every account.
     func loadAssignedRoute() {
         guard let uid = Auth.auth().currentUser?.uid ?? driver?.id else { return }
-
-        routeRepo.fetchRouteForDriver(driverId: uid) { route in
-            Task { @MainActor in
-                self.assignedRoute = route
-                if let route = route {
-                    self.loadStops(routeId: route.id)
-                }
-            }
+        Task { @MainActor in
+            // The driver's chosen route lives on their driver doc
+            // (activeRoute) - read fresh, so a choice made on another
+            // device, or by the owner assigning a route, is respected.
+            let preferred = await driverRepo.fetchDriver(uid: uid)?.activeRoute
+            self.loadOpenRoutes(uid: uid, preferred: preferred ?? self.assignedRoute?.id)
         }
     }
 
     // MARK: Load a specific route by id (used to restore an active route on relaunch)
     func loadAssignedRoute(routeId: String) async {
         guard let uid = Auth.auth().currentUser?.uid ?? driver?.id else { return }
-        routeRepo.fetchRouteForDriver(driverId: uid) { route in
+        loadOpenRoutes(uid: uid, preferred: routeId)
+    }
+
+    // MARK: Several routes per driver
+    //
+    // A driver can have more than one open route (e.g. a regular route
+    // plus a one-off). It used to silently take "the first one" by
+    // document id - which is how My Route and the owner's Home screen
+    // ended up showing different routes for the same driver. Now every
+    // open route is listed (assignedRoutes, for the picker on My Route)
+    // and the one in use is the driver's explicit choice.
+    @Published var assignedRoutes: [Route] = []
+
+    private func loadOpenRoutes(uid: String, preferred: String?) {
+        routeRepo.fetchOpenRoutesForDriver(driverId: uid) { routes in
             Task { @MainActor in
-                self.assignedRoute = route
-                if let route = route {
-                    self.loadStops(routeId: route.id)
-                }
+                self.assignedRoutes = routes
+                self.apply(route: RouteRepository.pick(routes, preferred: preferred))
             }
         }
+    }
+
+    private func apply(route: Route?) {
+        let changed = route?.id != assignedRoute?.id
+        assignedRoute = route
+        guard let route else {
+            stopsListener?.remove()
+            stopsListener = nil
+            activeStops = []
+            return
+        }
+        if changed || stopsListener == nil {
+            activeStops = []
+            hasLoadedStops = false
+            loadStops(routeId: route.id)
+        }
+    }
+
+    /// Switch which route this driver runs. Not mid-shift: the shift's
+    /// start texts, tracking links and time report belong to one route.
+    /// Saved to the driver doc so the owner's fleet map follows.
+    func selectRoute(_ route: Route) {
+        guard activeShift == nil, route.id != assignedRoute?.id else { return }
+        guard let uid = Auth.auth().currentUser?.uid ?? driver?.id else { return }
+        driverRepo.assignRoute(driverId: uid, routeId: route.id)
+        apply(route: route)
     }
 
     // MARK: Load stops
@@ -172,8 +215,13 @@ final class DriverSession: ObservableObject {
             return
         }
 
-        stopsRepo.loadStops(forRoute: routeId, assignedTo: uid) { result in
+        // Close the previous route's listener first - see StopsRepository.
+        stopsListener?.remove()
+        stopsListener = stopsRepo.loadStops(forRoute: routeId, assignedTo: uid) { result in
             Task { @MainActor in
+                // A late result for a route the driver has since switched
+                // away from must never overwrite the current stops.
+                guard routeId == self.assignedRoute?.id else { return }
                 switch result {
                 case .success(let stops):
                     self.permissionRetries = 0

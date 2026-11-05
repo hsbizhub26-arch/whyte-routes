@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import FirebaseFirestore
 
 // Nothing on the owner side ever asked iOS for location permission -
 // UserAnnotation() and MapUserLocationButton() both need
@@ -74,6 +75,11 @@ struct LiveFleetMapView: View {
     @State private var stopsByDriver: [String: [Stop]] = [:]
     @State private var routesByDriver: [String: Route] = [:]
     @State private var subscribedDriverIds: Set<String> = []
+    /// Every open route per driver (live), so the map can follow the
+    /// driver's CHOSEN route (drivers/{id}.activeRoute) - the same rule
+    /// My Route uses, so the two screens can't disagree.
+    @State private var openRoutesByDriver: [String: [Route]] = [:]
+    @State private var listenerBag = FleetListenerBag()
     @State private var selectedDriverShift: Shift?
     /// What the map is actually showing, so the zoom buttons have a
     /// span to scale - cameraPosition is often not a plain region.
@@ -232,6 +238,10 @@ struct LiveFleetMapView: View {
             locationAuthorizer.requestIfNeeded()
             driverVM.startLiveUpdates()
             loadStopsIfNeeded()
+        }
+        // A driver switching routes changes their activeRoute - re-pick.
+        .onChange(of: driverVM.drivers.map { $0.activeRoute ?? "" }) { _, _ in
+            for id in openRoutesByDriver.keys { showChosenRoute(for: id) }
         }
         .onChange(of: driverVM.drivers.count) { _, _ in
             loadStopsIfNeeded()
@@ -551,20 +561,58 @@ struct LiveFleetMapView: View {
     // Subscribes once per driver id (not re-subscribed on every GPS
     // ping, which would otherwise fire on nearly every frame) - only
     // fires for genuinely new drivers appearing in the roster.
+    // LIVE, not load-once. This used to fetch each driver's route a single
+    // time, so Home kept showing a route after it was unassigned, finished
+    // or replaced (Nov 4: "Devon · 1, SMS Test Route" on Home while the
+    // test route had been unassigned). Now each driver's open routes are
+    // listened to, the driver's chosen one is shown, and the stops
+    // listener is swapped whenever that choice changes.
     private func loadStopsIfNeeded() {
         for driver in visibleDrivers where !subscribedDriverIds.contains(driver.id) {
             subscribedDriverIds.insert(driver.id)
-            routeRepo.fetchRouteForDriver(driverId: driver.id) { route in
-                guard let route else { return }
+            let id = driver.id
+            listenerBag.routes[id] = routeRepo.listenOpenRoutesForDriver(driverId: id) { routes in
                 Task { @MainActor in
-                    routesByDriver[driver.id] = route
-                }
-                stopsRepo.loadStops(forRoute: route.id) { stops in
-                    Task { @MainActor in
-                        stopsByDriver[driver.id] = stops.sorted { $0.order < $1.order }
-                    }
+                    openRoutesByDriver[id] = routes
+                    showChosenRoute(for: id)
                 }
             }
         }
+    }
+
+    private func showChosenRoute(for id: String) {
+        let preferred = driverVM.drivers.first { $0.id == id }?.activeRoute
+        guard let route = RouteRepository.pick(openRoutesByDriver[id] ?? [], preferred: preferred) else {
+            routesByDriver[id] = nil
+            stopsByDriver[id] = nil
+            listenerBag.stops[id]?.registration.remove()
+            listenerBag.stops[id] = nil
+            return
+        }
+        routesByDriver[id] = route
+        guard listenerBag.stops[id]?.routeId != route.id else { return }
+        listenerBag.stops[id]?.registration.remove()
+        stopsByDriver[id] = nil
+        let routeId = route.id
+        if let registration = stopsRepo.loadStops(forRoute: routeId, completion: { stops in
+            Task { @MainActor in
+                // Ignore a late update from a route that's been swapped out.
+                guard routesByDriver[id]?.id == routeId else { return }
+                stopsByDriver[id] = stops.sorted { $0.order < $1.order }
+            }
+        }) {
+            listenerBag.stops[id] = (routeId, registration)
+        }
+    }
+}
+
+/// Holds the fleet map's Firestore listeners so they live as long as the
+/// view and are all closed when it goes away.
+final class FleetListenerBag {
+    var routes: [String: ListenerRegistration] = [:]
+    var stops: [String: (routeId: String, registration: ListenerRegistration)] = [:]
+    deinit {
+        routes.values.forEach { $0.remove() }
+        stops.values.forEach { $0.registration.remove() }
     }
 }

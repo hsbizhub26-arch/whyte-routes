@@ -40,15 +40,22 @@ final class StopsRepository {
     // it is literally the value the rule compares against - those are
     // the same today, and a silent divergence would look exactly like
     // "the driver has no stops."
+    /// Returns the live listener so the caller can CLOSE it before opening
+    /// another. It used to be dropped on the floor: every reload opened a
+    /// new listener and none were ever removed, so after the driver's
+    /// route changed the old route's listener kept firing and overwrote
+    /// their stops with the previous route's (Nov 4 drive test: My Route
+    /// showed 37 stops while the app's route was the 1-stop test route).
+    @discardableResult
     func loadStops(forRoute routeId: String,
                    assignedTo driverUID: String,
-                   completion: @escaping (Result<[Stop], Error>) -> Void) {
+                   completion: @escaping (Result<[Stop], Error>) -> Void) -> ListenerRegistration? {
         guard let routeRef = routeRef(routeId) else {
             completion(.failure(StopsError.noCompanySelected))
-            return
+            return nil
         }
 
-        routeRef
+        return routeRef
             .collection("stops")
             .whereField("driverId", isEqualTo: driverUID)
             .addSnapshotListener { snapshot, error in
@@ -151,10 +158,13 @@ final class StopsRepository {
     // MARK: - Load Stops (Subcollection)
     // STAFF ONLY - see the driver-scoped variant above for why this
     // one is denied for a driver account.
-    func loadStops(forRoute routeId: String, completion: @escaping ([Stop]) -> Void) {
-        guard let routeRef = routeRef(routeId) else { completion([]); return }
+    /// Returns the live listener so the fleet map can close it when a
+    /// driver's route changes (same leak as the driver variant above).
+    @discardableResult
+    func loadStops(forRoute routeId: String, completion: @escaping ([Stop]) -> Void) -> ListenerRegistration? {
+        guard let routeRef = routeRef(routeId) else { completion([]); return nil }
 
-        routeRef
+        return routeRef
             .collection("stops")
             .order(by: "order")
             .addSnapshotListener { snapshot, error in

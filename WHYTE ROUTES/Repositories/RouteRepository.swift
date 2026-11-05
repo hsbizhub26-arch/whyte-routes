@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseFirestore
+import FirebaseFunctions
 
 final class RouteRepository {
 
@@ -61,6 +62,65 @@ final class RouteRepository {
     }
 
     // MARK: - Fetch Current Route for a Driver
+    /// The route a driver is running. A driver can now have several open
+    /// routes; the one they CHOSE is stored on their driver doc as
+    /// `activeRoute` (see DriverSession.selectRoute). Every screen passes
+    /// that here, so My Route and the owner's fleet map always agree.
+    /// Falls back to the first open route when nothing is chosen (or the
+    /// chosen one was finished or reassigned).
+    func fetchRouteForDriver(driverId: String, preferredRouteId: String?, completion: @escaping (Route?) -> Void) {
+        fetchOpenRoutesForDriver(driverId: driverId) { routes in
+            completion(Self.pick(routes, preferred: preferredRouteId))
+        }
+    }
+
+    static func pick(_ routes: [Route], preferred: String?) -> Route? {
+        if let preferred, let chosen = routes.first(where: { $0.id == preferred }) { return chosen }
+        return routes.first
+    }
+
+    /// Every open (not completed) route assigned to a driver, by name.
+    func fetchOpenRoutesForDriver(driverId: String, completion: @escaping ([Route]) -> Void) {
+        guard let routesRef else { completion([]); return }
+        routesRef.whereField("driverId", isEqualTo: driverId).getDocuments { snapshot, error in
+            if let error {
+                print("❌ Failed to fetch routes for driver:", error.localizedDescription)
+                completion([])
+                return
+            }
+            completion(Self.openRoutes(snapshot))
+        }
+    }
+
+    /// Live version for the owner's fleet map: fires again whenever a
+    /// route is assigned, unassigned, finished or deleted.
+    @discardableResult
+    func listenOpenRoutesForDriver(driverId: String, handler: @escaping ([Route]) -> Void) -> ListenerRegistration? {
+        guard let routesRef else { handler([]); return nil }
+        return routesRef.whereField("driverId", isEqualTo: driverId).addSnapshotListener { snapshot, error in
+            if let error {
+                print("❌ Failed to listen to routes for driver:", error.localizedDescription)
+                return
+            }
+            handler(Self.openRoutes(snapshot))
+        }
+    }
+
+    private static func openRoutes(_ snapshot: QuerySnapshot?) -> [Route] {
+        (snapshot?.documents ?? [])
+            .compactMap { Route(from: $0.data(), id: $0.documentID) }
+            .filter { $0.status != "completed" }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Deletes a route with its stops, closes its customers' tracking
+    /// links and clears drivers pointing at it - all server-side (see
+    /// deleteRoute in functions/index.js). Owner/manager only.
+    func deleteRoute(routeId: String) async throws {
+        _ = try await Functions.functions().httpsCallable("deleteRoute").call(["routeId": routeId])
+    }
+
+    // Kept for any caller that doesn't know the driver's choice.
     func fetchRouteForDriver(driverId: String, completion: @escaping (Route?) -> Void) {
         guard let routesRef else { completion(nil); return }
 

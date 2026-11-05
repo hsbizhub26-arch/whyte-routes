@@ -171,6 +171,10 @@ struct DriverDashboardView: View {
         VStack(spacing: 10) {
             header
 
+            if session.assignedRoutes.count > 1 {
+                routePicker
+            }
+
             routeState
 
             if session.assignedRoute != nil && totalStops > 0 {
@@ -187,6 +191,46 @@ struct DriverDashboardView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color("WRThemeGold").opacity(0.25), lineWidth: 1)
         )
+    }
+
+    // Only shown when this driver has more than one open route: choose
+    // which one to run. Locked during a shift (its start texts and links
+    // belong to one route) - end the shift first to switch.
+    private var routePicker: some View {
+        let onShift = session.activeShift?.isActive == true
+        return Menu {
+            ForEach(session.assignedRoutes) { route in
+                Button {
+                    session.selectRoute(route)
+                } label: {
+                    if route.id == session.assignedRoute?.id {
+                        Label(route.name, systemImage: "checkmark")
+                    } else {
+                        Text(route.name)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath.fill")
+                Text(session.assignedRoute?.name ?? "Choose a route")
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(onShift ? "End shift to switch" : "Switch route")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.6))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Color.white.opacity(0.10))
+            .clipShape(Capsule())
+        }
+        .disabled(onShift)
+        .accessibilityLabel("Switch route")
     }
 
     // Name, live shift clock, the small shift button, and (only when

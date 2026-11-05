@@ -36,6 +36,8 @@ struct EditRouteView: View {
 
     @State private var isLoading = true
     @State private var isSaving = false
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
     @State private var errorMessage: String?
     @State private var historyStop: Stop?
     @State private var sendingLinkStopId: String?
@@ -273,8 +275,27 @@ struct EditRouteView: View {
                                 .foregroundColor(.red)
                                 .font(.footnote)
                         }
+
+                        // Delete lives at the bottom, away from Save, and is
+                        // always confirmed - see AssignRoutesView for what
+                        // it removes.
+                        Section {
+                            Button(role: .destructive) {
+                                showDeleteConfirm = true
+                            } label: {
+                                Text(isDeleting ? "Deleting…" : "Delete Route")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .disabled(isDeleting || isSaving)
+                        }
                     }
                     .readableListWidth()
+                    .confirmationDialog("Delete \"\(routeName)\"?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                        Button("Delete Route", role: .destructive) { deleteRoute() }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("This removes the route and all its stops, photos and notification history, and closes any customer tracking links for it. Your customers themselves are not deleted. This can't be undone.")
+                    }
                 }
             }
             .navigationTitle("Edit Route")
@@ -667,6 +688,26 @@ struct EditRouteView: View {
             Task { @MainActor in
                 if case .success(let fetched) = result {
                     drivers = fetched
+                }
+            }
+        }
+    }
+
+    private func deleteRoute() {
+        isDeleting = true
+        errorMessage = nil
+        Task {
+            do {
+                try await RouteRepository().deleteRoute(routeId: routeId)
+                await MainActor.run {
+                    isDeleting = false
+                    RouteService.shared.loadRoutesOnce()
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    errorMessage = "Couldn't delete route: \(error.localizedDescription)"
                 }
             }
         }

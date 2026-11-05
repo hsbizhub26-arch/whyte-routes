@@ -1664,6 +1664,74 @@ exports.sendTrackingLink = onCall(
 );
 
 // ─────────────────────────────────────────────────────────────────────
+// DELETE A ROUTE - owner or manager only, everything it owns goes with it.
+//
+// There was no way to delete a route at all. Done client-side it would
+// leave orphans: Firestore doesn't cascade, so each stop's photos and
+// notification history would linger, customers' tracking links would
+// stay live, and a driver whose activeRoute pointed here would keep a
+// dangling pointer. This does it in one place, with admin rights:
+//   1. close every still-active tracking link for the route's stops
+//      (active:false with no completedAt = the page reads "no longer
+//      available", which is true);
+//   2. clear activeRoute on any driver pointing at this route;
+//   3. recursively delete the route, its stops and their subcollections.
+// Customers themselves are never touched.
+exports.deleteRoute = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in required.");
+  }
+  const routeId = (request.data && request.data.routeId || "").trim();
+  if (!routeId || routeId.includes("/")) {
+    throw new HttpsError("invalid-argument", "routeId is required.");
+  }
+
+  const userSnap = await admin.firestore().doc(`users/${request.auth.uid}`).get();
+  const user = userSnap.data();
+  if (!user || !user.companyId) {
+    throw new HttpsError("failed-precondition", "No company associated with this account.");
+  }
+  if (user.companyRole !== "owner" && user.companyRole !== "manager") {
+    throw new HttpsError("permission-denied", "Only an owner or manager can delete routes.");
+  }
+  const companyId = user.companyId;
+  const db = admin.firestore();
+  const routeRef = db.doc(`companies/${companyId}/routes/${routeId}`);
+  const routeSnap = await routeRef.get();
+  if (!routeSnap.exists) {
+    throw new HttpsError("not-found", "That route doesn't exist (it may already be deleted).");
+  }
+
+  const stopsSnap = await routeRef.collection("stops").get();
+  const stopIds = stopsSnap.docs.map((d) => d.id);
+
+  let linksClosed = 0;
+  for (let i = 0; i < stopIds.length; i += 30) {
+    const chunk = stopIds.slice(i, i + 30);
+    const links = await db.collection(`companies/${companyId}/trackingLinks`)
+      .where("stopId", "in", chunk)
+      .where("active", "==", true)
+      .get();
+    for (const link of links.docs) {
+      await link.ref.set({ active: false, routeDeleted: true }, { merge: true });
+      linksClosed++;
+    }
+  }
+
+  const pointing = await db.collection(`companies/${companyId}/drivers`)
+    .where("activeRoute", "==", routeId).get();
+  for (const d of pointing.docs) {
+    await d.ref.update({ activeRoute: admin.firestore.FieldValue.delete() });
+  }
+
+  await db.recursiveDelete(routeRef);
+
+  console.log(`🗑️ route ${routeId} (company ${companyId}) deleted by ${request.auth.uid}: ` +
+    `${stopIds.length} stops, ${linksClosed} links closed, ${pointing.size} driver pointer(s) cleared`);
+  return { deleted: true, stops: stopIds.length, linksClosed };
+});
+
+// ─────────────────────────────────────────────────────────────────────
 // A STOP'S ADDRESS CHANGED -> ITS LIVE CUSTOMER LINK FOLLOWS.
 //
 // A tracking link keeps its own copy of the address and home-pin
