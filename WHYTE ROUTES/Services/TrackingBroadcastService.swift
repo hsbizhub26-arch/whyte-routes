@@ -597,8 +597,34 @@ final class TrackingBroadcastService {
         while let w = words.first, w.first?.isNumber == true || w.hasPrefix("#") || w == "unit" {
             words.removeFirst()
         }
+        // "Ave." -> "ave"
+        words = words.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")) }.filter { !$0.isEmpty }
+        // Drop a trailing unit: "95 Fleet St Unit 4" is still Fleet St.
+        if let i = words.firstIndex(where: { ["unit", "apt", "suite", "ste"].contains($0) || $0.hasPrefix("#") }), i > 0 {
+            words.removeSubrange(i...)
+        }
         guard !words.isEmpty else { return nil }
+        // "Crosby Avenue" and "Crosby Ave" are one street. Only the suffix
+        // (and a trailing direction) is normalised, so "St Clair" keeps its "St".
+        if let last = words.last, let dir = directionAbbrev[last], words.count > 1 {
+            words[words.count - 1] = dir
+            if let suffix = suffixAbbrev[words[words.count - 2]] { words[words.count - 2] = suffix }
+        } else if let last = words.last, let suffix = suffixAbbrev[last], words.count > 1 {
+            words[words.count - 1] = suffix
+        }
         let town = parts.count > 1 ? parts[1] : ""
         return words.joined(separator: " ") + "|" + town
     }
+
+    private static let suffixAbbrev: [String: String] = [
+        "avenue": "ave", "av": "ave", "street": "st", "road": "rd", "drive": "dr",
+        "crescent": "cres", "cr": "cres", "cresc": "cres", "court": "crt", "ct": "crt",
+        "boulevard": "blvd", "blvrd": "blvd", "circle": "cir", "circ": "cir", "place": "pl",
+        "lane": "ln", "trail": "trl", "terrace": "terr", "ter": "terr", "parkway": "pkwy",
+        "square": "sq", "highway": "hwy", "gardens": "gdns", "heights": "hts",
+        "grove": "grv", "point": "pt", "gate": "gate", "way": "way",
+    ]
+    private static let directionAbbrev: [String: String] = [
+        "north": "n", "n": "n", "south": "s", "s": "s", "east": "e", "e": "e", "west": "w", "w": "w",
+    ]
 }
