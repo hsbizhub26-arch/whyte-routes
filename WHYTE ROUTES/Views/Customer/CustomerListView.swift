@@ -66,16 +66,35 @@ struct CustomerListView: View {
     /// alone.
     @State private var pendingDelete: Customer?
     @State private var deleteFailed = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         NavigationStack {
             VStack {
-                TextField("Search customers…", text: $vm.search)
-                    .textFieldStyle(.roundedBorder)
-                    .submitLabel(.search)
-                    .autocorrectionDisabled()
-                    .padding()
-                    .readableContentWidth()
+                // The keyboard covers the tab bar, so without a way out on
+                // screen the user is stuck on this page. Cancel sits next
+                // to the field (not on the keyboard, which iOS can restyle
+                // or hide accessories on) and both clears the search and
+                // puts the keyboard away - the same as the iOS search bar.
+                HStack(spacing: 10) {
+                    TextField("Search customers…", text: $vm.search)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($searchFocused)
+                        .submitLabel(.search)
+                        .autocorrectionDisabled()
+                        .onSubmit { searchFocused = false }
+
+                    if searchFocused || !vm.search.isEmpty {
+                        Button("Cancel") {
+                            vm.search = ""
+                            searchFocused = false
+                        }
+                        .fontWeight(.semibold)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: searchFocused)                .padding()
+                .readableContentWidth()
 
                 if let limit = access.customerLimit {
                     Text("\(vm.customers.count) of \(limit) customers used (\(access.tier.displayName) plan)")
@@ -102,6 +121,7 @@ struct CustomerListView: View {
                 } else {
                     List(vm.filtered) { customer in
                         Button {
+                            searchFocused = false
                             editingCustomer = customer
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
