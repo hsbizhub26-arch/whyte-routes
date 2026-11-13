@@ -72,6 +72,8 @@ struct CustomerListView: View {
             VStack {
                 TextField("Search customers…", text: $vm.search)
                     .textFieldStyle(.roundedBorder)
+                    .submitLabel(.search)
+                    .autocorrectionDisabled()
                     .padding()
                     .readableContentWidth()
 

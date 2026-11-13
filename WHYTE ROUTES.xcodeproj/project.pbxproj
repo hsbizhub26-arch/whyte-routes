@@ -129,6 +129,7 @@
 				Views/Shared/DriverPickerOrdering.swift,
 				Views/Shared/GoldButton.swift,
 				Views/Shared/ImagePicker.swift,
+				Views/Shared/KeyboardDoneBar.swift,
 				Views/Shared/PhotoProofView.swift,
 				Views/Shared/PhotoUploader.swift,
 				Views/Shared/ReportIssueView.swift,
@@ -423,7 +424,7 @@
 				CODE_SIGN_ENTITLEMENTS = "WHYTE ROUTES/WHYTE-ROUTES.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 63;
 				DEVELOPMENT_TEAM = FW57G974CG;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -487,7 +488,7 @@
 				CODE_SIGN_ENTITLEMENTS = "WHYTE ROUTES/WHYTE-ROUTES.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 62;
+				CURRENT_PROJECT_VERSION = 63;
 				DEVELOPMENT_TEAM = FW57G974CG;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

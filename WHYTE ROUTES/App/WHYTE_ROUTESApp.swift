@@ -18,6 +18,8 @@ struct WHYTE_ROUTESApp: App {
         if let clientID = FirebaseApp.app()?.options.clientID {
             GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
         }
+
+        KeyboardDoneBar.install()
     }
 
     var body: some Scene {
@@ -26,6 +28,10 @@ struct WHYTE_ROUTESApp: App {
                 .environmentObject(auth)
                 .environmentObject(purchaseManager)
                 .preferredColorScheme(.dark)
+                // Dragging any list/form/scroll view down slides the
+                // keyboard away, like most iPhone apps. Set once here;
+                // it's an environment value, so every screen inherits it.
+                .scrollDismissesKeyboard(.interactively)
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
                 }
