@@ -179,8 +179,14 @@ struct CreateRouteView: View {
                 get: { pickerTargetId != nil },
                 set: { if !$0 { pickerTargetId = nil } }
             )) {
+                let target = stops.first { $0.id == pickerTargetId }
+                // Blank = just made by "Add Stop", so allow picking many.
+                // Changing the customer on a filled stop stays single-pick.
+                let isBlankStop = target?.customerId == nil && (target?.address.isEmpty ?? true)
+                let targetId = pickerTargetId
                 CustomerPickerView(
-                    onThisRoute: Set(stops.filter { $0.id != pickerTargetId }.compactMap(\.customerId))
+                    onThisRoute: Set(stops.filter { $0.id != pickerTargetId }.compactMap(\.customerId)),
+                    onSelectMany: isBlankStop ? { picked in applyMany(picked, firstStopId: targetId) } : nil
                 ) { customer in
                     apply(customer, toStopId: pickerTargetId)
                 }
@@ -226,6 +232,30 @@ struct CreateRouteView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Several customers picked at once: the first fills the blank stop
+    /// "Add Stop" made, the rest become new stops after it, still
+    /// capped by the plan's stop limit.
+    private func applyMany(_ customers: [Customer], firstStopId: UUID?) {
+        guard let first = customers.first else { return }
+        apply(first, toStopId: firstStopId)
+        var leftOff = 0
+        for customer in customers.dropFirst() {
+            guard access.canAddStop(currentCount: stops.count) else {
+                leftOff += 1
+                continue
+            }
+            let draft = StopDraft()
+            stops.append(draft)
+            apply(customer, toStopId: draft.id)
+        }
+        if leftOff > 0 {
+            // Let the picker finish closing before the next sheet opens.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                showStopLimitPrompt = true
+            }
+        }
     }
 
     private func apply(_ customer: Customer, toStopId id: UUID?) {

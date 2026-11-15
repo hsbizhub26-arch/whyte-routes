@@ -68,6 +68,15 @@ struct CustomerListView: View {
     @State private var deleteFailed = false
     @FocusState private var searchFocused: Bool
 
+    private var customerCountLabel: String {
+        let total = vm.customers.count
+        let noun = total == 1 ? "customer" : "customers"
+        if vm.search.isEmpty {
+            return "\(total) \(noun)"
+        }
+        return "\(vm.filtered.count) of \(total) \(noun)"
+    }
+
     var body: some View {
         NavigationStack {
             VStack {
@@ -95,6 +104,18 @@ struct CustomerListView: View {
                 }
                 .animation(.easeInOut(duration: 0.2), value: searchFocused)                .padding()
                 .readableContentWidth()
+
+                // Always-visible total, so the owner can see the size of
+                // their book at a glance. While searching it shows how
+                // many of the total match.
+                if !vm.isLoading && !vm.customers.isEmpty {
+                    Text(customerCountLabel)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .readableContentWidth()
+                }
 
                 if let limit = access.customerLimit {
                     Text("\(vm.customers.count) of \(limit) customers used (\(access.tier.displayName) plan)")

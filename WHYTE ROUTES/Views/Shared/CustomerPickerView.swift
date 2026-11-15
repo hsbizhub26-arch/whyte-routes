@@ -23,9 +23,25 @@ struct CustomerPickerView: View {
     /// Customer ids already on the route being built/edited, including
     /// stops added in this editing session that aren't saved yet.
     var onThisRoute: Set<String> = []
+    /// When set, the picker is a checklist (Select All / Unselect All,
+    /// then "Add (N)") instead of tap-one-and-close. Used when adding
+    /// new stops; changing the customer on an existing stop stays
+    /// single-pick.
+    var onSelectMany: (([Customer]) -> Void)? = nil
     var onSelect: (Customer) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var selected: Set<String> = []
+
+    private var isMultiSelect: Bool { onSelectMany != nil }
+
+    /// What Select All acts on: every customer currently shown (so it
+    /// respects the search) that isn't already on this route.
+    private var selectableVisible: [Customer] { notOnAnyRoute + onOtherRoutes }
+
+    private var allVisibleSelected: Bool {
+        !selectableVisible.isEmpty && selectableVisible.allSatisfy { selected.contains($0.id) }
+    }
     @ObservedObject private var access = FeatureAccessManager.shared
     @State private var customers: [Customer] = []
     /// customerId -> names of the OTHER routes they're on.
@@ -52,8 +68,12 @@ struct CustomerPickerView: View {
         let list = q.isEmpty ? customers : customers.filter {
             $0.name.lowercased().contains(q) || $0.address.lowercased().contains(q)
         }
-        // Newest first; records with no date go last, alphabetically.
-        return list.sorted { a, b in
+        return Self.newestFirst(list)
+    }
+
+    /// Newest first; records with no date go last, alphabetically.
+    private static func newestFirst(_ list: [Customer]) -> [Customer] {
+        list.sorted { a, b in
             switch (a.createdAt, b.createdAt) {
             case let (x?, y?): return x > y
             case (_?, nil): return true
@@ -99,6 +119,29 @@ struct CustomerPickerView: View {
                             }
                         }
 
+                        if isMultiSelect && !selectableVisible.isEmpty {
+                            Section {
+                                HStack {
+                                    Button("Select All") {
+                                        selected.formUnion(selectableVisible.map(\.id))
+                                    }
+                                    .disabled(allVisibleSelected)
+                                    Spacer()
+                                    Text("\(selected.count) selected")
+                                        .font(.footnote)
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Button("Unselect All") {
+                                        selected.removeAll()
+                                    }
+                                    .disabled(selected.isEmpty)
+                                }
+                                // Two buttons in one row: without this a tap
+                                // anywhere fires both.
+                                .buttonStyle(.borderless)
+                            }
+                        }
+
                         if !notOnAnyRoute.isEmpty {
                             Section {
                                 ForEach(notOnAnyRoute) { row($0, routes: []) }
@@ -141,12 +184,31 @@ struct CustomerPickerView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                if let onSelectMany {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(selected.isEmpty ? "Add" : "Add (\(selected.count))") {
+                            // Same newest-first order the list shows.
+                            let picked = Self.newestFirst(customers.filter { selected.contains($0.id) })
+                            onSelectMany(picked)
+                            dismiss()
+                        }
+                        .fontWeight(.semibold)
+                        .disabled(selected.isEmpty)
+                    }
+                }
             }
             .onAppear(perform: load)
             .sheet(isPresented: $showCreateNew) {
                 AddCustomerView { newCustomer in
-                    onSelect(newCustomer)
-                    dismiss()
+                    if isMultiSelect {
+                        // Stay open: the new customer joins the list,
+                        // already ticked, alongside anything else picked.
+                        customers.append(newCustomer)
+                        selected.insert(newCustomer.id)
+                    } else {
+                        onSelect(newCustomer)
+                        dismiss()
+                    }
                 }
             }
             .sheet(isPresented: $showUpgradePrompt) {
@@ -160,15 +222,30 @@ struct CustomerPickerView: View {
 
     private func row(_ customer: Customer, routes: [String]) -> some View {
         Button {
-            onSelect(customer)
-            dismiss()
+            if isMultiSelect {
+                if selected.contains(customer.id) {
+                    selected.remove(customer.id)
+                } else {
+                    selected.insert(customer.id)
+                }
+            } else {
+                onSelect(customer)
+                dismiss()
+            }
         } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                details(customer)
-                if !routes.isEmpty {
-                    Label("On: " + routes.joined(separator: ", "), systemImage: "point.topleft.down.to.point.bottomright.curvepath")
-                        .font(.caption2)
-                        .foregroundColor(.orange)
+            HStack(spacing: 12) {
+                if isMultiSelect {
+                    Image(systemName: selected.contains(customer.id) ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundColor(selected.contains(customer.id) ? .accentColor : .secondary)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    details(customer)
+                    if !routes.isEmpty {
+                        Label("On: " + routes.joined(separator: ", "), systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
                 }
             }
         }

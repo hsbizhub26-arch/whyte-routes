@@ -316,9 +316,16 @@ struct EditRouteView: View {
                 get: { pickerTargetId != nil },
                 set: { if !$0 { pickerTargetId = nil } }
             )) {
+                let target = stops.first { $0.id == pickerTargetId }
+                // A blank stop is one just made by "Add Stop" - that's
+                // where picking several at once makes sense. Changing
+                // the customer on a filled stop stays single-pick.
+                let isBlankStop = target?.customerId == nil && (target?.address.isEmpty ?? true)
+                let targetId = pickerTargetId
                 CustomerPickerView(
                     currentRouteId: routeId,
-                    onThisRoute: Set(stops.filter { $0.id != pickerTargetId }.compactMap(\.customerId))
+                    onThisRoute: Set(stops.filter { $0.id != pickerTargetId }.compactMap(\.customerId)),
+                    onSelectMany: isBlankStop ? { picked in applyMany(picked, firstStopId: targetId) } : nil
                 ) { customer in
                     apply(customer, toStopId: pickerTargetId)
                 }
@@ -635,6 +642,32 @@ struct EditRouteView: View {
                 } else {
                     errorMessage = "Couldn't move that stop - check your connection."
                 }
+            }
+        }
+    }
+
+    /// Several customers picked at once: the first fills the blank stop
+    /// "Add Stop" made, the rest become new stops after it. Still
+    /// capped by the plan's stop limit - anyone past it is left off and
+    /// the upgrade sheet explains why.
+    private func applyMany(_ customers: [Customer], firstStopId: String?) {
+        guard let first = customers.first else { return }
+        apply(first, toStopId: firstStopId)
+        var leftOff = 0
+        for customer in customers.dropFirst() {
+            guard access.canAddStop(currentCount: stops.count) else {
+                leftOff += 1
+                continue
+            }
+            let newStop = Stop(address: "", order: stops.count)
+            stops.append(newStop)
+            apply(customer, toStopId: newStop.id)
+        }
+        if leftOff > 0 {
+            upgradeReason = "More Stops Per Route"
+            // Let the picker finish closing before the next sheet opens.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                showUpgradePrompt = true
             }
         }
     }
