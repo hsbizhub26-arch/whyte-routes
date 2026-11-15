@@ -552,8 +552,25 @@ async function sendSms(to, body) {
   return { accepted: true, providerStatus: result.status, providerMessageId: result.sid };
 }
 
-async function sendEmail(to, subject, body) {
+// Resend only sends from a domain verified in the Resend account. The old
+// sender, updates@whyte-routes.web.app, could never be verified (web.app
+// is Google's domain, nobody else can add DNS records to it), so every
+// customer email was rejected. send.hsbizhub.com is the verified sending
+// domain the other products already use. The display name is the
+// company's own brand, the same one their texts open with.
+const EMAIL_FROM_ADDRESS = "notifications@send.hsbizhub.com";
+
+function emailFromHeader(fromName) {
+  // Strip characters that would break the "Name <address>" header.
+  const name = String(fromName || PRODUCT_SMS_BRAND).replace(/[<>"\r\n]/g, "").trim();
+  return `${name || PRODUCT_SMS_BRAND} <${EMAIL_FROM_ADDRESS}>`;
+}
+
+async function sendEmail(to, subject, body, fromName) {
   const apiKey = RESEND_API_KEY.value();
+  if (!apiKey) {
+    return { accepted: false, providerStatus: "error", failureReason: "Email is not configured (missing Resend key)." };
+  }
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -562,7 +579,7 @@ async function sendEmail(to, subject, body) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: "WHYTE ROUTES <updates@whyte-routes.web.app>",
+      from: emailFromHeader(fromName),
       to: [to],
       subject,
       text: body,
@@ -846,7 +863,7 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     method = "email";
     contact = email;
     try {
-      result = await sendEmail(email, `Update on your service`, message);
+      result = await sendEmail(email, `Update on your service`, message, brand);
     } catch (err) {
       result = { accepted: false, failureReason: err.message || "Email send threw an error." };
     }
@@ -1506,7 +1523,9 @@ async function ensureTrackingLink({ companyId, stopId, stopData, customerName })
 }
 
 exports.sendTrackingLink = onCall(
-  { secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER] },
+  // RESEND_API_KEY was missing here, so the email branch below could
+  // never read the key and every emailed tracking link failed.
+  { secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER, RESEND_API_KEY] },
   async (request) => {
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Sign in required.");
@@ -1623,7 +1642,7 @@ exports.sendTrackingLink = onCall(
     try {
       result = canSms
         ? await sendSms(phone, smsMessage)
-        : await sendEmail(email, "Track your service in real time", message);
+        : await sendEmail(email, "Track your service in real time", message, smsBrand(companyData));
     } catch (err) {
       result = { accepted: false, failureReason: err.message || `${method} send threw an error.` };
     }
@@ -1677,6 +1696,75 @@ exports.sendTrackingLink = onCall(
 //   2. clear activeRoute on any driver pointing at this route;
 //   3. recursively delete the route, its stops and their subcollections.
 // Customers themselves are never touched.
+// THE FREE WAY TO SEND A TRACKING LINK.
+//
+// Returns the customer's live tracking URL WITHOUT texting or emailing
+// it, so the owner can share it from their own phone (Messages, copy,
+// WhatsApp...). Nothing goes through Twilio, so it costs nothing and is
+// unaffected by carrier filtering of link-carrying texts. The owner is
+// messaging their own customer personally, so the app's opt-in gate
+// (which governs texts the APP sends) doesn't apply; the deleted-
+// customer stop still does - a removed customer gets no fresh link.
+// Same link minting as sendTrackingLink, so a resend reuses the link a
+// customer may already have open.
+exports.getTrackingLink = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in required.");
+  }
+
+  const { routeId, stopId } = request.data || {};
+  if (!routeId || !stopId) {
+    throw new HttpsError("invalid-argument", "routeId and stopId are required.");
+  }
+
+  const uid = request.auth.uid;
+  const userSnap = await admin.firestore().doc(`users/${uid}`).get();
+  const userData = userSnap.data();
+  if (!userData || !userData.companyId) {
+    throw new HttpsError("failed-precondition", "No company associated with this account.");
+  }
+  const companyId = userData.companyId;
+
+  const companySnap = await admin.firestore().doc(`companies/${companyId}`).get();
+  const companyData = companySnap.data();
+  if (!companyData) {
+    throw new HttpsError("failed-precondition", "Company not found.");
+  }
+  if (tierRank(companyData.subscriptionTier) < 1) {
+    return { status: "not_entitled" };
+  }
+
+  const stopRef = admin.firestore().doc(`companies/${companyId}/routes/${routeId}/stops/${stopId}`);
+  const stopSnap = await stopRef.get();
+  const stopData = stopSnap.data();
+  if (!stopData) {
+    throw new HttpsError("not-found", "Stop not found.");
+  }
+
+  let customerName = stopData.customerName || "Customer";
+  if (stopData.customerId) {
+    const customerSnap = await admin.firestore().doc(`companies/${companyId}/customers/${stopData.customerId}`).get();
+    const customerData = customerSnap.data();
+    if (!customerData) return { status: "customer_deleted" };
+    customerName = customerData.name || customerName;
+  }
+
+  const { linkId, url } = await ensureTrackingLink({
+    companyId, stopId, stopData, customerName,
+  });
+
+  console.log(`🔗 tracking link ${linkId} (company ${companyId}) shared manually`);
+
+  return {
+    status: "ok",
+    url,
+    linkId,
+    // Ready-to-send wording, matching the texted version minus the
+    // STOP line (that only applies to texts the app sends).
+    message: `${smsBrand(companyData)}: Track your service live: ${url}`,
+  };
+});
+
 exports.deleteRoute = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in required.");

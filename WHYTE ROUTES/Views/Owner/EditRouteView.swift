@@ -42,6 +42,8 @@ struct EditRouteView: View {
     @State private var historyStop: Stop?
     @State private var sendingLinkStopId: String?
     @State private var trackingLinkResults: [String: String] = [:]
+    @State private var sharingLinkStopId: String?
+    @State private var trackingShareItem: TrackingShareItem?
     @State private var pickerTargetId: String?
     @State private var showUpgradePrompt = false
     // Which limit opened the upgrade sheet - it was hardcoded to
@@ -312,6 +314,10 @@ struct EditRouteView: View {
             .sheet(item: $historyStop) { stop in
                 NotificationHistoryView(routeId: routeId, stop: stop)
             }
+            .sheet(item: $trackingShareItem) { item in
+                TrackingLinkShareSheet(text: item.text)
+                    .presentationDetents([.medium, .large])
+            }
             .sheet(isPresented: Binding(
                 get: { pickerTargetId != nil },
                 set: { if !$0 { pickerTargetId = nil } }
@@ -438,12 +444,54 @@ struct EditRouteView: View {
         }
     }
 
+    // FREE: fetches the customer's live link without the app sending
+    // anything (getTrackingLink), then opens the share sheet so the
+    // owner can send it from their own phone - Messages, copy, etc.
+    // No Twilio, no cost, no carrier filtering.
+    private func shareTrackingLink(for stop: Stop) {
+        sharingLinkStopId = stop.id
+        trackingLinkResults[stop.id] = nil
+        Task {
+            do {
+                let result = try await Functions.functions()
+                    .httpsCallable("getTrackingLink")
+                    .call(["routeId": routeId, "stopId": stop.id])
+                let data = result.data as? [String: Any]
+                let status = data?["status"] as? String ?? "unknown"
+                await MainActor.run {
+                    sharingLinkStopId = nil
+                    if status == "ok", let text = data?["message"] as? String ?? data?["url"] as? String {
+                        trackingShareItem = TrackingShareItem(text: text)
+                    } else {
+                        trackingLinkResults[stop.id] = shareLinkMessage(for: status)
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    trackingLinkResults[stop.id] = "⚠️ Couldn't get the link - \(error.localizedDescription)"
+                    sharingLinkStopId = nil
+                }
+            }
+        }
+    }
+
+    private func shareLinkMessage(for status: String) -> String {
+        switch status {
+        case "not_entitled":     return "⚠️ Your plan doesn't include customer tracking links."
+        case "customer_deleted": return "⚠️ This customer was deleted."
+        default:                 return "⚠️ \(status)"
+        }
+    }
+
     private func trackingLinkMessage(for status: String, data: [String: Any]?) -> String {
         switch status {
-        case "accepted":       return "✓ Tracking link texted to the customer."
+        case "accepted":
+            return (data?["method"] as? String) == "email"
+                ? "✓ Tracking link emailed to the customer."
+                : "✓ Tracking link texted to the customer."
         case "not_opted_in":   return "⚠️ This customer hasn't agreed to receive messages yet."
-        case "channel_disabled": return "⚠️ This customer has text messages turned off."
-        case "no_contact_on_file": return "⚠️ No phone number on file for this customer."
+        case "channel_disabled": return "⚠️ This customer has texts and email turned off."
+        case "no_contact_on_file": return "⚠️ No phone number or email on file for this customer."
         case "not_entitled":   return "⚠️ Your plan doesn't include customer notifications."
         case "failed":
             let reason = data?["failureReason"] as? String
@@ -510,8 +558,8 @@ struct EditRouteView: View {
                     // For customers who'd rather check on their own than
                     // be texted at every step - one message with a link
                     // instead of a stream of ETA/status updates. Only
-                    // offered where there's actually a number to send to.
-                    if let phone = stop.customerPhone, !phone.isEmpty {
+                    // offered where there's a number or email to send to.
+                    if !(stop.customerPhone ?? "").isEmpty || !(stop.customerEmail ?? "").isEmpty {
                         rowActionButton(
                             sendingLinkStopId == stop.id ? "Sending…" : "Send Tracking Link"
                         ) {
@@ -519,6 +567,16 @@ struct EditRouteView: View {
                         }
                         .disabled(sendingLinkStopId != nil)
                     }
+
+                    // Free alternative: share the same link from the
+                    // owner's own phone. Always offered - it needs no
+                    // phone number on file and costs nothing.
+                    rowActionButton(
+                        sharingLinkStopId == stop.id ? "Getting link…" : "Share Link (free)"
+                    ) {
+                        shareTrackingLink(for: stop)
+                    }
+                    .disabled(sharingLinkStopId != nil)
 
                     if let result = trackingLinkResults[stop.id] {
                         Text(result)
@@ -921,4 +979,22 @@ struct DwellTimeBadge: View {
             ? String(format: "%dh %02dm", hours, minutes)
             : String(format: "%dm %02ds", minutes, seconds)
     }
+}
+
+/// The text handed to the share sheet by "Share Link (free)".
+private struct TrackingShareItem: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+/// iOS share sheet for the tracking-link text. Kept here rather than
+/// reusing Utilities/ShareSheet.swift, which isn't in the app target.
+private struct TrackingLinkShareSheet: UIViewControllerRepresentable {
+    let text: String
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [text], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
