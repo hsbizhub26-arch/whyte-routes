@@ -80,13 +80,11 @@
   .center { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; text-align: center; }
   .center p { color: var(--muted); max-width: 340px; line-height: 1.5; }
   .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--gold); margin-right:7px; vertical-align:middle; }
-  .leaflet-container { background: #1a1a1a; }
-  /* OSM tiles are bright; dim them so the page stays dark-themed. */
-  /* Neutral charcoal night map. The old invert + hue-rotate turned parks
-     bright green and highways pink, which read as muddy and fought the
-     gold route line. Greyscale first removes all of that, so only the
-     car (blue) and the route (gold) carry colour - Uber/Google night look. */
-  .leaflet-tile { filter: grayscale(1) invert(1) brightness(.72) contrast(1.2); }
+  /* Regular, unfiltered OpenStreetMap. The page chrome stays dark, but the
+     map itself is the normal colour map: the old grayscale/invert/dim
+     filter made streets muddy and labels hard to read (user call,
+     2026-11-15). */
+  .leaflet-container { background: #f2efe9; }
 </style>
 </head>
 <body>
@@ -113,6 +111,16 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Clean, Waze-like vector map (OpenFreeMap "Liberty": free, no key,
+     commercial use allowed). Rendered inside Leaflet via the MapLibre
+     plugin so the markers/route code below is unchanged. If either script
+     fails to load, ensureMap() falls back to plain OSM raster tiles. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"
+        integrity="sha384-4CB9Vtol9LN6lGgBCvmPLbUEZwilrqIvPieSRurgAXAB7FVJaLS9n8WyAIA5wjQ+" crossorigin="anonymous"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, doc, getDoc, onSnapshot }
@@ -223,13 +231,56 @@ let map = null, driverMarker = null, stopMarker = null, hasFitBounds = false;
 // repaint a live-looking driver onto a completed page.
 let serviceComplete = false;
 
+// Tones the Liberty style down to a calm, Waze-like look: light grey
+// ground, white roads with soft grey edges, green parks, light-blue water,
+// and no 3D buildings, shop/transit icons or one-way arrows. Every call is
+// guarded so a future change to the style's layer names can't break the map.
+function wazeify(gl) {
+  const has = (id) => !!gl.getLayer(id);
+  const paint = (id, prop, val) => { if (has(id)) { try { gl.setPaintProperty(id, prop, val); } catch (_) {} } };
+  const hide = (id) => { if (has(id)) { try { gl.setLayoutProperty(id, "visibility", "none"); } catch (_) {} } };
+
+  ["building-3d", "road_area_pattern", "poi_r20", "poi_r7", "poi_r1", "poi_transit",
+   "road_one_way_arrow", "road_one_way_arrow_opposite",
+   "road_major_rail_hatching", "road_transit_rail_hatching",
+   "bridge_major_rail_hatching", "bridge_transit_rail_hatching",
+   "tunnel_major_rail_hatching", "tunnel_transit_rail_hatching"].forEach(hide);
+
+  paint("background", "background-color", "#f3f3f1");
+  paint("landuse_residential", "fill-color", "#f3f3f1");
+  paint("building", "fill-color", "#e6e6e3");
+  ["park", "landcover_grass"].forEach((id) => paint(id, "fill-color", "#cdebc0"));
+  paint("landcover_wood", "fill-color", "#c4e6b6");
+  paint("park_outline", "line-color", "#cdebc0");
+  paint("water", "fill-color", "#aad3f2");
+  ["waterway_river", "waterway_other", "waterway_tunnel"].forEach((id) => paint(id, "line-color", "#aad3f2"));
+  ["landuse_school", "landuse_hospital", "landuse_pitch", "landuse_track", "landuse_cemetery"]
+    .forEach((id) => paint(id, "fill-color", "#ececE8"));
+
+  for (const layer of gl.getStyle().layers) {
+    const id = layer.id;
+    if (layer.type !== "line" || !/^(road|bridge|tunnel)_/.test(id)) continue;
+    if (/rail/.test(id)) { paint(id, "line-color", "#d0d0cc"); continue; }
+    paint(id, "line-color", /casing/.test(id) ? "#c4c4bf" : "#ffffff");
+  }
+}
+
 function ensureMap() {
   if (map) return;
   map = L.map("map", { zoomControl: false, attributionControl: true }).setView([43.7, -79.4], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
-  }).addTo(map);
+  if (typeof L.maplibreGL === "function" && window.maplibregl) {
+    const glLayer = L.maplibreGL({
+      style: "https://tiles.openfreemap.org/styles/liberty",
+      attribution: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+    }).addTo(map);
+    const gl = glLayer.getMaplibreMap && glLayer.getMaplibreMap();
+    if (gl) gl.on("style.load", () => wazeify(gl));
+  } else {
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+  }
   // The customer touching the map pauses auto-framing for 20s, so the
   // page never yanks the view away from something they're looking at.
   let userTimer = null;
@@ -254,7 +305,7 @@ const goldIcon = () => L.divIcon({
 const carIcon = () => L.divIcon({
   className: "",
   html: '<div class="wr-car" style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;transition:transform .8s linear;filter:drop-shadow(0 2px 3px rgba(0,0,0,.55))">' +
-        '<svg viewBox="0 0 20 34" width="20" height="34" aria-label="Driver">' +
+        '<svg viewBox="0 0 20 34" width="20" height="34" aria-label="Your snow angels">' +
         '<rect x="1.5" y="1.5" width="17" height="31" rx="7" fill="#1A73F2" stroke="#fff" stroke-width="2.5"/>' +
         '<rect x="4.5" y="7.5" width="11" height="6.5" rx="2" fill="#fff" opacity=".92"/>' +
         '<rect x="5" y="24" width="10" height="4" rx="1.5" fill="#fff" opacity=".6"/>' +
@@ -338,7 +389,7 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     $("etaSub").hidden = true;
     $("statusText").textContent = "Scheduled";
     $("stale").hidden = false;
-    $("stale").textContent = "Your driver hasn't started toward this stop yet.";
+    $("stale").textContent = "Your snow angels haven't started toward this stop yet.";
     return;
   }
   const d = snap.data();
@@ -386,10 +437,10 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     // on the way" while the badge underneath said "2 stops before
     // yours" - the page contradicting itself in two adjacent lines.
     // The badge owns the number; this line owns the status.
-    $("statusText").textContent = "Driver is on their route";
+    $("statusText").textContent = "Your snow angels are on their route";
     showQueue(stopsBefore);
     $("stale").hidden = false;
-    $("stale").textContent = "Your driver's live location appears once they're on the way to you.";
+    $("stale").textContent = "Your snow angels' live location appears once they're on the way to you.";
   } else {
     $("queue").hidden = true;
     $("statusText").textContent = isNext ? "On the way to you" : "On the way";
@@ -432,7 +483,7 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
     const ageMin = Math.round((Date.now() - updated) / 60000);
     if (ageMin >= 5) {
       $("stale").hidden = false;
-      $("stale").textContent = `Last update ${ageMin} min ago — your driver may be out of signal.`;
+      $("stale").textContent = `Last update ${ageMin} min ago — your snow angels may be out of signal.`;
     } else {
       $("stale").hidden = true;
     }
@@ -499,7 +550,8 @@ function updateRouteLine(shouldShow) {
     routeLine.setLatLngs(pts);
   } else {
     routeLine = L.polyline(pts, {
-      color: "#F5C451", weight: 4, opacity: .85, dashArray: "8 8"
+      // Deeper gold, thicker and opaque so it reads on the light map.
+      color: "#D99A00", weight: 5, opacity: 1, dashArray: "8 8"
     }).addTo(map);
   }
 }

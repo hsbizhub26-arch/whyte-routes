@@ -279,7 +279,7 @@ const MESSAGE_TEMPLATES = {
   shiftStart: (c) =>
     `${c.brand}: We're on our way for your service today. Track us live: ${c.trackingUrl}`,
   eta10: (c) =>
-    `${c.brand}: Your driver is about 10 minutes away from ${c.address}.`,
+    `${c.brand}: Your snow angels are about 10 minutes away from ${c.address}.`,
   // A RECEIPT, not just an announcement. The date and time are what
   // make it worth keeping: a customer asking "did they even come on
   // Tuesday?" has the answer in their own message history, and so does
