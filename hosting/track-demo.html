@@ -108,6 +108,16 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Clean, Waze-like vector map (OpenFreeMap "Liberty": free, no key,
+     commercial use allowed). Rendered inside Leaflet via the MapLibre
+     plugin so the markers/route code below is unchanged. If either script
+     fails to load, ensureMap() falls back to plain OSM raster tiles. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"
+        integrity="sha384-4CB9Vtol9LN6lGgBCvmPLbUEZwilrqIvPieSRurgAXAB7FVJaLS9n8WyAIA5wjQ+" crossorigin="anonymous"></script>
 <script>
 // ================= DEMO PAGE =================
 // The real page, with Firestore swapped for a scripted scenario that
@@ -226,13 +236,52 @@ let map = null, driverMarker = null, stopMarker = null, hasFitBounds = false;
 // repaint a live-looking driver onto a completed page.
 let serviceComplete = false;
 
+function wazeify(gl) {
+  const has = (id) => !!gl.getLayer(id);
+  const paint = (id, prop, val) => { if (has(id)) { try { gl.setPaintProperty(id, prop, val); } catch (_) {} } };
+  const hide = (id) => { if (has(id)) { try { gl.setLayoutProperty(id, "visibility", "none"); } catch (_) {} } };
+
+  ["building-3d", "road_area_pattern", "poi_r20", "poi_r7", "poi_r1", "poi_transit",
+   "road_one_way_arrow", "road_one_way_arrow_opposite",
+   "road_major_rail_hatching", "road_transit_rail_hatching",
+   "bridge_major_rail_hatching", "bridge_transit_rail_hatching",
+   "tunnel_major_rail_hatching", "tunnel_transit_rail_hatching"].forEach(hide);
+
+  paint("background", "background-color", "#f3f3f1");
+  paint("landuse_residential", "fill-color", "#f3f3f1");
+  paint("building", "fill-color", "#e6e6e3");
+  ["park", "landcover_grass"].forEach((id) => paint(id, "fill-color", "#cdebc0"));
+  paint("landcover_wood", "fill-color", "#c4e6b6");
+  paint("park_outline", "line-color", "#cdebc0");
+  paint("water", "fill-color", "#aad3f2");
+  ["waterway_river", "waterway_other", "waterway_tunnel"].forEach((id) => paint(id, "line-color", "#aad3f2"));
+  ["landuse_school", "landuse_hospital", "landuse_pitch", "landuse_track", "landuse_cemetery"]
+    .forEach((id) => paint(id, "fill-color", "#ececE8"));
+
+  for (const layer of gl.getStyle().layers) {
+    const id = layer.id;
+    if (layer.type !== "line" || !/^(road|bridge|tunnel)_/.test(id)) continue;
+    if (/rail/.test(id)) { paint(id, "line-color", "#d0d0cc"); continue; }
+    paint(id, "line-color", /casing/.test(id) ? "#c4c4bf" : "#ffffff");
+  }
+}
+
 function ensureMap() {
   if (map) return;
   map = L.map("map", { zoomControl: false, attributionControl: true }).setView([43.7, -79.4], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
-  }).addTo(map);
+  if (typeof L.maplibreGL === "function" && window.maplibregl) {
+    const glLayer = L.maplibreGL({
+      style: "https://tiles.openfreemap.org/styles/liberty",
+      attribution: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'
+    }).addTo(map);
+    const gl = glLayer.getMaplibreMap && glLayer.getMaplibreMap();
+    if (gl) gl.on("style.load", () => wazeify(gl));
+  } else {
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+  }
 }
 
 const goldIcon = () => L.divIcon({
