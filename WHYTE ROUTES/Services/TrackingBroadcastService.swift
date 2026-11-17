@@ -151,6 +151,13 @@ final class TrackingBroadcastService {
     }
 
     func stop() {
+        // Before forgetting the links, take the truck off each
+        // customer's page (see TrackingLinkRepository.publishPaused).
+        if let companyId = CompanySession.shared.currentCompanyId {
+            for link in Set(linksByStopId.values.map(\.id)) {
+                linkRepo.publishPaused(companyId: companyId, linkId: link)
+            }
+        }
         isRunning = false
         cancellables.removeAll()
         linksByStopId.removeAll()

@@ -132,6 +132,37 @@ final class TrackingLinkRepository {
             data["etaMinutes"] = FieldValue.delete()
         }
 
+        // Any live update means the shift is running again, so a
+        // "paused" flag left by the last End Shift must go.
+        data["paused"] = FieldValue.delete()
+
+        trackingLinksRef(companyId: companyId)
+            .document(linkId)
+            .collection("location")
+            .document("current")
+            .setData(data, merge: true)
+    }
+
+    // END SHIFT: take the truck off every customer's page.
+    //
+    // Stopping the broadcast only stops NEW positions. Without this the
+    // last coordinates and ETA stayed on the document, so a customer
+    // whose stop wasn't finished kept seeing "On the way to you · 6 min"
+    // with a truck frozen mid-street for the rest of the day (found in
+    // the Nov 16 simulator test). Coordinates and ETA are removed and
+    // `paused` tells the page to say so plainly. The next shift's first
+    // publishLocation clears the flag.
+    func publishPaused(companyId: String, linkId: String) {
+        let data: [String: Any] = [
+            "updatedAt": FieldValue.serverTimestamp(),
+            "paused": true,
+            "latitude": FieldValue.delete(),
+            "longitude": FieldValue.delete(),
+            "heading": FieldValue.delete(),
+            "etaMinutes": FieldValue.delete(),
+            "hasArrived": false,
+            "isCurrentDestination": false
+        ]
         trackingLinksRef(companyId: companyId)
             .document(linkId)
             .collection("location")

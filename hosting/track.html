@@ -379,7 +379,9 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId), (snap) => {
 });
 
 // ── Live driver position, published by the driver's app while en route
-onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", "current"), (snap) => {
+let lastLocSnap = null;
+function renderLocation(snap) {
+  lastLocSnap = snap;
   // The driver's app deletes this document when the stop is completed,
   // so there is normally nothing left to read. This guard covers the
   // ordering race where a final update lands just as the link flips.
@@ -394,6 +396,29 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
   }
   const d = snap.data();
   ensureMap();
+
+  // SHIFT OVER (or the phone stopped reporting): no truck, no ETA.
+  //
+  // `paused` is written by the driver's app on End Shift (build 67+).
+  // The age check covers older builds and a phone that died mid-shift:
+  // a truck position 20+ minutes old is not "on the way", it's a frozen
+  // picture, and showing it with an ETA misleads the customer. Only
+  // applied when the document carries coordinates - a waiting
+  // customer's document can legitimately go unchanged for a long time.
+  const updatedMs = d.updatedAt && d.updatedAt.toMillis ? d.updatedAt.toMillis() : null;
+  const hasCoords = typeof d.latitude === "number" && typeof d.longitude === "number";
+  const positionLongGone = hasCoords && updatedMs && (Date.now() - updatedMs) >= 20 * 60000;
+  if (d.paused === true || positionLongGone) {
+    if (driverMarker) { stopGlide(); map.removeLayer(driverMarker); driverMarker = null; }
+    if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+    $("queue").hidden = true;
+    $("eta").hidden = true;
+    $("etaSub").hidden = true;
+    $("statusText").textContent = "Paused for now";
+    $("stale").hidden = false;
+    $("stale").textContent = "Your snow angels have wrapped up for now. This page will update as soon as they're on the way to you again.";
+    return;
+  }
 
   // A waiting customer's document carries no coordinates at all - the
   // driver's position is only published once they are the current
@@ -488,7 +513,14 @@ onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", 
       $("stale").hidden = true;
     }
   }
-}, () => { /* location may legitimately not exist yet */ });
+}
+onSnapshot(doc(db, "companies", companyId, "trackingLinks", linkId, "location", "current"),
+  renderLocation,
+  () => { /* location may legitimately not exist yet */ });
+// Re-check once a minute even with no new data, so a position that
+// stops updating turns into "stale" / "Paused for now" for a customer
+// who simply keeps the page open.
+setInterval(() => { if (lastLocSnap) renderLocation(lastLocSnap); }, 60000);
 
 // ── Smooth movement between GPS fixes
 //
