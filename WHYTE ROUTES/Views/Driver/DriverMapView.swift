@@ -641,6 +641,8 @@ struct DriverMapView: View {
     // map too instead of unlabeled dots.
     private var mapLayer: some View {
         Map(position: $vm.cameraPosition) {
+            CleanMapWash()
+
             // Road-following, not straight lines - see RouteOverviewPlanner.
             // Later legs first, the truck's leg last so it draws on top.
             ForEach(overview.stopLegs) { leg in
@@ -691,10 +693,11 @@ struct DriverMapView: View {
                 UserAnnotation()
             }
         }
-        // Clean, Waze-like: dark, muted, no shop/restaurant pins, live
-        // traffic colours on the roads. All free (Apple Maps).
+        // Clean, Waze-like and LIGHT (matches the customer tracking page):
+        // muted, no shop/restaurant pins, live traffic colours on the
+        // roads. The app UI is dark; its maps are not. Free (Apple Maps).
         .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: true))
-        .environment(\.colorScheme, .dark)
+        .environment(\.colorScheme, .light)
         // Feeds DriverMapViewModel.visibleRegion so the zoom buttons
         // have a span to scale. cameraPosition is normally
         // .userLocation(...), which carries no region of its own -

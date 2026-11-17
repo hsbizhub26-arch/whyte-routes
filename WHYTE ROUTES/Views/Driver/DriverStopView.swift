@@ -662,6 +662,8 @@ extension DriverStopView {
     private var mapSection: some View {
         if let coordinate = vm.stop.coordinate {
             Map(position: $navCamera) {
+                CleanMapWash()
+
                 // Custom gold pin, not MapKit's stock red marker - the
                 // stock one is the one place left that broke the
                 // black/gold branding every other pin in the app
@@ -681,10 +683,14 @@ extension DriverStopView {
                     UserAnnotation()
                     if let polyline = nav.route?.polyline {
                         MapPolyline(polyline)
-                            .stroke(Color("WRThemeGold"), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                            .stroke(Color(red: 0xD9 / 255, green: 0x9A / 255, blue: 0x00 / 255),
+                                    style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                     }
                 }
             }
+            // Light and clean like the customer tracking page.
+            .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
+            .environment(\.colorScheme, .light)
             .frame(height: 280)
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(

@@ -42,6 +42,7 @@ struct DashboardView: View {
                                 }
                         }
                     }
+                    .environment(\.colorScheme, .light)
                     .frame(height: UIScreen.main.bounds.height * 0.45)
                     .clipShape(RoundedRectangle(cornerRadius: 24))
                     .overlay(

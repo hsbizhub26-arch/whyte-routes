@@ -421,6 +421,7 @@ private struct NavMapCanvas: View, Equatable {
     /// swipe.
     private static let deliberatePanDistance: CGFloat = 40
     private static let gestureGracePeriod: TimeInterval = 2.0
+    private static let routeAmber = Color(red: 0xD9 / 255, green: 0x9A / 255, blue: 0x00 / 255)
 
     private func userTookOverMap() {
         guard Date().timeIntervalSince(appearedAt) > Self.gestureGracePeriod else { return }
@@ -434,17 +435,21 @@ private struct NavMapCanvas: View, Equatable {
 
     var body: some View {
         Map(position: $camera) {
+            CleanMapWash()
+
             // Route first so the car draws on top of it. Only the part
             // still ahead of the car - see RouteAhead.
             if let routePolyline {
                 let ahead = location.currentLocation.map { RouteAhead.coordinates(of: routePolyline, from: $0) }
+                // Deeper amber than WRThemeGold - the pale gold washes out
+                // on the light map. Same #D99A00 as the tracking page.
                 if let ahead, ahead.count > 1 {
                     MapPolyline(coordinates: ahead)
-                        .stroke(Color("WRThemeGold"),
+                        .stroke(Self.routeAmber,
                                 style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
                 } else {
                     MapPolyline(routePolyline)
-                        .stroke(Color("WRThemeGold"),
+                        .stroke(Self.routeAmber,
                                 style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
                 }
             }
@@ -470,10 +475,11 @@ private struct NavMapCanvas: View, Equatable {
                 }
             }
         }
-        // Waze-like: dark, muted, no shop/restaurant pins, live traffic
-        // colours; 3D buildings kept for turn-by-turn. Free (Apple Maps).
-        .mapStyle(.standard(elevation: .realistic, emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: true))
-        .environment(\.colorScheme, .dark)
+        // Light and clean, to match the customer tracking page: muted
+        // grey ground, white roads, no shop/restaurant pins, flat (no 3D
+        // buildings), live traffic colours kept for the driver. Free (Apple Maps).
+        .mapStyle(.standard(elevation: .flat, emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: true))
+        .environment(\.colorScheme, .light)
         .onMapCameraChange(frequency: .continuous) { context in
             mapHeading = context.camera.heading
         }
@@ -641,6 +647,32 @@ private struct NavMapCanvas: View, Equatable {
 /// can inset its camera by exactly what the card covers rather than a
 /// number guessed per device.
 /// Global Y of the navigation map's bottom edge. See recentreClearance.
+// MARK: - Clean map wash (shared by every app map)
+//
+// A see-through white sheet over the whole map, drawn above the ground and
+// roads but under street names, route lines and pins. Apple's light map
+// paints every field and wood green; this washes it toward the near-white
+// look of the customer tracking page. Put it FIRST in a Map's content so
+// route lines added after it draw on top.
+struct CleanMapWash: MapContent {
+    var body: some MapContent {
+        MapPolygon(Self.world)
+            // 0.5 made the ground as white as the roads, so streets
+            // vanished at driving zoom; 0.35 keeps them readable.
+            .foregroundStyle(Color.white.opacity(0.35))
+            .mapOverlayLevel(level: .aboveRoads)
+    }
+
+    private static let world: MKPolygon = {
+        let r = MKMapRect.world
+        var corners = [
+            MKMapPoint(x: r.minX, y: r.minY), MKMapPoint(x: r.maxX, y: r.minY),
+            MKMapPoint(x: r.maxX, y: r.maxY), MKMapPoint(x: r.minX, y: r.maxY)
+        ]
+        return MKPolygon(points: &corners, count: corners.count)
+    }()
+}
+
 // MARK: - Car marker (shared by every map that shows a truck)
 //
 // A top-down car, front at the top, rotated to the direction of travel -

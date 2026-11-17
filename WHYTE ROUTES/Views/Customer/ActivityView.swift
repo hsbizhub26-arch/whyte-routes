@@ -90,6 +90,7 @@ struct ActivityView: View {
                         span: .init(latitudeDelta: 0.01, longitudeDelta: 0.01)
                     )
                 ))
+                .environment(\.colorScheme, .light)
                 .frame(height: 300)
                 .cornerRadius(12)
                 .padding(.horizontal)

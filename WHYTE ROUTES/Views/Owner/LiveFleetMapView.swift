@@ -117,6 +117,7 @@ struct LiveFleetMapView: View {
     private var map: some View {
         ZStack(alignment: .top) {
             Map(position: $cameraPosition) {
+                CleanMapWash()
                 UserAnnotation()
 
                 ForEach(visibleDrivers) { driver in
@@ -183,10 +184,11 @@ struct LiveFleetMapView: View {
             // below the status bar - letting the map extend under the
             // top too (even with .mapControls applied afterward) still
             // let those controls creep up into the battery/wifi icons.
-            // Clean, Waze-like: dark, muted, no shop/restaurant pins, live
-            // traffic colours - the trucks and their routes carry the colour.
+            // Clean, Waze-like and LIGHT (matches the customer tracking
+            // page): muted, no shop/restaurant pins, live traffic colours -
+            // the trucks and their routes carry the colour.
             .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: true))
-            .environment(\.colorScheme, .dark)
+            .environment(\.colorScheme, .light)
             .ignoresSafeArea(edges: [.horizontal, .bottom])
             .onMapCameraChange { context in
                 visibleRegion = context.region
