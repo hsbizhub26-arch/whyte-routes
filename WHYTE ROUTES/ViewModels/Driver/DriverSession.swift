@@ -37,12 +37,41 @@ final class DriverSession: ObservableObject {
     private let driverRepo = FirestoreDriverRepository()
     /// The one live stops listener for the current route.
     private var stopsListener: ListenerRegistration?
+    /// Live listener on the signed-in driver's own record.
+    private var driverListener: ListenerRegistration?
 
     // MARK: Load driver after login
     func setDriver(_ driver: Driver) {
         self.driver = driver
+        observeOwnDriverRecord(driverId: driver.id)
         loadAssignedRoute()
         Task { await restoreActiveShift() }
+    }
+
+    // The driver used to be read ONCE at sign-in and never again, so a
+    // rename - by the owner on the Team screen, or by the driver on
+    // their own profile - kept showing the old name (often the raw
+    // sign-in email) on the route card until the app was force-quit.
+    // Listening keeps name, vehicle and phone current everywhere the
+    // session's driver is shown. A failed or missing snapshot is
+    // ignored: keeping the last good record beats blanking the card.
+    private func observeOwnDriverRecord(driverId: String) {
+        driverListener?.remove()
+        driverListener = nil
+        guard let companyId = CompanySession.shared.currentCompanyId else { return }
+        driverListener = driverRepo.listenToDriver(companyId: companyId, driverId: driverId) { [weak self] updated in
+            guard let updated else { return }
+            Task { @MainActor in
+                guard let self, let current = self.driver, current.id == updated.id else { return }
+                // The same document takes a location write every few
+                // seconds on shift; only republish when something the
+                // UI shows has changed, not on every GPS fix.
+                guard current.name != updated.name
+                        || current.phone != updated.phone
+                        || current.vehicle != updated.vehicle else { return }
+                self.driver = updated
+            }
+        }
     }
 
     // MARK: Refresh current driver's route/stops (called when the tab view appears)
@@ -54,6 +83,8 @@ final class DriverSession: ObservableObject {
     func logout() {
         stopsListener?.remove()
         stopsListener = nil
+        driverListener?.remove()
+        driverListener = nil
         assignedRoutes = []
         driver = nil
         assignedRoute = nil

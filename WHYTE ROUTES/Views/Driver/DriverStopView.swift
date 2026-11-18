@@ -587,6 +587,14 @@ struct DriverStopView: View {
             }
         }
         .onAppear { navCamera = stopRegion() }
+        // Mark Completed / Skip advance this same screen to the next
+        // stop (vm.stop is replaced in place). The camera was only set
+        // on appear, so the map stayed on the stop just finished and the
+        // new stop's pin sat off-screen - the driver saw an empty map.
+        .onChange(of: vm.stop.id) { _, _ in
+            guard !nav.isNavigating else { return }
+            withAnimation { navCamera = stopRegion() }
+        }
     }
 
     /// The static framing of this stop, used before and after

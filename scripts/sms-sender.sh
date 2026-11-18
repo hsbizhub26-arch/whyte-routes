@@ -34,7 +34,7 @@ tfv_status() {
   local sid tok
   sid=$(secret TWILIO_ACCOUNT_SID | grep -oE 'AC[0-9a-f]{32}')
   tok=$(secret TWILIO_AUTH_TOKEN | grep -oE '^[0-9a-f]{32}$')
-  curl -s -u "$sid:$tok" "https://messaging.twilio.com/v1/Tollfree/Verifications?TollfreePhoneNumberSid=PNe275990cf4e56bb961ef2f13af40370e" \
+  curl -s -u "$sid:$tok" "https://messaging.twilio.com/v1/Tollfree/Verifications?TollfreePhoneNumberSid=PN4cef2b71df30bb6c9c3f6f9bda7fe475" \
     | python3 -I -c 'import json,sys; v=json.load(sys.stdin).get("verifications",[]); print(v[0]["status"] if v else "NONE")'
 }
 

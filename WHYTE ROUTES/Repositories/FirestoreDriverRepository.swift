@@ -90,7 +90,8 @@ final class FirestoreDriverRepository: DriverRepository {
     // session/CompanySession here, the company comes from the
     // tracking link's URL instead). A listener, not a one-time fetch,
     // so the customer's map actually updates as the driver moves.
-    func listenToDriver(companyId: String, driverId: String, handler: @escaping (Driver?) -> Void) {
+    @discardableResult
+    func listenToDriver(companyId: String, driverId: String, handler: @escaping (Driver?) -> Void) -> ListenerRegistration {
         db.collection("companies").document(companyId).collection("drivers")
             .document(driverId)
             .addSnapshotListener { snapshot, error in
