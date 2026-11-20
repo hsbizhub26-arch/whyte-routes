@@ -58,6 +58,32 @@ struct Stop: Identifiable {
     var arrivedAt: Date? = nil
     var completedAt: Date? = nil
 
+    /// The service-history record this stop's current run is writing
+    /// into (companies/{c}/serviceHistory/{id}). The stop itself is
+    /// reused storm after storm and its three timestamps above get
+    /// overwritten each time; the history record is the permanent
+    /// copy. See ServiceHistoryRepository for when a new one starts.
+    var openVisitId: String? = nil
+    /// B8: optional time window, minutes after midnight in the company's
+    /// time zone (e.g. 480 = 8:00 AM). Both nil = no window. Written only
+    /// when set (merge writes), so a driver's write can never add or
+    /// strip it; clearing is an explicit owner-side delete.
+    var windowStartMinute: Int? = nil
+    var windowEndMinute: Int? = nil
+
+    var hasTimeWindow: Bool { windowStartMinute != nil && windowEndMinute != nil }
+
+    /// "8:00 AM – 10:00 AM"
+    var timeWindowText: String? {
+        guard let a = windowStartMinute, let b = windowEndMinute else { return nil }
+        func fmt(_ m: Int) -> String {
+            let h = (m / 60) % 24, mm = m % 60
+            let h12 = h % 12 == 0 ? 12 : h % 12
+            return String(format: "%d:%02d %@", h12, mm, h < 12 ? "AM" : "PM")
+        }
+        return "\(fmt(a)) – \(fmt(b))"
+    }
+
     var coordinate: CLLocationCoordinate2D? {
         guard let lat = latitude,
               let lng = longitude else { return nil }
@@ -118,6 +144,9 @@ extension Stop {
         self.enRouteAt = (dict["enRouteAt"] as? Timestamp)?.dateValue()
         self.arrivedAt = (dict["arrivedAt"] as? Timestamp)?.dateValue()
         self.completedAt = (dict["completedAt"] as? Timestamp)?.dateValue()
+        self.openVisitId = dict["openVisitId"] as? String
+        self.windowStartMinute = (dict["windowStartMinute"] as? NSNumber)?.intValue
+        self.windowEndMinute = (dict["windowEndMinute"] as? NSNumber)?.intValue
     }
 
     // MARK: Encode for Firestore
@@ -142,6 +171,11 @@ extension Stop {
         if let enRouteAt { d["enRouteAt"] = Timestamp(date: enRouteAt) }
         if let arrivedAt { d["arrivedAt"] = Timestamp(date: arrivedAt) }
         if let completedAt { d["completedAt"] = Timestamp(date: completedAt) }
+        if let openVisitId { d["openVisitId"] = openVisitId }
+        if let windowStartMinute, let windowEndMinute {
+            d["windowStartMinute"] = windowStartMinute
+            d["windowEndMinute"] = windowEndMinute
+        }
         return d
     }
 }

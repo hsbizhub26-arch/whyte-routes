@@ -551,6 +551,8 @@ final class RouteOverviewPlanner: ObservableObject {
 struct DriverMapView: View {
 
     @StateObject private var vm = DriverMapViewModel()
+    /// B6: per-device (UserDefaults), default ON.
+    @AppStorage("map.showStopNames") private var showStopNames = true
     @StateObject private var overview = RouteOverviewPlanner()
     @Environment(\.scenePhase) private var scenePhase
     @State private var mapVisible = false
@@ -668,14 +670,20 @@ struct DriverMapView: View {
                                 .opacity(stop.isCompleted ? 0.55 : 1)
                                 .shadow(color: .black.opacity(0.35), radius: 4)
 
-                            Text(stop.customerName ?? "")
-                                .font(.caption2.bold())
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.black.opacity(0.7))
-                                .clipShape(Capsule())
+                            // B6: names can be hidden (crowded streets);
+                            // the numbered pin always stays and still opens
+                            // the stop card.
+                            if showStopNames, let name = stop.customerName, !name.isEmpty {
+                                Text(name)
+                                    .font(.caption2.bold())
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.black.opacity(0.7))
+                                    .clipShape(Capsule())
+                            }
                         }
+                        .contentShape(Rectangle())
                         .onTapGesture {
                             vm.selectedStop = stop
                         }
@@ -830,6 +838,21 @@ struct DriverMapView: View {
                 Spacer(minLength: 0)
                 VStack(spacing: 12) {
                     mapControls
+
+                    // B6: show/hide the names under the numbered pins.
+                    // Remembered on this phone; on by default.
+                    Button {
+                        showStopNames.toggle()
+                    } label: {
+                        Image(systemName: showStopNames ? "tag.fill" : "tag.slash.fill")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.black)
+                            .frame(width: 46, height: 46)
+                            .background(Color("WRThemeGold"))
+                            .clipShape(Circle())
+                            .shadow(radius: 6)
+                    }
+                    .accessibilityLabel(showStopNames ? "Hide stop names" : "Show stop names")
 
                     Button {
                         vm.centerOnDriver()

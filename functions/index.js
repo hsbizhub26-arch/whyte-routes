@@ -13,13 +13,20 @@
 // PurchaseManager.swift calls this immediately after every verified
 // StoreKit transaction (new purchase, renewal, or restore).
 
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { SignedDataVerifier, Environment } = require("@apple/app-store-server-library");
 const fs = require("fs");
+const { findClusters, clusterOf, nextPending } = require("./streetClusters");
+
+// Routes on the new street-cluster text flow. SMS Test Route only until
+// the owner has seen the real texts; every other route is unchanged.
+const STREET_FLOW_ROUTES = ["0SmsTestRoute"];
+
+
 const path = require("path");
 
 admin.initializeApp();
@@ -227,6 +234,79 @@ function tierRank(subscriptionTier) {
   return TIER_RANK[subscriptionTier] ?? 0;
 }
 
+// ── SMS FAIR-USE ALLOWANCE (per business, per calendar month) ─────────
+// Counted in billable SEGMENTS, enforced here on the server so no app
+// version can get around it. At the cap, customer texts PAUSE for the
+// rest of the month - never an overage charge. Email and the tracking
+// page keep working. Warnings for the owner are written onto the month's
+// usage document (smsWarn80 / smsCapReached) and shown in the app.
+const SMS_ALLOWANCE = { professional: 1000, premiumPlus: 3000, enterprise: 3000 };
+function smsSegments(body) {
+  const text = String(body || "");
+  const gsm = /^[\x20-\x7E\n\r]*$/.test(text);   // plain text = GSM-7
+  const single = gsm ? 160 : 70, multi = gsm ? 153 : 67;
+  return text.length <= single ? 1 : Math.ceil(text.length / multi);
+}
+// Comped/internal companies (billingRequired === false - the existing
+// whitelist flag, e.g. DW Landscaping and the App Review demo) are never
+// capped. No second list: this is the same flag the app already uses.
+function smsCapExempt(companyData) { return companyData.billingRequired === false; }
+
+// Calendar month in the COMPANY's own time zone, so the allowance resets
+// at local midnight on the 1st (not 7 PM the night before, as UTC would).
+function usagePeriod(companyData) {
+  const tz = (companyData && companyData.timeZoneIdentifier) || "America/Toronto";
+  return new Date().toLocaleDateString("en-CA", { timeZone: tz }).slice(0, 7);
+}
+function usageRef(companyId, companyData) {
+  return admin.firestore().doc(`companies/${companyId}/notificationUsage/${usagePeriod(companyData)}`);
+}
+async function smsAllowanceOk(companyId, companyData) {
+  if (smsCapExempt(companyData)) return true;
+  const cap = SMS_ALLOWANCE[companyData.subscriptionTier];
+  if (!cap) return true;
+  const snap = await usageRef(companyId, companyData).get();
+  return ((snap.exists && snap.data().smsSegments) || 0) < cap;
+}
+// RESERVE before sending, inside one transaction, so concurrent sends near
+// the cap can never push a business past it. Returns the number of
+// segments reserved, or 0 if the text would exceed the allowance (then it
+// must not be sent). Comped / uncapped companies are counted for
+// reporting but never refused. Warning flags are written once (a flag
+// that is already true is left alone).
+async function reserveSmsSegments(companyId, companyData, body) {
+  const segs = smsSegments(body);
+  const ref = usageRef(companyId, companyData);
+  const exempt = smsCapExempt(companyData);
+  const cap = exempt ? null : SMS_ALLOWANCE[companyData.subscriptionTier];
+  return admin.firestore().runTransaction(async (tx) => {
+    const d = (await tx.get(ref)).data() || {};
+    const used = d.smsSegments || 0;
+    if (cap && used + segs > cap) {
+      if (!d.smsCapReached) tx.set(ref, { smsCap: cap, smsWarn80: true, smsCapReached: true }, { merge: true });
+      return 0;
+    }
+    const next = used + segs;
+    const upd = { smsSegments: next };
+    if (cap) {
+      upd.smsCap = cap;
+      if (next >= cap * 0.8 && !d.smsWarn80) upd.smsWarn80 = true;
+      if (next >= cap && !d.smsCapReached) upd.smsCapReached = true;
+    }
+    tx.set(ref, upd, { merge: true });
+    return segs;
+  });
+}
+// Give back a reservation when Twilio refused the request outright (bad
+// number, STOP): no message exists and nothing is billed. A text Twilio
+// ACCEPTED keeps its reservation even if a carrier later blocks it -
+// Twilio still bills accepted-then-undelivered segments.
+async function releaseSmsSegments(companyId, companyData, segs) {
+  if (!segs) return;
+  await usageRef(companyId, companyData).set(
+    { smsSegments: admin.firestore.FieldValue.increment(-segs) }, { merge: true });
+}
+
 // THREE EVENTS. Shift start, ten minutes out, done.
 //
 // eta15, enRoute and arrived were removed outright - not disabled by a
@@ -267,6 +347,33 @@ function smsBrand(companyData) {
 // for SMS: "reply STOP" means nothing in an email, so the email copy of
 // the same message goes without it.
 const SMS_OPT_OUT = " Reply STOP to opt out.";
+// ── TEXTS WITH LINKS ARE BLOCKED FROM THE LOCAL 289 NUMBER ───────────
+//
+// Proven 2026-11-18, not guessed: of every message ever sent from
+// +1 289-802-6468, 18 of 18 that contained a link came back
+// "undelivered, 30007" (carrier filtering) and 9 of 9 without one were
+// delivered. A live A/B test that day gave the same answer, with and
+// without "https://". Canadian carriers only allow application traffic
+// with links from toll-free numbers and short codes; a local long code
+// cannot be registered out of it (10DLC covers US recipients only).
+//
+// So while the sender is that local number, customer texts go out
+// WITHOUT the link - a text that lands beats one that is silently
+// eaten - and the link is still minted, so the owner can hand it over
+// with Share Link (free) or email. Keyed on the sender itself: the
+// moment scripts/sms-sender.sh switches TWILIO_PHONE_NUMBER to the
+// approved toll-free number, links come back with no other change.
+const UNREGISTERED_LOCAL_SENDERS = ["+12898026468"];
+// OFF until the owner chooses it (2026-11-18): she wants the link kept
+// in the text. With this false, message content is exactly as before;
+// flip to true to send link-free texts from the local number (they
+// deliver - the linked ones don't, error 30007).
+const STRIP_LINKS_ON_UNREGISTERED_SENDER = false;
+function smsLinksBlocked() {
+  return STRIP_LINKS_ON_UNREGISTERED_SENDER
+    && UNREGISTERED_LOCAL_SENDERS.includes(TWILIO_PHONE_NUMBER.value());
+}
+
 function withOptOut(message) {
   return message.endsWith(SMS_OPT_OUT) ? message : `${message}${SMS_OPT_OUT}`;
 }
@@ -276,22 +383,34 @@ function withOptOut(message) {
 // cost of every text). The customer's name was dropped for the same
 // reason - the approved sample doesn't carry one either.
 const MESSAGE_TEMPLATES = {
-  shiftStart: (c) =>
-    `${c.brand}: We're on our way for your service today. Track us live: ${c.trackingUrl}`,
+  shiftStart: (c) => (c.v2 && c.trackingUrl)
+    ? `${c.brand}: Your driver has started their shift and is on the way. Track your service live: ${c.trackingUrl}`
+    : c.trackingUrl
+    ? `${c.brand}: We're on our way for your service today. Track us live: ${c.trackingUrl}`
+    // Link-free version for while links are carrier-blocked (see
+    // smsLinksBlocked). Still tells the customer what to expect next.
+    : `${c.brand}: We're on our way for your service today. We'll text you when we're about 10 minutes away.`,
+  // Street cluster: sent to the other customers on a street the moment
+  // the truck starts that street. No minute count on purpose - "stop 3
+  // of 5" is honest, a number would not be.
+  streetArrival: (c) =>
+    `${c.brand}: We're on our way to ${c.street}, about 10 minutes away. You're stop ${c.n} of ${c.m} on this street.` +
+    (c.trackingUrl ? ` Track us live: ${c.trackingUrl}` : ""),
   eta10: (c) =>
-    `${c.brand}: Your snow angels are about 10 minutes away from ${c.address}.`,
+    `${c.brand}: Our crew is about 10 minutes away from ${c.address}.`,
   // A RECEIPT, not just an announcement. The date and time are what
   // make it worth keeping: a customer asking "did they even come on
   // Tuesday?" has the answer in their own message history, and so does
   // the company if it is ever disputed. Stamped in the COMPANY's
   // timezone, not the Cloud Function's - see completedStamp below.
-  completed: (c) =>
-    `${c.brand}: Your service at ${c.address} was completed ${c.completedStamp}. Thank you!`,
+  completed: (c) => c.v2
+    ? `${c.brand}: Your service is complete. Thank you!`
+    : `${c.brand}: Your service at ${c.address} was completed ${c.completedStamp}. Thank you!`,
 };
 
 function buildMessage(type, ctx) {
   const template = MESSAGE_TEMPLATES[type];
-  if (!template) return `${ctx.brand}: update on your service.`;
+  if (!template) return `${ctx.brand}: An update on your service.`;
   return template(ctx);
 }
 
@@ -351,7 +470,7 @@ function isQuietHours(companyData) {
 // tracking link for a finished route shows nothing). These are simply
 // skipped during Quiet Hours, same as not_entitled - nothing is
 // written, nothing is queued.
-const LIVE_ONLY_TYPES = { eta10: true, shiftStart: true };
+const LIVE_ONLY_TYPES = { eta10: true, shiftStart: true, streetArrival: true };
 
 // Sends every queued morning-summary receipt for one company right
 // now. Called two ways: inline, the instant any live-hours call comes
@@ -360,6 +479,7 @@ const LIVE_ONLY_TYPES = { eta10: true, shiftStart: true };
 // scheduled function itself, as the safety net for a shift that ends
 // before anyone taps anything after Quiet Hours lifts.
 async function flushQueuedMorningSummaries(companyId) {
+  let flushCompanyData = null;
   const queueRef = admin.firestore().collection(`companies/${companyId}/queuedMorningSummaries`);
   const queueSnap = await queueRef.get();
 
@@ -395,11 +515,24 @@ async function flushQueuedMorningSummaries(companyId) {
     let contact = null;
     let result = { accepted: false, failureReason: "No contact information on file." };
 
-    if (q.smsEnabled && q.phone) {
+    // Same gates as every other customer text: STOP registry first, then
+    // the monthly allowance (reserved atomically). Either one falls back
+    // to email when the customer has it.
+    let smsOk = !!(q.smsEnabled && q.phone);
+    let reserved = 0;
+    if (smsOk && (await smsOptedOut(q.phone))) smsOk = false;
+    if (smsOk) {
+      if (!flushCompanyData) flushCompanyData = (await admin.firestore().doc(`companies/${companyId}`).get()).data() || {};
+      reserved = await reserveSmsSegments(companyId, flushCompanyData, withOptOut(q.message));
+      if (!reserved) smsOk = false;
+    }
+    if (smsOk) {
       method = "sms";
       contact = q.phone;
       try {
-        result = await sendSms(q.phone, withOptOut(q.message));
+        result = await sendSms(q.phone, withOptOut(q.message), { statusPath: q.notificationRefPath || undefined });
+        if (!result.accepted) await releaseSmsSegments(companyId, flushCompanyData, reserved);
+        else await rememberSmsRecipient(q.phone, companyId);
       } catch (err) {
         result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
       }
@@ -502,7 +635,39 @@ function toE164(raw) {
   return `+1${nanp}`;
 }
 
-async function sendSms(to, body) {
+// ── STOP / START REGISTRY ─────────────────────────────────────────────
+// smsOptOuts/{E.164}: written only by the incoming-reply webhook below.
+// One sending number serves every company, and a STOP to it blocks that
+// phone at the carrier for ALL of them - so the registry is per phone,
+// not per company. Every customer-text path checks it BEFORE sending, so
+// the app never even attempts a text Twilio would refuse (and the owner
+// sees why). START clears it and stamps a fresh consent time.
+async function smsOptedOut(phone) {
+  const e164 = toE164(phone);
+  if (!e164) return false;
+  const snap = await admin.firestore().doc(`smsOptOuts/${e164}`).get();
+  return snap.exists && snap.data().active === true;
+}
+// smsRecipients/{E.164} -> the company that last texted this phone, so a
+// HELP reply can name the right business. Written after each accepted SMS.
+async function rememberSmsRecipient(phone, companyId) {
+  const e164 = toE164(phone);
+  if (!e164) return;
+  await admin.firestore().doc(`smsRecipients/${e164}`).set(
+    { companyId, lastTextAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+}
+
+// Where Twilio reports each customer text's FINAL outcome (delivered /
+// undelivered / failed) - see twilioStatusCallback. A v2 function is
+// also served at this classic URL, which is stable, unlike the run.app
+// one; the signature check below depends on it being exact.
+const STATUS_CALLBACK_BASE = "https://us-central1-whyte-routes.cloudfunctions.net/twilioStatusCallback";
+
+// `statusPath` = the notification document this text is logged in. When
+// given, Twilio calls back with the real outcome and that document (and
+// the owner's alert list) is updated - so a text the carrier eats shows
+// up in the app instead of sitting there as "accepted" forever.
+async function sendSms(to, body, { statusPath } = {}) {
   // Normalised at the single choke point every send path already goes
   // through, so no caller can forget and no two callers can disagree.
   const normalized = toE164(to);
@@ -521,6 +686,9 @@ async function sendSms(to, body) {
 
   const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
   const params = new URLSearchParams({ To: normalized, From: from, Body: body });
+  if (statusPath) {
+    params.set("StatusCallback", `${STATUS_CALLBACK_BASE}?p=${encodeURIComponent(statusPath)}`);
+  }
 
   const response = await fetch(
     `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
@@ -606,7 +774,7 @@ async function sendEmail(to, subject, body, fromName) {
 //
 // The caller authenticates and resolves companyId/companyData;
 // everything from there down is identical no matter who asked.
-async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
+async function notifyStop({ companyId, companyData, routeId, stopId, type, extra = {} }) {
   const timeZone = companyData.timeZoneIdentifier || "America/Toronto";
   const quietHours = isQuietHours(companyData);
 
@@ -703,7 +871,7 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
   // shiftStart has no individual toggle: a customer who is opted in
   // at all wants to know the crew is coming, and it is the message
   // that carries their tracking link.
-  const typePreferenceOk = type === "eta10" ? notifyEta
+  const typePreferenceOk = (type === "eta10" || type === "streetArrival") ? notifyEta
     : type === "completed" ? notifyCompleted
     : true;
 
@@ -784,7 +952,7 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
   // notification document written a moment ago is cleared so the
   // idempotency key doesn't permanently block a retry.
   let trackingUrl = null;
-  if (type === "shiftStart") {
+  if (type === "shiftStart" || type === "streetArrival") {
     try {
       ({ url: trackingUrl } = await ensureTrackingLink({
         companyId, stopId, stopData, customerName,
@@ -796,11 +964,17 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     }
   }
 
+  // The link is still minted above either way; it's only left OUT of
+  // an SMS that carriers would block for carrying it. An email copy
+  // keeps it - email isn't filtered for it.
+  const smsWillCarryLink = !smsLinksBlocked();
+  const goesBySms = smsEnabled && phone && phone.trim().length > 0;
   const message = buildMessage(type, {
     brand,
     customerName,
     address: stopData.address || "your address",
-    trackingUrl,
+    trackingUrl: (goesBySms && !smsWillCarryLink) ? null : trackingUrl,
+    ...extra,
     // Formatted here rather than in the template so it lands in the
     // company's own timezone. Reuses the same toLocaleString pattern
     // as buildMorningSummaryMessage, which exists because formatting
@@ -854,8 +1028,30 @@ async function notifyStop({ companyId, companyData, routeId, stopId, type }) {
     method = "sms";
     contact = phone;
     sentMessage = withOptOut(message);
-    try {
-      result = await sendSms(phone, sentMessage);
+    if (await smsOptedOut(phone)) {
+      await notificationRef.update({ contactMethod: "sms", contactValue: phone, deliveryStatus: "sms_opted_out",
+        failureReason: "This customer replied STOP. No texts until they reply START.", message: sentMessage });
+      console.log(`🚫 notification ${notificationId} (company ${companyId}) -> sms_opted_out`);
+      return { deliveryStatus: "sms_opted_out", notificationId };
+    }
+    const reserved = await reserveSmsSegments(companyId, companyData, sentMessage);
+    if (!reserved) {
+      // At the cap: fall back to email when the customer has one, so the
+      // update still reaches them. Otherwise record a visible pause.
+      if (emailEnabled && email && email.trim().length > 0) {
+        method = "email"; contact = email; sentMessage = message;
+        try { result = await sendEmail(email, `Update on your service`, message, brand); }
+        catch (err) { result = { accepted: false, failureReason: err.message || "Email send threw an error." }; }
+      } else {
+        await notificationRef.update({ contactMethod: "sms", contactValue: phone, deliveryStatus: "sms_allowance_reached",
+          failureReason: "Monthly text allowance reached - texts resume on the 1st.", message: sentMessage });
+        console.log(`⏸️ notification ${notificationId} (company ${companyId}) -> sms_allowance_reached`);
+        return { deliveryStatus: "sms_allowance_reached", notificationId };
+      }
+    } else try {
+      result = await sendSms(phone, sentMessage, { statusPath: notificationRef.path });
+      if (!result.accepted) await releaseSmsSegments(companyId, companyData, reserved);
+      else await rememberSmsRecipient(phone, companyId);
     } catch (err) {
       result = { accepted: false, failureReason: err.message || "SMS send threw an error." };
     }
@@ -968,6 +1164,40 @@ exports.sendCustomerNotification = onCall(
       return { deliveryStatus: "not_entitled", notificationId: null };
     }
 
+    // STREET FLOW (test route only until approved - STREET_FLOW_ROUTES).
+    if (STREET_FLOW_ROUTES.includes(routeId)) {
+      if (type === "completed") {
+        return await notifyStop({ companyId, companyData, routeId, stopId, type, extra: { v2: true } });
+      }
+      if (type === "eta10") {
+        // The truck is ~10 minutes out (the driver app decides that, same
+        // as today). On a street with more than one customer, every
+        // still-open house on that street gets the street text - once a
+        // day each. A house on its own street gets nothing here: its
+        // tracking link already shows the truck coming.
+        const db = admin.firestore();
+        const snap = await db.collection(`companies/${companyId}/routes/${routeId}/stops`).get();
+        const me = snap.docs.find((d) => d.id === stopId);
+        const driverId = me && me.data().driverId;
+        const stops = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+          .filter((x) => !driverId || x.driverId === driverId);
+        const cluster = clusterOf(stopId, findClusters(stops));
+        if (!cluster) return { deliveryStatus: "no_street_text_single_house", notificationId: null };
+        const m = cluster.stopIds.length;
+        let mine = { deliveryStatus: "skipped", notificationId: null };
+        for (let i = 0; i < m; i++) {
+          const id = cluster.stopIds[i];
+          const st = stops.find((x) => x.id === id);
+          if (!st || st.isCompleted || st.isSkipped) continue;
+          const r = await notifyStop({ companyId, companyData, routeId, stopId: id, type: "streetArrival",
+            extra: { street: cluster.street, n: i + 1, m } });
+          console.log(`🛣️ streetArrival stop ${id} (route ${routeId}) -> ${r.deliveryStatus}`);
+          if (id === stopId) mine = r;
+        }
+        return mine;
+      }
+    }
+
     return await notifyStop({ companyId, companyData, routeId, stopId, type });
   }
 );
@@ -1042,10 +1272,16 @@ exports.sendShiftStartNotifications = onCall(
       : routeRef.collection("stops").where("driverId", "==", uid);
     const stopsSnap = await stopsQuery.get();
 
-    const openStops = stopsSnap.docs.filter((d) => {
+    const allOpen = stopsSnap.docs.filter((d) => {
       const data = d.data();
       return !data.isCompleted && !data.isSkipped;
     });
+
+    const plain = stopsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // NEW FLOW (test route only until approved - see STREET_FLOW_ROUTES):
+    // same audience, cleaner wording.
+    const newFlow = STREET_FLOW_ROUTES.includes(routeId);
+    const openStops = allOpen;
 
     let sent = 0;
     const statuses = {};
@@ -1053,7 +1289,9 @@ exports.sendShiftStartNotifications = onCall(
       let outcome;
       try {
         const res = await notifyStop({
-          companyId, companyData, routeId, stopId: stopDoc.id, type: "shiftStart",
+          companyId, companyData, routeId, stopId: stopDoc.id,
+          type: "shiftStart",
+          extra: newFlow ? { v2: true } : {},
         });
         outcome = res.deliveryStatus;
         if (outcome === "accepted") sent += 1;
@@ -1390,7 +1628,14 @@ const TRACKING_BASE_URL = "https://whyte-routes.web.app/track";
 // A token is 12 characters of crypto-random base62 - 62^12, far past
 // guessing - and resolves to the company/link pair server-side. The
 // URL now carries no meaning at all, which is the point.
-const TRACKING_SHORT_URL = "https://whyte-routes.web.app/t";
+// ON THE OWNER'S OWN DOMAIN (2026-11-18). Carriers filter *.web.app
+// links from our sending number - 18 of 18 blocked (30007), with or
+// without "https://" - while a link to hsbizhub.com from the same
+// number was delivered. track.hsbizhub.com is a Firebase Hosting custom
+// domain on this same site (CNAME -> whyte-routes.web.app), so it is
+// the exact same tracking page; only the address in the text changed.
+// Links already sent on whyte-routes.web.app keep working.
+const TRACKING_SHORT_URL = "https://track.hsbizhub.com/t";
 const TOKEN_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 function newTrackingToken() {
   const bytes = require("crypto").randomBytes(12);
@@ -1636,12 +1881,43 @@ exports.sendTrackingLink = onCall(
     const message = `${smsBrand(companyData)}: Track your service live: ${url}`;
     const smsMessage = withOptOut(message);
 
+    // This text IS a link, so while links are carrier-blocked (see
+    // smsLinksBlocked) an SMS would be billed and silently eaten. Use
+    // email if the customer has it; otherwise say so plainly and point
+    // the owner at Share Link, which sends from their own phone.
+    let reserved = 0;
+    const optedOut = canSms && (await smsOptedOut(phone));
+    if (optedOut && !canEmail) {
+      return { deliveryStatus: "sms_opted_out", url, linkId: null, method: "none",
+        failureReason: "This customer replied STOP to our texts. They won't get texts until they reply START." };
+    }
+    if (canSms && !optedOut && !smsLinksBlocked()) {
+      reserved = await reserveSmsSegments(companyId, companyData, withOptOut(`${smsBrand(companyData)}: Track your service live: ${url}`));
+    }
+    const useSms = reserved > 0;
+    if (canSms && !useSms && !canEmail) {
+      const capped = !smsLinksBlocked();
+      console.log(`⚠️ tracking link ${linkId} (company ${companyId}) -> held (${capped ? "sms_allowance_reached" : "links_blocked"}), no email on file`);
+      return {
+        deliveryStatus: capped ? "sms_allowance_reached" : "blocked_links_unregistered_sender",
+        url, linkId, method: "none",
+        failureReason: capped
+          ? "Your monthly customer text allowance is used up - texts resume on the 1st. Use Share Link (free) to send it from your own phone."
+          : "Carriers are blocking texts that contain links from our current number. Use Share Link (free) to send it from your own phone.",
+      };
+    }
+
     let result;
-    const method = canSms ? "sms" : "email";
-    const contact = canSms ? phone : email;
+    const method = useSms ? "sms" : "email";
+    const contact = useSms ? phone : email;
     try {
-      result = canSms
-        ? await sendSms(phone, smsMessage)
+      result = useSms
+        ? await sendSms(phone, smsMessage, { statusPath: stopRef.collection("notifications").doc(`${stopId}_trackingLink`).path })
+            .then(async (r) => {
+              if (!r.accepted) await releaseSmsSegments(companyId, companyData, reserved);
+              else await rememberSmsRecipient(phone, companyId);
+              return r;
+            })
         : await sendEmail(email, "Track your service in real time", message, smsBrand(companyData));
     } catch (err) {
       result = { accepted: false, failureReason: err.message || `${method} send threw an error.` };
@@ -1659,7 +1935,7 @@ exports.sendTrackingLink = onCall(
       deliveryStatus,
       providerMessageId: result.providerMessageId || null,
       failureReason: result.failureReason || null,
-      message: canSms ? smsMessage : message,
+      message: useSms ? smsMessage : message,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
 
@@ -2055,3 +2331,303 @@ exports.revokeEmployee = onCall(async (request) => {
     linksSuperseded: linksToKill.length,
   };
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// BACKFILL SERVICE HISTORY FROM THE TEXT LOG (one storm at a time).
+//
+// See serviceHistoryBackfill.js for what gets rebuilt and why. This
+// wrapper only reads the caller's own company and, when dryRun is
+// false, writes the planned records with create() - which FAILS if the
+// document already exists, so it can never overwrite a visit (live or
+// recovered) and running it twice adds nothing the second time.
+//
+// Owner only. dryRun defaults to TRUE: the first call always just
+// returns the list for a human to check.
+//
+// Customer names/addresses go back to the signed-in owner only; the
+// function log carries ids and counts, never PII.
+// ─────────────────────────────────────────────────────────────────────
+const { planRecoveredVisits } = require("./serviceHistoryBackfill");
+
+exports.backfillServiceHistoryFromLogs = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in required.");
+  }
+  const serviceDate = String((request.data && request.data.serviceDate) || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
+    throw new HttpsError("invalid-argument", "serviceDate must be YYYY-MM-DD.");
+  }
+  const dryRun = !(request.data && request.data.dryRun === false);
+
+  const db = admin.firestore();
+  const user = (await db.doc(`users/${request.auth.uid}`).get()).data();
+  if (!user || !user.companyId) {
+    throw new HttpsError("failed-precondition", "No company associated with this account.");
+  }
+  if (user.companyRole !== "owner") {
+    throw new HttpsError("permission-denied", "Only the company owner can recover service history.");
+  }
+  const companyId = user.companyId;
+  const company = (await db.doc(`companies/${companyId}`).get()).data() || {};
+  const timeZone = company.timeZoneIdentifier || "America/Toronto";
+
+  const driverNames = {};
+  (await db.collection(`companies/${companyId}/drivers`).get())
+    .forEach((d) => { if (d.data().name) driverNames[d.id] = d.data().name; });
+
+  const routes = [];
+  const routeSnaps = await db.collection(`companies/${companyId}/routes`).get();
+  for (const r of routeSnaps.docs) {
+    const stops = [];
+    const stopSnaps = await r.ref.collection("stops").get();
+    for (const s of stopSnaps.docs) {
+      const notifs = await s.ref.collection("notifications").where("type", "==", "completed").get();
+      stops.push({
+        id: s.id,
+        data: s.data(),
+        notifications: notifs.docs.map((n) => ({ id: n.id, data: n.data() })),
+      });
+    }
+    routes.push({ id: r.id, name: r.data().name, stops });
+  }
+
+  const plans = planRecoveredVisits({ serviceDate, timeZone, routes, driverNames });
+
+  const results = [];
+  for (const p of plans) {
+    const ref = db.doc(`companies/${companyId}/serviceHistory/${p.visitId}`);
+    const exists = (await ref.get()).exists;
+    let status = exists ? "already_recorded" : (dryRun ? "would_create" : "created");
+    if (!exists && !dryRun) {
+      try {
+        await ref.create({ ...p.record, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+      } catch (e) {
+        status = e.code === 6 ? "already_recorded" : `error: ${e.message}`;
+      }
+    }
+    results.push({ ...p.summary, status });
+  }
+
+  const created = results.filter((r) => r.status === "created").length;
+  console.log(`🗂️ backfillServiceHistoryFromLogs company ${companyId} day ${serviceDate} ` +
+    `dryRun=${dryRun}: ${plans.length} planned, ${created} created`);
+  return { serviceDate, timeZone, dryRun, count: plans.length, created, visits: results };
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// TWILIO DELIVERY RESULTS -> NO SILENT FAILURES.
+//
+// Twilio only says "accepted" when a text is sent; whether the carrier
+// delivered it, or filtered it as spam (30007), arrives seconds later.
+// Before this, nothing listened: a filtered customer text sat in the log
+// as "accepted" and the owner had no idea that customer never heard from
+// them. Now every customer SMS carries a StatusCallback (see sendSms)
+// pointing here with the path of its notification document, and:
+//   delivered            -> log updated to "delivered"
+//   undelivered / failed -> log updated to "undelivered" with the reason,
+//                           AND an alert is raised in
+//                           companies/{c}/textAlerts/{notificationId}
+//                           that the owner sees in the app (which
+//                           customer, which text, why), so Devon can
+//                           text that customer from his own phone.
+//
+// Only requests carrying a valid X-Twilio-Signature (HMAC-SHA1 with our
+// auth token) are accepted, and the path must be a notification document
+// - nothing else in the database can be touched from here. No customer
+// name or number is logged.
+// ─────────────────────────────────────────────────────────────────────
+const crypto = require("crypto");
+
+const NOTIFICATION_PATH_RE = /^companies\/([^/]+)\/routes\/([^/]+)\/stops\/([^/]+)\/notifications\/([^/]+)$/;
+
+function twilioSignatureValid(authToken, url, params, signature) {
+  if (!signature) return false;
+  const data = url + Object.keys(params).sort().map((k) => k + params[k]).join("");
+  const expected = crypto.createHmac("sha1", authToken).update(Buffer.from(data, "utf-8")).digest("base64");
+  const a = Buffer.from(expected), b = Buffer.from(signature);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function undeliveredReason(code) {
+  const c = String(code || "");
+  const known = {
+    "30007": "The carrier blocked it as suspected spam (error 30007).",
+    "30003": "The phone was off or out of service (error 30003).",
+    "30005": "That number doesn't exist or isn't active (error 30005).",
+    "30006": "That number is a landline or can't receive texts (error 30006).",
+    "30008": "The carrier couldn't deliver it (error 30008).",
+    "21610": "The customer has replied STOP to our texts (error 21610).",
+    "30032": "Our sending number isn't verified yet (error 30032).",
+    "30034": "Our sending number isn't registered with carriers (error 30034).",
+  };
+  return known[c] || (c ? `Not delivered (error ${c}).` : "Not delivered.");
+}
+
+exports.twilioStatusCallback = onRequest(
+  { secrets: [TWILIO_AUTH_TOKEN], cors: false },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).send("POST only"); return; }
+    const params = req.body || {};
+    const qs = (req.originalUrl || req.url || "").split("?")[1] || "";
+    // Twilio signs the exact URL it was given. Accept either spelling of
+    // the path in case the platform rewrites it.
+    const candidates = [
+      `${STATUS_CALLBACK_BASE}?${qs}`,
+      `${STATUS_CALLBACK_BASE}/?${qs}`,
+    ];
+    const sig = req.get("X-Twilio-Signature");
+    const token = TWILIO_AUTH_TOKEN.value();
+    if (!candidates.some((u) => twilioSignatureValid(token, u, params, sig))) {
+      console.warn("✖ twilioStatusCallback: bad or missing signature - ignored");
+      res.status(403).send("bad signature");
+      return;
+    }
+
+    const path = String(req.query.p || "");
+    const m = path.match(NOTIFICATION_PATH_RE);
+    const status = String(params.MessageStatus || "");
+    const sid = String(params.MessageSid || "");
+    if (!m || !sid) { res.status(200).send("ignored"); return; }
+    if (!["delivered", "undelivered", "failed"].includes(status)) { res.status(200).send("ok"); return; }
+
+    const [, companyId, routeId, stopId, notificationId] = m;
+    const db = admin.firestore();
+    const ref = db.doc(path);
+    try {
+      let snap = await ref.get();
+      // The callback can, rarely, beat the write that records which
+      // Twilio message this log entry belongs to. Give it a moment once.
+      if (snap.exists && !snap.data().providerMessageId) {
+        await new Promise((r) => setTimeout(r, 3000));
+        snap = await ref.get();
+      }
+      if (!snap.exists) { res.status(200).send("no doc"); return; }
+      const n = snap.data();
+      // A later send for the same stop/type/day reuses the document; a
+      // late callback for the OLDER message must not overwrite it.
+      if (n.providerMessageId && n.providerMessageId !== sid) { res.status(200).send("stale"); return; }
+
+      if (status === "delivered") {
+        await ref.update({
+          deliveryStatus: "delivered",
+          deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`✅ text ${sid} (company ${companyId}) delivered`);
+      } else {
+        const code = params.ErrorCode || null;
+        const reason = undeliveredReason(code);
+        await ref.update({
+          deliveryStatus: "undelivered",
+          providerErrorCode: code,
+          failureReason: reason,
+          needsFollowUp: true,
+          undeliveredAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        await db.doc(`companies/${companyId}/textAlerts/${notificationId}`).set({
+          routeId, stopId, notificationPath: path,
+          customerName: n.customerName || "Customer",
+          type: n.type || "unknown",
+          phone: n.contactValue || null,
+          message: n.message || null,
+          errorCode: code,
+          reason,
+          messageSid: sid,
+          resolved: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`⚠️ text ${sid} (company ${companyId}, ${n.type}) ${status} [${code}] -> owner alert raised`);
+      }
+      res.status(200).send("ok");
+    } catch (err) {
+      console.error("✖ twilioStatusCallback failed:", err);
+      // 500 makes Twilio retry the callback later.
+      res.status(500).send("error");
+    }
+  }
+);
+
+// ─────────────────────────────────────────────────────────────────────
+// INCOMING REPLIES: STOP / START / HELP
+//
+// Twilio posts every text a customer sends to our number here (set as
+// the number's "A message comes in" webhook). Twilio's own default
+// opt-out handling still runs alongside this: it blocks a STOPped number
+// at the carrier and sends its standard STOP/START confirmations. This
+// endpoint adds what the app needs:
+//   STOP words  -> smsOptOuts/{phone} active, with a timestamp and a
+//                  history entry; every customer-text path checks it.
+//   START words -> clears it and records a fresh consent timestamp.
+//   HELP words  -> a reply naming the business that last texted this
+//                  phone (business name only if it has no contact info).
+// No reply is sent to STOP or START (Twilio already confirms those), so
+// customers never get two confirmations. Signature-checked; anything
+// else a customer texts is ignored. No phone number is logged.
+// ─────────────────────────────────────────────────────────────────────
+const STOP_WORDS = ["STOP", "STOPALL", "STOP ALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT", "OPTOUT", "OPT OUT", "REVOKE"];
+const START_WORDS = ["START", "YES", "UNSTOP"];
+const HELP_WORDS = ["HELP", "INFO"];
+const INBOUND_URL = "https://us-central1-whyte-routes.cloudfunctions.net/twilioInbound";
+
+function classifyKeyword(body) {
+  const w = String(body || "").trim().toUpperCase().replace(/[^A-Z ]/g, "").replace(/\s+/g, " ");
+  if (STOP_WORDS.includes(w)) return "stop";
+  if (START_WORDS.includes(w)) return "start";
+  if (HELP_WORDS.includes(w)) return "help";
+  return null;
+}
+
+function xmlEscape(t) {
+  return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function helpReplyFor(e164) {
+  const db = admin.firestore();
+  const rec = (await db.doc(`smsRecipients/${e164}`).get()).data();
+  const company = rec && rec.companyId ? (await db.doc(`companies/${rec.companyId}`).get()).data() : null;
+  const brand = company ? smsBrand(company) : PRODUCT_SMS_BRAND;
+  const contact = company && (company.contactPhone || company.contactEmail);
+  return `${brand}: Service updates about your property. Msg frequency varies. Msg & data rates may apply. ` +
+    (contact ? `Questions: ${contact}. ` : "") + "Reply STOP to opt out.";
+}
+
+exports.twilioInbound = onRequest(
+  { secrets: [TWILIO_AUTH_TOKEN], cors: false },
+  async (req, res) => {
+    if (req.method !== "POST") { res.status(405).send("POST only"); return; }
+    const params = req.body || {};
+    const sig = req.get("X-Twilio-Signature");
+    if (!twilioSignatureValid(TWILIO_AUTH_TOKEN.value(), INBOUND_URL, params, sig)) {
+      console.warn("✖ twilioInbound: bad or missing signature - ignored");
+      res.status(403).send("bad signature");
+      return;
+    }
+    const e164 = toE164(params.From || "");
+    const kind = classifyKeyword(params.Body);
+    const empty = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+    res.set("Content-Type", "text/xml");
+    if (!e164 || !kind) { res.status(200).send(empty); return; }
+
+    const ref = admin.firestore().doc(`smsOptOuts/${e164}`);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    try {
+      if (kind === "stop") {
+        await ref.set({ active: true, optedOutAt: now, lastKeyword: "STOP",
+          history: admin.firestore.FieldValue.arrayUnion({ event: "stop", at: new Date().toISOString() }) }, { merge: true });
+        console.log("🚫 twilioInbound: opt-out recorded");
+        res.status(200).send(empty);
+      } else if (kind === "start") {
+        await ref.set({ active: false, optedInAt: now, consentRestoredAt: now, lastKeyword: "START",
+          history: admin.firestore.FieldValue.arrayUnion({ event: "start", at: new Date().toISOString() }) }, { merge: true });
+        console.log("✅ twilioInbound: opt-in restored");
+        res.status(200).send(empty);
+      } else {
+        const reply = await helpReplyFor(e164);
+        console.log("ℹ️ twilioInbound: HELP reply sent");
+        res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${xmlEscape(reply)}</Message></Response>`);
+      }
+    } catch (err) {
+      console.error("✖ twilioInbound failed:", err);
+      res.status(500).send(empty);
+    }
+  }
+);

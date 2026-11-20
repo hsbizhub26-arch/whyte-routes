@@ -15,6 +15,10 @@ struct AddCustomerView: View {
     @State private var phone = ""
     @State private var email = ""
     @State private var notes = ""
+    @State private var seasons: Set<Season> = []
+    @State private var contractLabel = ""
+    @State private var contractPriceText = ""
+    @State private var contractPaid = false
     @State private var latitude: Double = 0
     @State private var longitude: Double = 0
     @State private var notificationsOptIn = false
@@ -34,6 +38,7 @@ struct AddCustomerView: View {
     // the two separate state assignments in onAppear. Real user
     // toggles always happen well after onAppear has finished.
     @State private var hasLoadedInitialValues = false
+    @State private var showScanner = false
 
     private let repo = CustomerRepository()
 
@@ -42,6 +47,20 @@ struct AddCustomerView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // B4: pre-fill from a photo of a card or contract.
+                if !isEditing {
+                    Section {
+                        Button {
+                            showScanner = true
+                        } label: {
+                            Label("Scan a card or contract", systemImage: "text.viewfinder")
+                                .foregroundColor(WRTheme.gold)
+                        }
+                    } footer: {
+                        Text("Reads the name, phone, email and address from a photo - you check them before saving.")
+                    }
+                }
+
                 Section("Customer") {
                     TextField("Name", text: $name)
                     AddressAutocompleteField(address: $address) { _, lat, lng in
@@ -67,6 +86,33 @@ struct AddCustomerView: View {
                     Text("Notes for Drivers")
                 } footer: {
                     Text("Shown right on the stop screen every time a driver works this property.")
+                }
+
+                Section {
+                    SeasonChips(seasons: $seasons)
+                } header: {
+                    Text("Season")
+                } footer: {
+                    Text("Which work this customer gets. Both = snow removal and lawn care.")
+                }
+
+                Section {
+                    TextField("e.g. Snow 2026-27", text: $contractLabel)
+                    if !contractLabel.trimmingCharacters(in: .whitespaces).isEmpty {
+                        HStack {
+                            Text("Season price")
+                            Spacer()
+                            TextField("$0.00", text: $contractPriceText)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(maxWidth: 140)
+                        }
+                        Toggle("Paid", isOn: $contractPaid)
+                    }
+                } header: {
+                    Text("Seasonal Contract")
+                } footer: {
+                    Text("For prepaid season customers. Leave blank to bill per visit. Contract customers are left out of per-visit invoice drafts. No payment is taken in the app.")
                 }
 
                 Section {
@@ -113,6 +159,20 @@ struct AddCustomerView: View {
                 }
             }
             .readableListWidth()
+            .sheet(isPresented: $showScanner) {
+                ScanContactView { found in
+                    // Only fills what's still blank - never overwrites
+                    // something the owner already typed.
+                    if name.isEmpty, let v = found.name { name = v }
+                    if phone.isEmpty, let v = found.phone { phone = v }
+                    if email.isEmpty, let v = found.email { email = v }
+                    if address.isEmpty, let v = found.address {
+                        address = v
+                        latitude = 0      // still needs picking from suggestions
+                        longitude = 0
+                    }
+                }
+            }
             .navigationTitle(isEditing ? "Edit Customer" : "Add Customer")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -135,6 +195,10 @@ struct AddCustomerView: View {
                 phone = existingCustomer.phone ?? ""
                 email = existingCustomer.email ?? ""
                 notes = existingCustomer.notes ?? ""
+                seasons = existingCustomer.seasons
+                contractLabel = existingCustomer.contractLabel ?? ""
+                contractPriceText = existingCustomer.contractPriceCents.map(InvoiceDraftBuilder.dollars) ?? ""
+                contractPaid = existingCustomer.contractPaid
                 latitude = existingCustomer.latitude
                 longitude = existingCustomer.longitude
                 notificationsOptIn = existingCustomer.notificationsOptIn
@@ -154,8 +218,17 @@ struct AddCustomerView: View {
     }
 
     private func save() {
-        isSaving = true
         errorMessage = nil
+        // A blank number is fine (no mobile on file); a typed one must be
+        // real, and is stored in E.164 so texts go to exactly that number.
+        let phoneCheck = PhoneNumber.check(phone)
+        if phoneCheck == .invalid {
+            errorMessage = PhoneNumber.invalidMessage
+            return
+        }
+        var storedPhone: String? = nil
+        if case .valid(let e164) = phoneCheck { storedPhone = e164 }
+        isSaving = true
 
         // latitude/longitude come from AddressAutocompleteField's
         // resolved suggestion; stay 0 only if the address was typed
@@ -166,7 +239,7 @@ struct AddCustomerView: View {
             address: address,
             latitude: latitude,
             longitude: longitude,
-            phone: phone.isEmpty ? nil : phone,
+            phone: storedPhone,
             email: email.isEmpty ? nil : email,
             notes: notes.isEmpty ? nil : notes,
             notificationsOptIn: notificationsOptIn,
@@ -177,7 +250,12 @@ struct AddCustomerView: View {
             notifyCompleted: notifyCompleted,
             // Editing does a full-document write, so the original date
             // must be carried over or every edit would erase it.
-            createdAt: existingCustomer?.createdAt ?? (isEditing ? nil : Date())
+            createdAt: existingCustomer?.createdAt ?? (isEditing ? nil : Date()),
+            seasons: seasons,
+            contractLabel: contractLabel.trimmingCharacters(in: .whitespaces).isEmpty
+                ? nil : contractLabel.trimmingCharacters(in: .whitespaces),
+            contractPriceCents: InvoiceDraftBuilder.cents(from: contractPriceText),
+            contractPaid: contractPaid
         )
 
         let onComplete: (Bool) -> Void = { success in

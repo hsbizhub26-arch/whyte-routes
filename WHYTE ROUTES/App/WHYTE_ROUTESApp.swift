@@ -20,6 +20,14 @@ struct WHYTE_ROUTESApp: App {
         }
 
         KeyboardDoneBar.install()
+
+        // B2: proof photos queue on the phone and upload when there's
+        // signal - including ones left over from a previous launch.
+        let uploader = PhotoUploader()
+        PhotoProofQueue.shared.uploader = { photo, data in
+            try await uploader.uploadQueued(photo, data: data)
+        }
+        PhotoProofQueue.shared.start()
     }
 
     var body: some Scene {

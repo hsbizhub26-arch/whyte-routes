@@ -7,6 +7,8 @@ struct OwnerDashboardView: View {
     @StateObject private var driverVM = DriverViewModel()
     @StateObject private var routeService = RouteService.shared
     @State private var showReports = false
+    @State private var showSeasonLog = false
+    @State private var showInvoiceDrafts = false
     @State private var customerCount = 0
     @State private var showUpgradePrompt = false
     /// Closed by default. The map is the screen; the panel is something
@@ -81,6 +83,25 @@ struct OwnerDashboardView: View {
         .sheet(isPresented: $showReports) {
             DriverReportsView()
         }
+        .sheet(isPresented: $showInvoiceDrafts) {
+            InvoiceDraftsView()
+        }
+        .fullScreenCover(isPresented: $showSeasonLog) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-SeasonLogDemo") {
+                SeasonLogView(demo: .demo)
+            } else {
+                SeasonLogView()
+            }
+            #else
+            SeasonLogView()
+            #endif
+        }
+        #if DEBUG
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-SeasonLogDemo") { showSeasonLog = true }
+        }
+        #endif
         .sheet(isPresented: $showUpgradePrompt) {
             UpgradeRequiredView(
                 featureName: "More Customers",
@@ -203,6 +224,9 @@ struct OwnerDashboardView: View {
             VStack(spacing: 20) {
                 header
 
+                WeatherStripView()
+                    .padding(.horizontal)
+
                 HStack(spacing: 14) {
                     statCard(
                         icon: "person.2.fill",
@@ -252,6 +276,10 @@ struct OwnerDashboardView: View {
                 .padding(.horizontal)
 
                 driverReportsWidget
+
+                seasonLogWidget
+
+                invoiceDraftsWidget
 
                 if let limit = access.customerLimit {
                     customerUsageWidget(limit: limit)
@@ -304,6 +332,54 @@ extension OwnerDashboardView {
     // shortcut - tapping it drills into the full Reports screen for
     // detail, same "summary card -> detail" pattern as any dashboard
     // widget, not a duplicate of the tab bar.
+    /// B9 entry point.
+    var invoiceDraftsWidget: some View {
+        Button { showInvoiceDrafts = true } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "doc.text.fill")
+                    .font(.title2).foregroundColor(WRTheme.gold)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Invoice Drafts").font(.headline).foregroundColor(.white)
+                    Text("From completed visits · bill in HSLedger").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundColor(.secondary)
+            }
+            .padding(14)
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(16)
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(WRTheme.gold.opacity(0.25), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+    }
+
+    /// B5 entry point.
+    var seasonLogWidget: some View {
+        Button { showSeasonLog = true } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.title2)
+                    .foregroundStyle(LinearGradient(colors: [Color(red: 1, green: 0.86, blue: 0.45), Color(red: 0.72, green: 0.52, blue: 0.1)],
+                                                    startPoint: .top, endPoint: .bottom))
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Season Log").font(.headline).foregroundColor(.white)
+                    Text("Snowfall and visits, night by night").font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundColor(.secondary)
+            }
+            .padding(14)
+            .background(Color.white.opacity(0.05))
+            .cornerRadius(16)
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(WRTheme.gold.opacity(0.25), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+    }
+
     var driverReportsWidget: some View {
         Button {
             showReports = true

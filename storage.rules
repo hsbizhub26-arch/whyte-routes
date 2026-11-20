@@ -59,6 +59,21 @@ service firebase.storage {
         && (request.auth.uid == driverId || isCompanyStaff(companyId));
     }
 
+    // B7 video proof: companies/{companyId}/videos/{driverId}/{stopId}/{fileName}
+    // Same who-may-write as proof photos (the driver, under their own
+    // uid; staff read and delete). What: MP4 only, under 20 MB (the app
+    // compresses to <= 12 MB, 15 s, no sound - see VideoProofCompressor).
+    match /companies/{companyId}/videos/{driverId}/{stopId}/{fileName} {
+      allow read: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+      allow create, update: if isSignedIn() && myCompanyId() == companyId
+        && request.auth.uid == driverId
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType == 'video/mp4';
+      allow delete: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+    }
+
     // Driver's license photo: companies/{companyId}/licenses/{driverId}/{fileName}
     // Deliberately narrower than the photos rule above - this is a
     // government ID, not proof-of-work. Only the driver themselves can

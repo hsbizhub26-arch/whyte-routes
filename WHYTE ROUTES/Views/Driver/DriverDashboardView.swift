@@ -23,6 +23,14 @@ struct DriverDashboardView: View {
 
     @State private var isTogglingShift = false
     @State private var activeSheet: ActiveSheet?
+    /// B5: the shift that just ended, while the optional snowfall
+    /// question is up.
+    @State private var snowPrompt: SnowPrompt?
+
+    private struct SnowPrompt: Identifiable {
+        let id: String        // shift id
+        let driverId: String
+    }
 
     /// Measured height of the bottom status card, handed to the map so
     /// its locate/zoom controls float above the card instead of behind it.
@@ -269,9 +277,16 @@ struct DriverDashboardView: View {
             if let shift = session.activeShift, shift.isActive {
                 Button {
                     isTogglingShift = true
+                    let ending = shift
                     Task {
-                        await session.endShift()
+                        // The shift ends FIRST. The snowfall question only
+                        // appears afterwards and is optional (B5).
+                        let ended = await session.endShift()
                         isTogglingShift = false
+                        let tz = TimeZone(identifier: CompanySession.shared.currentCompany?.timeZoneIdentifier ?? "America/Toronto") ?? .current
+                        if ended, SeasonLogBuilder.isSnowSeason(Date(), timeZone: tz) {
+                            snowPrompt = SnowPrompt(id: ending.id, driverId: ending.driverId)
+                        }
                     }
                 } label: {
                     Text(isTogglingShift ? "Ending…" : "End")
@@ -301,6 +316,9 @@ struct DriverDashboardView: View {
                 }
                 .disabled(isTogglingShift)
             }
+        }
+        .sheet(item: $snowPrompt) { prompt in
+            SnowfallPromptSheet(driverId: prompt.driverId, shiftId: prompt.id)
         }
     }
 

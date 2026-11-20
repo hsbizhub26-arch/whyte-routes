@@ -57,6 +57,17 @@ struct Customer: Identifiable {
     // from Firestore's own document createTime; nil only if that
     // never happened, and those sort to the bottom.
     var createdAt: Date? = nil
+    // Phase 2: Snow / Grass. Empty = both seasons (every existing record).
+    var seasons: Set<Season> = []
+
+    // Phase 6: seasonal contract (prepaid season, e.g. "Snow 2026-27").
+    // Record-keeping only - no payment is taken in the app. nil label =
+    // no contract (billed per visit). A contract customer is left out of
+    // per-visit invoice drafts by default, since the season is prepaid.
+    var contractLabel: String? = nil
+    var contractPriceCents: Int? = nil
+    var contractPaid: Bool = false
+    var hasContract: Bool { !(contractLabel ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
 // MARK: - Firestore Decode
@@ -87,6 +98,10 @@ extension Customer {
         self.notifyEta = dict["notifyEta"] as? Bool ?? true
         self.notifyCompleted = dict["notifyCompleted"] as? Bool ?? true
         self.createdAt = (dict["createdAt"] as? Timestamp)?.dateValue()
+        self.seasons = Season.decode(dict["seasons"])
+        self.contractLabel = dict["contractLabel"] as? String
+        self.contractPriceCents = dict["contractPriceCents"] as? Int
+        self.contractPaid = dict["contractPaid"] as? Bool ?? false
     }
 
     // MARK: - Encode
@@ -100,13 +115,19 @@ extension Customer {
             "smsEnabled": smsEnabled,
             "emailEnabled": emailEnabled,
             "notifyEta": notifyEta,
-            "notifyCompleted": notifyCompleted
+            "notifyCompleted": notifyCompleted,
+            "seasons": Season.encode(seasons)
         ]
         if let phone { d["phone"] = phone }
         if let email { d["email"] = email }
         if let notes { d["notes"] = notes }
         if let consentTimestamp { d["consentTimestamp"] = Timestamp(date: consentTimestamp) }
         if let createdAt { d["createdAt"] = Timestamp(date: createdAt) }
+        if hasContract, let contractLabel {
+            d["contractLabel"] = contractLabel
+            d["contractPaid"] = contractPaid
+            if let contractPriceCents { d["contractPriceCents"] = contractPriceCents }
+        }
         return d
     }
 }

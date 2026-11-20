@@ -10,6 +10,9 @@ struct Shift: Identifiable {
     var startedAt: Date
     var endedAt: Date?
     var status: String // "active" | "completed"
+    /// B5: the driver's answer at End Shift ("how much snow?"), cm.
+    /// Nil = not asked or skipped - never assumed.
+    var snowfallCm: Int? = nil
 
     var isActive: Bool { status == "active" }
 
@@ -31,6 +34,7 @@ extension Shift {
         self.startedAt = startedTs.dateValue()
         self.endedAt = (dict["endedAt"] as? Timestamp)?.dateValue()
         self.status = dict["status"] as? String ?? "active"
+        self.snowfallCm = (dict["snowfallCm"] as? NSNumber)?.intValue
     }
 }
 

@@ -190,6 +190,7 @@ final class RouteRepository {
         endAddress: String? = nil,
         endLatitude: Double? = nil,
         endLongitude: Double? = nil,
+        seasons: Set<Season>? = nil,
         completion: ((Bool) -> Void)? = nil
     ) {
         guard let ref = routesRef?.document(routeId) else { completion?(false); return }
@@ -205,6 +206,8 @@ final class RouteRepository {
         data["endAddress"] = endAddress ?? FieldValue.delete()
         data["endLatitude"] = endLatitude ?? FieldValue.delete()
         data["endLongitude"] = endLongitude ?? FieldValue.delete()
+        // nil = caller doesn't manage seasons; leave the stored value alone.
+        if let seasons { data["seasons"] = Season.encode(seasons) }
 
         ref.updateData(data) { error in
             if let error = error {
@@ -308,6 +311,53 @@ final class RouteRepository {
             }
 
             completion(doc.documentID)
+        }
+    }
+
+    // MARK: - Copy Route for a Season (Phase 2)
+    //
+    // Makes a NEW route with the same stops, tagged for one season - e.g.
+    // "copy the snow route for grass". One batch, so either the whole copy
+    // lands or nothing does. The original route is only read, never changed.
+    //
+    // Each copied stop gets a fresh document id (service-history records are
+    // keyed by stop id, so reusing ids would mix the two routes' histories),
+    // starts not-done with no timestamps, and is unassigned - the owner picks
+    // the grass driver. Customer links, notes and time windows carry over.
+    func copyRoute(name: String,
+                   seasons: Set<Season>,
+                   stops: [Stop],
+                   completion: @escaping (String?) -> Void) {
+        guard let routesRef else { completion(nil); return }
+        let routeDoc = routesRef.document()
+        let batch = routesRef.firestore.batch()
+        batch.setData([
+            "name": name,
+            "driverId": "",
+            "status": "pending",
+            "seasons": Season.encode(seasons),
+            "createdAt": FieldValue.serverTimestamp()
+        ], forDocument: routeDoc)
+
+        for (index, original) in stops.sorted(by: { $0.order < $1.order }).enumerated() {
+            let stopDoc = routeDoc.collection("stops").document()
+            var copy = original
+            copy.id = stopDoc.documentID
+            copy.order = index
+            copy.driverId = nil
+            copy.status = JobStatus.scheduled.rawValue
+            copy.isCompleted = false
+            copy.isSkipped = false
+            copy.enRouteAt = nil
+            copy.arrivedAt = nil
+            copy.completedAt = nil
+            copy.openVisitId = nil
+            batch.setData(copy.toDict(), forDocument: stopDoc)
+        }
+
+        batch.commit { error in
+            if let error { print("❌ copyRoute failed:", error.localizedDescription) }
+            completion(error == nil ? routeDoc.documentID : nil)
         }
     }
 }

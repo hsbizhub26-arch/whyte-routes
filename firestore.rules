@@ -446,6 +446,111 @@ service cloud.firestore {
         allow read, write: if isCompanyStaff(companyId);
       }
 
+      // ── companies/{companyId}/notificationUsage/{period} ───
+      // Monthly text/email counters and the SMS allowance flags, written
+      // only by Cloud Functions. Staff read them for the allowance banner.
+      match /notificationUsage/{period} {
+        allow read: if isCompanyStaff(companyId);
+        allow write: if false;
+      }
+
+      // ── companies/{companyId}/textAlerts/{notificationId} ───
+      // Customer texts that came back undelivered/filtered, raised by
+      // the twilioStatusCallback function (Admin SDK). Staff read them
+      // (they hold the customer's number so the owner can text them by
+      // hand) and may only mark one handled. Never created or deleted
+      // from the app - an alert can't be made to disappear unseen.
+      match /textAlerts/{alertId} {
+        allow read: if isCompanyStaff(companyId);
+        allow update: if isCompanyStaff(companyId)
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['resolved', 'resolvedAt', 'resolvedBy'])
+                      && request.resource.data.resolved is bool;
+        allow create, delete: if false;
+      }
+
+      // ── companies/{companyId}/seasonLog/{night} ───────────
+      // B5 Season Log: an owner/manager's snowfall figure for one night
+      // (doc id = yyyy-MM-dd), shown as "owner-entered". Drivers' own
+      // answers stay on their shift records (they may update only their
+      // own shift; staff may not touch a driver's logged time - see the
+      // shifts rule), so corrections live here instead. Staff only;
+      // exact field set; a sane centimetre range; stamped with who.
+      match /seasonLog/{night} {
+        allow read: if isCompanyStaff(companyId);
+        allow create, update: if isCompanyStaff(companyId)
+          && request.resource.data.keys().hasOnly(['snowfallCm', 'source', 'enteredAt', 'enteredBy'])
+          && request.resource.data.snowfallCm is int
+          && request.resource.data.snowfallCm >= 0
+          && request.resource.data.snowfallCm <= 300
+          && request.resource.data.source == 'owner'
+          && request.resource.data.enteredBy == request.auth.uid;
+        allow delete: if isCompanyStaff(companyId);
+      }
+
+      // ── companies/{companyId}/serviceHistory/{visitId} ───
+      // The permanent record of work done: one document per property
+      // per storm (see ServiceHistoryRepository). The stop document is
+      // reused every storm and overwritten each time; this is the copy
+      // that has to survive for billing and disputes. So it is
+      // APPEND-ONLY, for everyone, owners included:
+      //  - created once, by the app, as source "app" (staff may also
+      //    enter "owner_entered" records). "recovered_from_logs" can
+      //    only come from the server backfill (Admin SDK, no rules);
+      //  - after that, a field may be ADDED but never changed or
+      //    removed - each time and the GPS spot are written once;
+      //  - outcome may move from in_progress to completed/skipped once;
+      //  - never deleted from the app.
+      match /serviceHistory/{visitId} {
+        function historyFields() {
+          return ['stopId', 'routeId', 'routeName', 'customerId', 'customerName',
+                  'address', 'propertyLatitude', 'propertyLongitude',
+                  'driverId', 'driverName', 'serviceDate', 'source',
+                  'recordedBy', 'recordedVia', 'outcome', 'createdAt',
+                  'enRouteAt', 'arrivedAt', 'completedAt', 'skippedAt',
+                  'completedLocation', 'completedLocationMissing'];
+        }
+        // True when this write leaves key `k` alone, or sets it for
+        // the first time. False when it changes or removes a value
+        // that was already there.
+        function fillOnce(k) {
+          return !(k in request.resource.data.diff(resource.data).affectedKeys())
+                 || !(k in resource.data)
+                 || resource.data[k] == null;
+        }
+        function validOutcome(o) {
+          return o in ['in_progress', 'completed', 'skipped'];
+        }
+
+        allow read: if isCompanyStaff(companyId)
+                    || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
+
+        allow create: if isCompanyMember(companyId)
+                      && request.resource.data.keys().hasOnly(historyFields())
+                      && request.resource.data.stopId is string
+                      && request.resource.data.routeId is string
+                      && validOutcome(request.resource.data.outcome)
+                      && (request.resource.data.source == 'app'
+                          || (request.resource.data.source == 'owner_entered' && isCompanyStaff(companyId)))
+                      && (isCompanyStaff(companyId)
+                          || request.resource.data.driverId == request.auth.uid);
+
+        allow update: if isCompanyMember(companyId)
+                      && (isCompanyStaff(companyId) || resource.data.driverId == request.auth.uid)
+                      && request.resource.data.keys().hasOnly(historyFields())
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['enRouteAt', 'arrivedAt', 'completedAt', 'skippedAt',
+                                     'completedLocation', 'completedLocationMissing', 'outcome'])
+                      && fillOnce('enRouteAt') && fillOnce('arrivedAt')
+                      && fillOnce('completedAt') && fillOnce('skippedAt')
+                      && fillOnce('completedLocation') && fillOnce('completedLocationMissing')
+                      && (!('outcome' in request.resource.data.diff(resource.data).affectedKeys())
+                          || (resource.data.outcome == 'in_progress'
+                              && request.resource.data.outcome in ['completed', 'skipped']));
+
+        allow delete: if false;
+      }
+
       // ── companies/{companyId}/routes/{routeId} + stops ───
       match /routes/{routeId} {
         allow read: if isCompanyMember(companyId);
@@ -500,6 +605,7 @@ service cloud.firestore {
                             && request.resource.data.diff(resource.data).affectedKeys()
                                  .hasOnly(['status', 'isCompleted', 'isSkipped',
                                            'enRouteAt', 'arrivedAt', 'completedAt',
+                                           'openVisitId',
                                            'driverNotes', 'updatedAt']));
 
           // ── .../stops/{stopId}/photos/{photoId} ─────────

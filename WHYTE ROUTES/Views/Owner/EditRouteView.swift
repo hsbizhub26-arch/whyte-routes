@@ -23,6 +23,7 @@ struct EditRouteView: View {
     @State private var startLatitude: Double?
     @State private var startLongitude: Double?
     @State private var endAddress = ""
+    @State private var seasons: Set<Season> = []
     @State private var endLatitude: Double?
     @State private var endLongitude: Double?
 
@@ -58,6 +59,85 @@ struct EditRouteView: View {
     @State private var quickResolved: ResolvedAddress?
     @State private var photoProofStop: Stop?
     @State private var otherRoutes: [Route] = []
+    // B1: Optimize shows a preview first, and can be undone after.
+    @State private var optimizePlan: RouteOptimizationService.Plan?
+    @State private var stopsBeforeOptimize: [Stop]?
+    // B8
+    @State private var windowTargetStop: Stop?
+    // Phase 1
+    @State private var showNewRunConfirm = false
+    @State private var isResettingRun = false
+    @ObservedObject private var auth = AuthSession.shared
+
+    /// Owner and manager only - never a driver.
+    private var canStartNewRun: Bool { auth.role == .owner || auth.role == .manager }
+    private var doneStopCount: Int { stops.filter { $0.isCompleted || $0.isSkipped || $0.status == JobStatus.completed.rawValue }.count }
+    /// Someone is driving to or standing at a stop right now.
+    // Phase 2: copy this route's stops into a new route for the other season.
+    @State private var isCopying = false
+    @State private var copyResult: String?
+    private var copyTarget: Season { seasons == [.grass] ? .snow : .grass }
+
+    private func copyForSeason() {
+        let name = "\(routeName.trimmingCharacters(in: .whitespaces)) - \(copyTarget.label)"
+        copyRoute(named: name, seasons: [copyTarget])
+    }
+
+    // Phase 3 (templates): a route IS the template. Build "Weekly Mow -
+    // Tuesday" once, then duplicate it for Thursday, a new crew, etc.
+    // Same season tags as this route. A separate templates collection
+    // would need a Firestore rules deploy for no extra benefit.
+    private func duplicateRoute() {
+        copyRoute(named: "\(routeName.trimmingCharacters(in: .whitespaces)) (copy)", seasons: seasons)
+    }
+
+    private func copyRoute(named name: String, seasons: Set<Season>) {
+        let saved = stops.filter { originalStopIds.contains($0.id) }
+        guard !saved.isEmpty else { return }
+        guard FeatureAccessManager.shared.canAddRoute(currentCount: RouteService.shared.routes.count) else {
+            errorMessage = "Your plan's route limit is reached - upgrade to add another route."
+            return
+        }
+        isCopying = true
+        routeRepo.copyRoute(name: name, seasons: seasons, stops: saved) { newId in
+            Task { @MainActor in
+                isCopying = false
+                if newId != nil {
+                    copyResult = "Made \"\(name)\" with \(saved.count) stop\(saved.count == 1 ? "" : "s"). Find it in Assign Routes and pick its driver."
+                    RouteService.shared.loadRoutesOnce()
+                } else {
+                    errorMessage = "Couldn't copy the route - check your connection and try again. Nothing was created."
+                }
+            }
+        }
+    }
+
+    private var stopInProgress: Bool {
+        stops.contains { $0.status == JobStatus.enRoute.rawValue || $0.status == JobStatus.arrived.rawValue }
+    }
+
+    private func startNewRun() {
+        let ids = stops.filter { originalStopIds.contains($0.id) }.map(\.id)
+        isResettingRun = true
+        stopsRepo.startNewRun(routeId: routeId, stopIds: ids) { ok in
+            Task { @MainActor in
+                isResettingRun = false
+                if ok {
+                    for i in stops.indices where originalStopIds.contains(stops[i].id) {
+                        stops[i].status = JobStatus.scheduled.rawValue
+                        stops[i].isCompleted = false
+                        stops[i].isSkipped = false
+                        stops[i].enRouteAt = nil
+                        stops[i].arrivedAt = nil
+                        stops[i].completedAt = nil
+                        stops[i].openVisitId = nil
+                    }
+                } else {
+                    errorMessage = "Couldn't start a new run - check your connection and try again. Nothing was changed."
+                }
+            }
+        }
+    }
 
     private let routeRepo = RouteRepository()
     private let stopsRepo = StopsRepository()
@@ -118,9 +198,19 @@ struct EditRouteView: View {
         return CLLocationCoordinate2D(latitude: endLatitude, longitude: endLongitude)
     }
 
-    private var approximateDistanceKM: Double {
-        RouteOptimizationService.totalDistanceKM(stops, startCoordinate: startCoordinate, endCoordinate: endCoordinate)
+    /// Undo is offered only while the list still holds exactly the
+    /// stops that were optimized - after an add or delete, restoring
+    /// the old list would silently undo that edit too.
+    private var canUndoOptimize: Bool {
+        guard let previous = stopsBeforeOptimize else { return false }
+        return Set(previous.map(\.id)) == Set(stops.map(\.id)) && previous.map(\.id) != stops.map(\.id)
     }
+
+    private var drivingLeft: (km: Double, isRemaining: Bool) {
+        RouteOptimizationService.drivingLeftKM(stops, startCoordinate: startCoordinate, endCoordinate: endCoordinate)
+    }
+
+    private var approximateDistanceKM: Double { drivingLeft.km }
 
     var body: some View {
         NavigationStack {
@@ -144,6 +234,14 @@ struct EditRouteView: View {
                         }
 
                         Section {
+                            SeasonChips(seasons: $seasons)
+                        } header: {
+                            Text("Season")
+                        } footer: {
+                            Text("Snow, grass, or both. Saved with the route.")
+                        }
+
+                        Section {
                             HStack(spacing: 8) {
                                 Circle().fill(.green).frame(width: 10, height: 10)
                                 AddressAutocompleteField(address: $startAddress, placeholder: "Start location (optional)") { address, lat, lng in
@@ -164,6 +262,63 @@ struct EditRouteView: View {
                             Text("Route Endpoints")
                         } footer: {
                             Text("Leave blank to use the first/last stop as usual - set these to route from a fixed depot or back to the shop.")
+                        }
+
+                        // Phase 1: Start New Run - owner/manager only.
+                        if canStartNewRun {
+                            Section {
+                                Button {
+                                    showNewRunConfirm = true
+                                } label: {
+                                    HStack {
+                                        if isResettingRun { ProgressView().tint(.black) }
+                                        Label(isResettingRun ? "Resetting…" : "Start New Run", systemImage: "arrow.clockwise.circle.fill")
+                                            .font(.headline)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 50)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(WRTheme.gold)
+                                .foregroundColor(.black)
+                                .disabled(doneStopCount == 0 || isResettingRun || stopInProgress)
+                            } footer: {
+                                if stopInProgress {
+                                    Text("A driver is on a stop right now. Start New Run unlocks when no stop is en route or arrived.")
+                                        .foregroundColor(.orange)
+                                } else if doneStopCount == 0 {
+                                    Text("Every stop is already ready to go.")
+                                } else {
+                                    Text("Next storm or next week: sets \(doneStopCount == 1 ? "the 1 done stop" : "all \(doneStopCount) done stops") back to not-done. Past visits stay in the service history.")
+                                }
+                            }
+
+                            Section {
+                                Button {
+                                    copyForSeason()
+                                } label: {
+                                    HStack {
+                                        if isCopying { ProgressView() }
+                                        Label(isCopying ? "Copying…" : "Copy Route for \(copyTarget.label)",
+                                              systemImage: copyTarget.symbol)
+                                    }
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                }
+                                .disabled(isCopying || originalStopIds.isEmpty)
+
+                                Button {
+                                    duplicateRoute()
+                                } label: {
+                                    Label("Duplicate Route", systemImage: "plus.square.on.square")
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                }
+                                .disabled(isCopying || originalStopIds.isEmpty)
+                            } footer: {
+                                if let copyResult {
+                                    Text(copyResult).foregroundColor(.green)
+                                } else {
+                                    Text("Both make a new route with the same stops, not done and unassigned. Copy for \(copyTarget.label) tags it \(copyTarget.label.lowercased()); Duplicate keeps this route's season - use it as a template for another day or crew. This route isn't changed.")
+                                }
+                            }
                         }
 
                         Section {
@@ -236,10 +391,11 @@ struct EditRouteView: View {
                             if stops.count > 2 {
                                 Button {
                                     if access.canAccessRouteOptimization() {
-                                        stops = RouteOptimizationService.optimize(
+                                        optimizePlan = RouteOptimizationService.plan(
                                             stops,
                                             startCoordinate: startCoordinate,
-                                            endCoordinate: endCoordinate
+                                            endCoordinate: endCoordinate,
+                                            timeZone: TimeZone(identifier: CompanySession.shared.currentCompany?.timeZoneIdentifier ?? "America/Toronto") ?? .current
                                         )
                                     } else {
                                         upgradeReason = "Route Optimization"
@@ -247,6 +403,15 @@ struct EditRouteView: View {
                                     }
                                 } label: {
                                     Label("Optimize Route", systemImage: "wand.and.stars")
+                                }
+                            }
+
+                            if canUndoOptimize {
+                                Button {
+                                    if let previous = stopsBeforeOptimize { stops = previous }
+                                    stopsBeforeOptimize = nil
+                                } label: {
+                                    Label("Undo Optimize", systemImage: "arrow.uturn.backward")
                                 }
                             }
                         } header: {
@@ -266,7 +431,7 @@ struct EditRouteView: View {
                             }
                         } footer: {
                             if approximateDistanceKM > 0 {
-                                Text("Drag to reorder - the driver sees stops in this order. Approx. \(approximateDistanceKM, specifier: "%.1f") km straight-line (not actual driving distance).")
+                                Text("Drag to reorder - the driver sees stops in this order. Approx. \(approximateDistanceKM, specifier: "%.1f") km\(drivingLeft.isRemaining ? " of driving left," : "") straight-line (not actual driving distance).")
                             } else {
                                 Text("Drag to reorder - the driver sees stops in this order.")
                             }
@@ -334,6 +499,35 @@ struct EditRouteView: View {
                     onSelectMany: isBlankStop ? { picked in applyMany(picked, firstStopId: targetId) } : nil
                 ) { customer in
                     apply(customer, toStopId: pickerTargetId)
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { optimizePlan != nil },
+                set: { if !$0 { optimizePlan = nil } }
+            )) {
+                if let plan = optimizePlan {
+                    OptimizePreviewSheet(plan: plan) {
+                        stopsBeforeOptimize = stops
+                        stops = plan.proposed
+                        optimizePlan = nil
+                    } onCancel: {
+                        optimizePlan = nil
+                    }
+                    .presentationDetents([.medium, .large])
+                }
+            }
+            .alert("Start a new run?", isPresented: $showNewRunConfirm) {
+                Button("Reset \(doneStopCount) stop\(doneStopCount == 1 ? "" : "s")") { startNewRun() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Every stop on \(routeName.isEmpty ? "this route" : routeName) goes back to not-done for the next storm or week. Past visits, photos and the Season Log are kept. This saves right away.")
+            }
+            .sheet(item: $windowTargetStop) { stop in
+                TimeWindowSheet(stop: stop) { start, end in
+                    if let i = stops.firstIndex(where: { $0.id == stop.id }) {
+                        stops[i].windowStartMinute = start
+                        stops[i].windowEndMinute = end
+                    }
                 }
             }
             .sheet(isPresented: $showUpgradePrompt) {
@@ -541,6 +735,13 @@ struct EditRouteView: View {
                     DwellTimeBadge(duration: dwell)
                 }
 
+                // B8
+                if let window = stop.timeWindowText {
+                    Label("Arrive \(window)", systemImage: "clock.badge.checkmark")
+                        .font(.caption.bold())
+                        .foregroundColor(WRTheme.gold)
+                }
+
                 if originalStopIds.contains(stop.id) {
                     rowActionButton("View Notification Log") {
                         historyStop = stop
@@ -628,6 +829,10 @@ struct EditRouteView: View {
                         pickerTargetId = stop.id
                     }
                 }
+                // B8
+                Button(stop.hasTimeWindow ? "Change Time Window" : "Set Time Window") {
+                    windowTargetStop = stop
+                }
                 if originalStopIds.contains(stop.id) {
                     Button("Move to Another Route") {
                         moveTargetStop = stop
@@ -646,6 +851,7 @@ struct EditRouteView: View {
 
     private func toggleCompletion(_ stop: Stop) {
         var updated = stop
+        var ownerVisit: (id: String, isNew: Bool)? = nil
         if updated.isCompleted {
             // Full reset back to untouched - not just flipping the
             // flag, since a half-reset (isCompleted false but status
@@ -657,16 +863,32 @@ struct EditRouteView: View {
             updated.arrivedAt = nil
             updated.completedAt = nil
         } else {
+            let now = Date()
+            let visit = ServiceHistoryRepository.shared.visitId(for: stop, event: .completed, at: now)
             updated.isCompleted = true
             updated.status = JobStatus.completed.rawValue
-            updated.completedAt = Date()
+            updated.completedAt = now
+            updated.openVisitId = visit.id
+            ownerVisit = visit
         }
+        // Un-ticking (the reset branch above) never touches history: a
+        // visit that happened stays on record even if the stop is put
+        // back to "scheduled" for the next storm.
+        let recordVisit = ownerVisit
 
         stopsRepo.updateStop(routeId: routeId, stop: updated) { success in
             Task { @MainActor in
                 guard success else {
                     errorMessage = "Couldn't update that stop - check your connection."
                     return
+                }
+                if let recordVisit {
+                    ServiceHistoryRepository.shared.record(
+                        .completed, stop: updated, routeId: routeId,
+                        routeName: routeName.isEmpty ? nil : routeName,
+                        visitId: recordVisit.id, isNew: recordVisit.isNew,
+                        at: updated.completedAt ?? Date(),
+                        recordedVia: "owner_edit_route")
                 }
                 if let index = stops.firstIndex(where: { $0.id == stop.id }) {
                     stops[index] = updated
@@ -756,6 +978,7 @@ struct EditRouteView: View {
                     endAddress = route.endAddress ?? ""
                     endLatitude = route.endLatitude
                     endLongitude = route.endLongitude
+                    seasons = route.seasons
                 }
             }
         }
@@ -823,7 +1046,8 @@ struct EditRouteView: View {
             startLongitude: trimmedStartAddress.isEmpty ? nil : startLongitude,
             endAddress: trimmedEndAddress.isEmpty ? nil : trimmedEndAddress,
             endLatitude: trimmedEndAddress.isEmpty ? nil : endLatitude,
-            endLongitude: trimmedEndAddress.isEmpty ? nil : endLongitude
+            endLongitude: trimmedEndAddress.isEmpty ? nil : endLongitude,
+            seasons: seasons
         ) { success in
             Task { @MainActor in
                 guard success else {
@@ -997,4 +1221,190 @@ private struct TrackingLinkShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+/// B8: optional "arrive between" window for one stop. Applied to the
+/// on-screen list; written when the owner taps Save.
+private struct TimeWindowSheet: View {
+    let stop: Stop
+    let onDone: (Int?, Int?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var start = Date()
+    @State private var end = Date()
+
+    private static func date(fromMinute m: Int) -> Date {
+        Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
+    }
+    private static func minute(of d: Date) -> Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("Earliest", selection: $start, displayedComponents: .hourAndMinute)
+                    DatePicker("Latest", selection: $end, displayedComponents: .hourAndMinute)
+                } header: {
+                    Text(stop.customerName ?? stop.address)
+                } footer: {
+                    Text("Optional. Optimize keeps window stops in time order and warns if one may be missed. The driver sees the window on the stop.")
+                }
+                if Self.minute(of: end) <= Self.minute(of: start) {
+                    Text("Latest must be after Earliest.").font(.footnote).foregroundColor(.orange)
+                }
+                if stop.hasTimeWindow {
+                    Section {
+                        Button("Remove Time Window", role: .destructive) {
+                            onDone(nil, nil)
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Time Window")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        onDone(Self.minute(of: start), Self.minute(of: end))
+                        dismiss()
+                    }
+                    .disabled(Self.minute(of: end) <= Self.minute(of: start))
+                }
+            }
+            .onAppear {
+                start = Self.date(fromMinute: stop.windowStartMinute ?? 8 * 60)
+                end = Self.date(fromMinute: stop.windowEndMinute ?? 10 * 60)
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+/// B1: what Optimize Route would do, shown BEFORE anything changes.
+/// Nothing is applied until "Use This Order"; even then it's only the
+/// on-screen list (Save writes it, Cancel or Undo Optimize backs out).
+private struct OptimizePreviewSheet: View {
+    let plan: RouteOptimizationService.Plan
+    let onApply: () -> Void
+    let onCancel: () -> Void
+
+    private var lockedIds: Set<String> {
+        Set(plan.proposed.filter(RouteOptimizationService.isLocked).map(\.id))
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Now").font(.caption).foregroundColor(.secondary)
+                            Text("\(plan.beforeKM, specifier: "%.1f") km").font(.title3.bold())
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.right").foregroundColor(.secondary)
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Optimized").font(.caption).foregroundColor(.secondary)
+                            Text("\(plan.afterKM, specifier: "%.1f") km")
+                                .font(.title3.bold())
+                                .foregroundColor(WRTheme.gold)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    if !plan.changesOrder {
+                        Text("Your current order is already the shortest we can find - nothing to change.")
+                            .font(.footnote).foregroundColor(.secondary)
+                    } else if plan.afterKM > plan.beforeKM + 0.05 {
+                        Text("About \(plan.afterKM - plan.beforeKM, specifier: "%.1f") km more driving, to keep time-window stops in time order.")
+                            .font(.footnote).foregroundColor(.secondary)
+                    } else {
+                        Text("About \(plan.savedKM, specifier: "%.1f") km less driving (straight-line estimate, not road distance).")
+                            .font(.footnote).foregroundColor(.secondary)
+                    }
+                } header: {
+                    Text(plan.lockedCount > 0 ? "Driving still ahead" : "Driving")
+                }
+
+                if (plan.changesOrder && plan.lockedCount > 0) || plan.unplaceableCount > 0 {
+                    Section {
+                        if plan.changesOrder && plan.lockedCount > 0 {
+                            Label("\(plan.lockedCount) done or in-progress stop\(plan.lockedCount == 1 ? "" : "s") stay at the top, unchanged.",
+                                  systemImage: "lock.fill")
+                                .font(.footnote)
+                        }
+                        if plan.unplaceableCount > 0 {
+                            Label("\(plan.unplaceableCount) stop\(plan.unplaceableCount == 1 ? " has" : "s have") no map location, so \(plan.unplaceableCount == 1 ? "it can't" : "they can't") be placed by distance\(plan.changesOrder ? " and go\(plan.unplaceableCount == 1 ? "es" : "") last" : ""). Re-pick the address to fix.",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                }
+
+                // B8
+                if plan.windowOrderFixed || !plan.windowRisks.isEmpty {
+                    Section {
+                        if plan.windowOrderFixed {
+                            Label("Stops with a time window are kept in time order.", systemImage: "clock.badge.checkmark")
+                                .font(.footnote)
+                        }
+                        ForEach(plan.windowRisks) { stop in
+                            Label("\(stop.customerName ?? stop.address) may miss \(stop.timeWindowText ?? "its window").",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote).foregroundColor(.orange)
+                        }
+                        if !plan.windowRisks.isEmpty {
+                            Text("Rough estimate from now: straight-line distance at about 30 km/h plus 8 minutes a stop.")
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
+                    } header: {
+                        Text("Time windows")
+                    }
+                }
+
+                Section("New order") {
+                    ForEach(Array(plan.proposed.enumerated()), id: \.element.id) { index, stop in
+                        HStack(spacing: 12) {
+                            Text("\(index + 1)")
+                                .font(.subheadline.monospacedDigit().bold())
+                                .foregroundColor(.black)
+                                .frame(width: 28, height: 28)
+                                .background(Circle().fill(lockedIds.contains(stop.id) ? Color.gray : WRTheme.gold))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(stop.customerName?.isEmpty == false ? stop.customerName! : stop.address)
+                                    .font(.subheadline)
+                                    .lineLimit(1)
+                                if stop.customerName?.isEmpty == false {
+                                    Text(stop.address).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            if lockedIds.contains(stop.id) {
+                                Image(systemName: "lock.fill").font(.caption).foregroundColor(.secondary)
+                            } else if stop.coordinate == nil {
+                                Image(systemName: "mappin.slash").font(.caption).foregroundColor(.orange)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Optimize Route")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") { onApply() }
+                        .disabled(!plan.changesOrder)
+                        .bold()
+                }
+            }
+        }
+    }
 }

@@ -1,0 +1,102 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Cross-service check against the same users/{uid} permissions
+    // doc Firestore rules use, so Storage access follows the exact
+    // same company-membership rule as everything else - no separate
+    // source of truth to keep in sync.
+    function myPermissions() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function myCompanyId() {
+      return myPermissions().companyId;
+    }
+
+    // Mirrors Firestore rules' isCompanyStaff - owner or manager of
+    // this specific company, not just "signed in".
+    function isCompanyStaff(companyId) {
+      return isSignedIn() && myCompanyId() == companyId
+        && (myPermissions().companyRole == 'owner' || myPermissions().companyRole == 'manager');
+    }
+
+    // Both upload paths below are images taken in the app and nothing
+    // else. Without this, a member could park arbitrary files of any
+    // size and type under a made-up stopId - our storage bill, our
+    // bandwidth, and content we'd be serving. The path rules say WHO
+    // may write; this says WHAT.
+    function isReasonableImage() {
+      return request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Photo proof-of-work: companies/{companyId}/photos/{driverId}/{stopId}/{fileName}
+    // Same restriction as the license-photo rule just below (which
+    // this previously didn't match): staff can read any proof photo
+    // company-wide; a driver reads/writes only photos filed under
+    // their own uid segment of the path, set by the app itself at
+    // upload time (see PhotoUploader.uploadPhoto). Previously any
+    // signed-in company member could read, overwrite, or delete any
+    // other driver's proof-of-work photo - the exact evidence these
+    // exist to protect against liability disputes.
+    match /companies/{companyId}/photos/{driverId}/{stopId}/{fileName} {
+      allow read: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+      // create/update and delete are split because request.resource is
+      // null on a delete - folding isReasonableImage() into a blanket
+      // `write` would make every deletion fail its size check, which
+      // account deletion depends on.
+      allow create, update: if isSignedIn() && myCompanyId() == companyId
+        && request.auth.uid == driverId
+        && isReasonableImage();
+      allow delete: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+    }
+
+    // B7 video proof: companies/{companyId}/videos/{driverId}/{stopId}/{fileName}
+    // Same who-may-write as proof photos (the driver, under their own
+    // uid; staff read and delete). What: MP4 only, under 20 MB (the app
+    // compresses to <= 12 MB, 15 s, no sound - see VideoProofCompressor).
+    match /companies/{companyId}/videos/{driverId}/{stopId}/{fileName} {
+      allow read: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+      allow create, update: if isSignedIn() && myCompanyId() == companyId
+        && request.auth.uid == driverId
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType == 'video/mp4';
+      allow delete: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+    }
+
+    // Driver's license photo: companies/{companyId}/licenses/{driverId}/{fileName}
+    // Deliberately narrower than the photos rule above - this is a
+    // government ID, not proof-of-work. Only the driver themselves can
+    // upload their own (request.auth.uid must equal driverId - a
+    // manager can't upload one on someone else's behalf), and only the
+    // driver or an owner/manager of the same company can view it.
+    // Other drivers, even on the same crew, get neither.
+    match /companies/{companyId}/licenses/{driverId}/{fileName} {
+      allow read: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+      // create/update and delete are split because request.resource is
+      // null on a delete - folding isReasonableImage() into a blanket
+      // `write` would make every deletion fail its size check, which
+      // account deletion depends on.
+      allow create, update: if isSignedIn() && myCompanyId() == companyId
+        && request.auth.uid == driverId
+        && isReasonableImage();
+      allow delete: if isSignedIn() && myCompanyId() == companyId
+        && (request.auth.uid == driverId || isCompanyStaff(companyId));
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

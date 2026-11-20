@@ -25,6 +25,9 @@ struct Route: Identifiable {
     var endAddress: String? = nil
     var endLatitude: Double? = nil
     var endLongitude: Double? = nil
+
+    // Phase 2: Snow / Grass. Empty = both seasons (every existing route).
+    var seasons: Set<Season> = []
 }
 
 extension Route {
@@ -73,6 +76,7 @@ extension Route {
         self.endAddress = dict["endAddress"] as? String
         self.endLatitude = dict["endLatitude"] as? Double
         self.endLongitude = dict["endLongitude"] as? Double
+        self.seasons = Season.decode(dict["seasons"])
     }
 }
 
@@ -95,6 +99,7 @@ extension Route {
         if let endAddress { dict["endAddress"] = endAddress }
         if let endLatitude { dict["endLatitude"] = endLatitude }
         if let endLongitude { dict["endLongitude"] = endLongitude }
+        if !seasons.isEmpty { dict["seasons"] = Season.encode(seasons) }
 
         return dict
     }

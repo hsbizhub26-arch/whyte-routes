@@ -15,6 +15,37 @@ final class StopsRepository {
         return db.collection("companies").document(companyId).collection("routes").document(routeId)
     }
 
+    // MARK: - Start New Run (Phase 1)
+    //
+    // Resets every stop on a route to "not done" for the next storm or the
+    // next weekly visit, in one batched write. Owner/manager only (the UI
+    // never shows it to a driver, and only staff may write these fields on
+    // stops the driver isn't assigned to).
+    //
+    // Touches ONLY the reusable stop documents. The permanent record of
+    // every past visit lives in companies/{c}/serviceHistory, which is
+    // append-only and is not read or written here - so storm and season
+    // history, the Season Log and invoice drafts are unaffected.
+    func startNewRun(routeId: String, stopIds: [String], completion: @escaping (Bool) -> Void) {
+        guard let routeRef = routeRef(routeId), !stopIds.isEmpty else { completion(false); return }
+        let batch = db.batch()
+        for id in stopIds {
+            batch.updateData([
+                "status": JobStatus.scheduled.rawValue,
+                "isCompleted": false,
+                "isSkipped": false,
+                "enRouteAt": FieldValue.delete(),
+                "arrivedAt": FieldValue.delete(),
+                "completedAt": FieldValue.delete(),
+                "openVisitId": FieldValue.delete()
+            ], forDocument: routeRef.collection("stops").document(id))
+        }
+        batch.commit { error in
+            if let error { print("❌ startNewRun failed:", error.localizedDescription) }
+            completion(error == nil)
+        }
+    }
+
     // MARK: - Load One Driver's Stops (driver app)
     //
     // Separate from the staff query below, and not an optimisation -
@@ -125,6 +156,9 @@ final class StopsRepository {
             put("driverNotes", stop.driverNotes)
             put("latitude", stop.latitude)
             put("longitude", stop.longitude)
+            // B8: both or neither - clearing a window deletes both.
+            put("windowStartMinute", stop.hasTimeWindow ? stop.windowStartMinute : nil)
+            put("windowEndMinute", stop.hasTimeWindow ? stop.windowEndMinute : nil)
 
             batch.setData(data, forDocument: stopRef, merge: true)
         }

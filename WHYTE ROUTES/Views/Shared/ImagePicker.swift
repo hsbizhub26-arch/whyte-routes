@@ -11,12 +11,20 @@ struct ImagePicker: UIViewControllerRepresentable {
     // (it isn't Equatable) and which couldn't distinguish "picked a
     // new photo" from "picked the same photo again" besides.
     var onPicked: ((UIImage) -> Void)? = nil
+    /// nil = camera when the device has one, else the library (proof
+    /// photos must come from the camera). B4's scanner passes
+    /// .photoLibrary explicitly for an existing photo of a contract.
+    var sourceType: UIImagePickerController.SourceType? = nil
     @Environment(\.dismiss) private var dismiss
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.delegate = context.coordinator
-        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        if let sourceType, UIImagePickerController.isSourceTypeAvailable(sourceType) {
+            picker.sourceType = sourceType
+        } else {
+            picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        }
         return picker
     }
 

@@ -13,6 +13,10 @@ struct OwnerTabView: View {
                 permissionsSyncWarning
             }
 
+            // Customer texts the carrier didn't deliver - see
+            // TextAlertsView. Empty (and invisible) when all is well.
+            TextAlertsBanner()
+
             TabView {
 
                 homeTab

@@ -25,9 +25,13 @@ final class CustomerListViewModel: ObservableObject {
         }
     }
 
+    /// Season switch, set by the view from AppStorage.
+    @Published var seasonFilter: SeasonFilter = .all
+
     var filtered: [Customer] {
-        if search.isEmpty { return customers }
-        return customers.filter {
+        let inSeason = customers.filter { seasonFilter.includes($0.seasons) }
+        if search.isEmpty { return inSeason }
+        return inSeason.filter {
             $0.name.lowercased().contains(search.lowercased()) ||
             $0.address.lowercased().contains(search.lowercased())
         }
@@ -67,11 +71,12 @@ struct CustomerListView: View {
     @State private var pendingDelete: Customer?
     @State private var deleteFailed = false
     @FocusState private var searchFocused: Bool
+    @AppStorage(SeasonFilter.storageKey) private var seasonRaw = SeasonFilter.all.rawValue
 
     private var customerCountLabel: String {
         let total = vm.customers.count
         let noun = total == 1 ? "customer" : "customers"
-        if vm.search.isEmpty {
+        if vm.search.isEmpty && vm.seasonFilter == .all {
             return "\(total) \(noun)"
         }
         return "\(vm.filtered.count) of \(total) \(noun)"
@@ -104,6 +109,12 @@ struct CustomerListView: View {
                 }
                 .animation(.easeInOut(duration: 0.2), value: searchFocused)                .padding()
                 .readableContentWidth()
+
+                SeasonSwitch()
+                    .padding(.horizontal)
+                    .readableContentWidth()
+                    .onAppear { vm.seasonFilter = SeasonFilter(rawValue: seasonRaw) ?? .all }
+                    .onChange(of: seasonRaw) { _, new in vm.seasonFilter = SeasonFilter(rawValue: new) ?? .all }
 
                 // Always-visible total, so the owner can see the size of
                 // their book at a glance. While searching it shows how

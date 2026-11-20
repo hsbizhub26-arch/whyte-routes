@@ -195,6 +195,12 @@ struct ImportCustomersView: View {
                     .font(.subheadline).foregroundColor(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
             }
+            let badPhones = rows.filter { $0.isImportable && $0.phoneWarning != nil }
+            if !badPhones.isEmpty {
+                Text("\(badPhones.count) customer\(badPhones.count == 1 ? "" : "s") saved without a phone number because it wasn't valid: \(badPhones.prefix(5).map(\.name).joined(separator: ", "))\(badPhones.count > 5 ? "…" : ""). Edit them to add the right number.")
+                    .font(.subheadline).foregroundColor(.orange)
+                    .multilineTextAlignment(.center)
+            }
             Button("Done") { onFinished(savedCount); dismiss() }
                 .font(.headline).foregroundColor(.black)
                 .frame(maxWidth: .infinity).padding()
@@ -312,7 +318,7 @@ struct ImportCustomersView: View {
                     address: row.resolvedAddress ?? row.address,
                     latitude: coordinate.latitude,
                     longitude: coordinate.longitude,
-                    phone: row.phone.isEmpty ? nil : row.phone,
+                    phone: row.e164Phone,
                     email: row.email.isEmpty ? nil : row.email,
                     notes: row.notes.isEmpty ? nil : row.notes,
                     // Consent is NEVER inferred from a spreadsheet. CASL
@@ -351,6 +357,19 @@ struct ImportRow: Identifiable {
     var skipped = false
 
     var isImportable: Bool { coordinate != nil && !skipped && !name.isEmpty }
+
+    /// Valid number in E.164, or nil (blank or invalid). An invalid number
+    /// never blocks the import - the customer is saved without it and the
+    /// row is flagged (phoneWarning) so the owner can fix it afterwards.
+    var e164Phone: String? {
+        if case .valid(let n) = PhoneNumber.check(phone) { return n }
+        return nil
+    }
+    var phoneWarning: String? {
+        PhoneNumber.check(phone) == .invalid
+            ? "Phone \"\(phone)\" isn't a valid number - customer will be saved without it."
+            : nil
+    }
 }
 
 private struct ImportRowCell: View {
@@ -371,6 +390,9 @@ private struct ImportRowCell: View {
                     .foregroundColor(.white.opacity(0.7))
                 if let reason = row.failureReason, !row.skipped {
                     Text(reason).font(.caption2).foregroundColor(.orange)
+                }
+                if let warn = row.phoneWarning, !row.skipped {
+                    Text(warn).font(.caption2).foregroundColor(.orange)
                 }
             }
             Spacer()

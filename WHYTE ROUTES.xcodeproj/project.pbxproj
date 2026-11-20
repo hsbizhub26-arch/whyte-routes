@@ -48,6 +48,7 @@
 				Models/NavigationSettings.swift,
 				Models/NotificationEvent.swift,
 				Models/Route.swift,
+				Models/Season.swift,
 				Models/Shift.swift,
 				Models/Stop.swift,
 				Models/TrackingLink.swift,
@@ -60,6 +61,7 @@
 				Repositories/NotificationRepository.swift,
 				Repositories/RouteRepository.swift,
 				Repositories/RouteService.swift,
+				Repositories/ServiceHistoryRepository.swift,
 				Repositories/ShiftRepository.swift,
 				Repositories/StopsRepository.swift,
 				Repositories/TrackingLinkRepository.swift,
@@ -71,10 +73,25 @@
 				Services/BatchGeocoder.swift,
 				Services/NavigationSession.swift,
 				Services/NotificationService.swift,
+				Services/PendingStopSync.swift,
+				Services/PhotoProofQueue.swift,
 				Services/RealtimeLocationManager.swift,
 				Services/RouteOptimizationService.swift,
 				Services/SMSService.swift,
 				Services/TrackingBroadcastService.swift,
+				Services/WeatherService.swift,
+				Services/SeasonLogBuilder.swift,
+				Services/InvoiceDraftBuilder.swift,
+				Views/Owner/InvoiceDraftsView.swift,
+				Services/VideoProofCompressor.swift,
+				Views/Shared/VideoPicker.swift,
+				Repositories/SeasonLogRepository.swift,
+				Views/Driver/SnowfallPromptSheet.swift,
+				Views/Owner/SeasonLogView.swift,
+				Views/Shared/WeatherStripView.swift,
+				Utilities/PhoneNumber.swift,
+				Utilities/ContactTextParser.swift,
+				Views/Customer/ScanContactView.swift,
 				Utilities/iPadAdaptive.swift,
 				Utilities/SafePrint.swift,
 				Utilities/TimestampFormatter.swift,
@@ -118,6 +135,7 @@
 				Views/Owner/OwnerDashboardView.swift,
 				Views/Owner/OwnerLoginView.swift,
 				Views/Owner/OwnerTabView.swift,
+				Views/Owner/TextAlertsView.swift,
 				Views/Paywall/SubscriptionTierView.swift,
 				Views/Routing/RoleRouterView.swift,
 				Views/Shared/AddressAutocompleteField.swift,
@@ -424,7 +442,7 @@
 				CODE_SIGN_ENTITLEMENTS = "WHYTE ROUTES/WHYTE-ROUTES.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 69;
+				CURRENT_PROJECT_VERSION = 72;
 				DEVELOPMENT_TEAM = FW57G974CG;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -434,7 +452,8 @@
 				INFOPLIST_FILE = "WHYTE ROUTES/Resources/Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSAppDataUsageDescription = "";
-				INFOPLIST_KEY_NSCameraUsageDescription = "WHYTE ROUTES uses the camera so drivers can photograph their license for their profile and capture photo proof of completed work.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WHYTE ROUTES uses the camera so drivers can photograph their license for their profile and capture photo or short video proof of completed work.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "The camera asks for the microphone while you record a short video proof clip. WHYTE ROUTES removes the sound before the clip is saved or uploaded.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "WHYTE ROUTES uses your location, including in the background while you are clocked in on a route, to share your live position with your dispatcher, detect arrival at stops, and notify customers.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "WHYTE ROUTES uses your location to show your position on the fleet map and provide turn-by-turn navigation to your stops.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "WHYTE ROUTES accesses your photo library so you can choose an existing photo for your driver license or proof of completed work.";
@@ -488,7 +507,7 @@
 				CODE_SIGN_ENTITLEMENTS = "WHYTE ROUTES/WHYTE-ROUTES.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 69;
+				CURRENT_PROJECT_VERSION = 72;
 				DEVELOPMENT_TEAM = FW57G974CG;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -498,7 +517,8 @@
 				INFOPLIST_FILE = "WHYTE ROUTES/Resources/Info.plist";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSAppDataUsageDescription = "";
-				INFOPLIST_KEY_NSCameraUsageDescription = "WHYTE ROUTES uses the camera so drivers can photograph their license for their profile and capture photo proof of completed work.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WHYTE ROUTES uses the camera so drivers can photograph their license for their profile and capture photo or short video proof of completed work.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "The camera asks for the microphone while you record a short video proof clip. WHYTE ROUTES removes the sound before the clip is saved or uploaded.";
 				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "WHYTE ROUTES uses your location, including in the background while you are clocked in on a route, to share your live position with your dispatcher, detect arrival at stops, and notify customers.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "WHYTE ROUTES uses your location to show your position on the fleet map and provide turn-by-turn navigation to your stops.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "WHYTE ROUTES accesses your photo library so you can choose an existing photo for your driver license or proof of completed work.";

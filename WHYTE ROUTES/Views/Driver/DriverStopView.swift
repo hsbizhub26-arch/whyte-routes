@@ -28,6 +28,7 @@ final class DriverStopViewModel: ObservableObject {
     // truck drive on to everybody else's homes for the rest of the
     // shift.
     private let trackingRepo = TrackingLinkRepository()
+    private let history = ServiceHistoryRepository.shared
 
     // GPS older than this is treated as unusable for an ETA
     // notification - better to send nothing than tell a customer
@@ -179,9 +180,23 @@ final class DriverStopViewModel: ObservableObject {
     // automatic GPS proximity - see NotificationService for why)
     func startDriving() async {
         guard let route else { return }
+        let now = Date()
+        // Decided on the stop as it is BEFORE this event - see
+        // ServiceHistoryRepository.visitId.
+        let visit = history.visitId(for: stop, event: .enRoute, at: now)
         stop.status = JobStatus.enRoute.rawValue
-        stop.enRouteAt = Date()
-        await routeService.updateStop(routeId: route.id, stop: stop)
+        stop.enRouteAt = now
+        stop.openVisitId = visit.id
+        // Phase 5: returns within seconds even with no signal (the write
+        // waits on the phone and sends itself later).
+        _ = await routeService.saveStop(routeId: route.id, stop: stop)
+        // Re-tapping Start Driving on a visit already under way must
+        // not try to overwrite its first on-the-way time (the rules
+        // would refuse it anyway); only a new visit records it.
+        if visit.isNew {
+            history.record(.enRoute, stop: stop, routeId: route.id, routeName: route.name,
+                           visitId: visit.id, isNew: true, at: now)
+        }
         // No customer text here. "On the way" was retired along with
         // the 15-minute ETA and "arrived" - three of the five texts a
         // customer used to get per stop, for a stop they might still
@@ -206,9 +221,14 @@ final class DriverStopViewModel: ObservableObject {
         // arrival queued in that window lands AFTER the completed write
         // and leaves the stop arrived-but-not-completed.
         guard !isCompleting, !stop.isCompleted, jobStatus != .arrived else { return }
+        let now = Date()
+        let visit = history.visitId(for: stop, event: .arrived, at: now)
         stop.status = JobStatus.arrived.rawValue
-        stop.arrivedAt = Date()
-        await routeService.updateStop(routeId: route.id, stop: stop)
+        stop.arrivedAt = now
+        stop.openVisitId = visit.id
+        _ = await routeService.saveStop(routeId: route.id, stop: stop)
+        history.record(.arrived, stop: stop, routeId: route.id, routeName: route.name,
+                       visitId: visit.id, isNew: visit.isNew, at: now)
         // Retired, same as enRoute above. "Arrived" landed seconds
         // before "completed" on a driveway that takes four minutes,
         // so the customer got two texts for one visit.
@@ -226,22 +246,41 @@ final class DriverStopViewModel: ObservableObject {
         // completed the instant it was tapped, so a failed write left
         // a stop that looked done to the driver, was still scheduled
         // in Firestore, and would be silently re-served or skipped.
+        let now = Date()
+        let visit = history.visitId(for: stop, event: .completed, at: now)
         var updated = stop
         updated.isCompleted = true
         updated.status = JobStatus.completed.rawValue
-        updated.completedAt = Date()
+        updated.completedAt = now
+        updated.openVisitId = visit.id
 
-        let saved = await routeService.updateStop(routeId: route.id, stop: updated)
-        guard saved else {
+        // Phase 5: with no signal the completion is kept on the phone and
+        // sent when signal returns. The completion TEXT needs the server
+        // copy (the Cloud Function reads the stop), so in that case it is
+        // sent from onSynced, once the server actually has it.
+        let routeId = route.id
+        let outcome = await routeService.saveStop(routeId: routeId, stop: updated) { synced in
+            guard synced else { return }
+            Task { await NotificationService.shared.notify(stop: updated, routeId: routeId, type: "completed") }
+        }
+        guard outcome != .failed else {
             isCompleting = false
             completionError = "Couldn't mark this stop completed - check your connection and tap again."
             return
         }
         stop = updated
 
+        // The permanent record of this visit: done time plus where the
+        // truck actually was. Written before anything else below so a
+        // failure in the text or link close-out can't cost it.
+        history.record(.completed, stop: updated, routeId: route.id, routeName: route.name,
+                       visitId: visit.id, isNew: visit.isNew, at: now)
+
         // Only now, with the completion actually persisted: the text
         // says the service is finished, and there is no unsending it.
-        await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "completed")
+        if outcome == .synced {
+            await NotificationService.shared.notify(stop: stop, routeId: route.id, type: "completed")
+        }
 
         // This customer's service is done, so their live tracking ends
         // here: the position document is deleted and the link marked
@@ -269,17 +308,25 @@ final class DriverStopViewModel: ObservableObject {
         // commit it once Firestore confirms. Status goes back to
         // scheduled so a skipped en-route stop doesn't keep an en-route
         // badge.
+        let now = Date()
+        let visit = history.visitId(for: stop, event: .skipped, at: now)
         var updated = stop
         updated.isSkipped = true
         updated.status = JobStatus.scheduled.rawValue
+        updated.openVisitId = visit.id
 
-        let saved = await routeService.updateStop(routeId: route.id, stop: updated)
-        guard saved else {
+        let outcome = await routeService.saveStop(routeId: route.id, stop: updated)
+        guard outcome != .failed else {
             isCompleting = false
             completionError = "Couldn't skip this stop - check your connection and tap again."
             return
         }
         stop = updated
+
+        // A skip is history too: "we came and couldn't do it" is part
+        // of the record an owner bills (or doesn't bill) from.
+        history.record(.skipped, stop: updated, routeId: route.id, routeName: route.name,
+                       visitId: visit.id, isNew: visit.isNew, at: now)
 
         // This customer is no longer being served: end their live link
         // without marking it completed.
@@ -400,8 +447,19 @@ struct DriverStopView: View {
     @StateObject private var nav = NavigationSession()
     @ObservedObject private var session = DriverSession.shared
     @ObservedObject private var access = FeatureAccessManager.shared
-    @State private var showPhotoCapture = false
-    @State private var proofPhotoURL: String?
+    // B2: "arrival" / "completion" while the camera is open.
+    @State private var photoCaptureType: String?
+    @State private var pickedPhoto: UIImage?
+    /// Types photographed at this stop during this screen's life - the
+    /// queue drops an entry once it uploads, so it can't answer that.
+    @State private var photosTaken: Set<String> = []
+    @State private var photoError: String?
+    @ObservedObject private var photoQueue = PhotoProofQueue.shared
+    // B7
+    @State private var showVideoCapture = false
+    @State private var isCompressingVideo = false
+    /// Optional date/time stamp printed on proof photos. Per phone, on by default.
+    @AppStorage("proof.stampDateTime") private var stampDateTime = true
     @State private var showSkipConfirm = false
     /// The map was `initialPosition:`, which means exactly what it says
     /// - it framed the stop once and then never moved again, so during
@@ -467,27 +525,27 @@ struct DriverStopView: View {
                         // texts along with the steps themselves.
                         if vm.jobStatus == .arrived || vm.jobStatus == .completed {
                             if access.canAccessProofOfWork() {
-                                photoProofButton
+                                photoProofButtons
                             }
-                            completeButton
-                            completionErrorBanner
+                            // Mark Completed is in the pinned bottom bar.
                         }
 
                         // Available at every stage before completion: a
                         // blocked driveway is found on arrival, but a
                         // cancelled job is found before setting off.
+                        // Phase 4: behind a small "…" menu so a gloved
+                        // thumb can't hit it instead of the main button.
                         if vm.jobStatus != .completed && !vm.stop.isCompleted && !vm.stop.isSkipped {
                             skipButton
-                            if vm.jobStatus != .arrived {
-                                completionErrorBanner
-                            }
                         }
+                        completionErrorBanner
 
                         Spacer(minLength: 40)
                     }
                     .padding()
                     .readableContentWidth()
                 }
+                .safeAreaInset(edge: .bottom) { bottomActionBar }
             }
 
             closeButton
@@ -527,22 +585,17 @@ struct DriverStopView: View {
                 }
             )
         }
-        .sheet(isPresented: $showPhotoCapture) {
-            if let companyId = CompanySession.shared.currentCompanyId,
-               let routeId = vm.route?.id,
-               let driverId = session.driver?.id {
-                PhotoProofView(
-                    companyId: companyId,
-                    routeId: routeId,
-                    stopId: vm.stop.id,
-                    driverId: driverId,
-                    type: "completion",
-                    onUploaded: { url in
-                        proofPhotoURL = url
-                        showPhotoCapture = false
-                    }
-                )
+        // B2: one tap opens the camera; the shot goes straight into the
+        // on-phone queue (see PhotoProofQueue) - no separate Upload step,
+        // and no waiting for signal.
+        .padFullScreenSheet(isPresented: Binding(
+            get: { photoCaptureType != nil },
+            set: { if !$0 { photoCaptureType = nil } }
+        )) {
+            ImagePicker(image: $pickedPhoto) { image in
+                if let type = photoCaptureType { queuePhoto(image, type: type) }
             }
+            .ignoresSafeArea()
         }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -637,6 +690,13 @@ extension DriverStopView {
                     .foregroundColor(.white.opacity(0.7))
             }
 
+            // B8: the customer's time window, if the owner set one.
+            if let window = vm.stop.timeWindowText {
+                Label("Arrive \(window)", systemImage: "clock.badge.checkmark")
+                    .font(.subheadline.bold())
+                    .foregroundColor(WRTheme.gold)
+                    .padding(.vertical, 6)
+            }
             if let notes = vm.stop.driverNotes, !notes.isEmpty {
                 driverNotesCallout(notes)
             }
@@ -869,25 +929,9 @@ extension DriverStopView {
                 // stop en route (texting the customer "on my way"), and
                 // open navigation. A driver never has to find a separate
                 // Start Shift button first.
-                Button {
-                    Task {
-                        if DriverSession.shared.activeShift == nil {
-                            _ = await DriverSession.shared.startShift()
-                        }
-                        await vm.startDriving()
-                        if let coordinate = vm.stop.coordinate {
-                            nav.start(to: coordinate)
-                        }
-                    }
-                } label: {
-                    Label("Start Driving", systemImage: "car.fill")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color("WRThemeGold"))
-                        .cornerRadius(14)
-                }
+                // Phase 4: the Start Driving button itself now lives in
+                // the pinned bottom bar (bottomActionBar) - big, and in
+                // thumb reach.
 
                 // Same "starting this stop" gesture, but directions come
                 // from the driver's own nav app - Waze for its police /
@@ -908,20 +952,7 @@ extension DriverStopView {
                 // action. Navigation becomes a secondary control so a
                 // driver who closed the map can pull directions back
                 // without re-triggering the customer text.
-                Button {
-                    Task { await vm.markArrived() }
-                } label: {
-                    Label("I've Arrived", systemImage: "mappin.circle.fill")
-                        .font(.headline)
-                        .foregroundColor(.black)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color("WRThemeGold"))
-                        .cornerRadius(14)
-                }
-                // Same rule as the navigation screen's fallback: not while
-                // a completion is still saving (see markArrived).
-                .disabled(!vm.canMarkArrived)
+                // Phase 4: "I've Arrived" is in the pinned bottom bar.
 
                 if let coordinate = vm.stop.coordinate {
                     // Already en route: just hand off directions, no
@@ -968,18 +999,78 @@ extension DriverStopView {
 
     // MARK: PHOTO PROOF (optional - not required to complete, but
     // encouraged for dispute resolution / proof of work)
-    private var photoProofButton: some View {
-        Button {
-            showPhotoCapture = true
-        } label: {
-            HStack {
-                Image(systemName: proofPhotoURL != nil ? "checkmark.circle.fill" : "camera.fill")
-                Text(proofPhotoURL != nil ? "Photo Added" : "Add Photo Proof")
+    //
+    // B2: an Arrival + Completion pair. The arrival photo is offered
+    // only while arrived (it's the "before"); the completion photo while
+    // arrived or completed. Neither ever blocks completing the stop.
+    @ViewBuilder
+    private var photoProofButtons: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                if vm.jobStatus == .arrived || photosTaken.contains("arrival") {
+                    photoButton(type: "arrival", title: "Arrival Photo")
+                        .disabled(vm.jobStatus != .arrived)
+                }
+                photoButton(type: "completion", title: "Completion Photo")
             }
-            .font(.headline)
-            .foregroundColor(proofPhotoURL != nil ? .green : .white)
-            .padding()
-            .frame(maxWidth: .infinity)
+            // B7: optional 15-second clip.
+            Button {
+                photoError = nil
+                showVideoCapture = true
+            } label: {
+                HStack(spacing: 6) {
+                    if isCompressingVideo { ProgressView().tint(WRTheme.gold) }
+                    Image(systemName: photosTaken.contains("video") ? "checkmark.circle.fill" : "video.fill")
+                    Text(isCompressingVideo ? "Preparing video…" : (photosTaken.contains("video") ? "Video Proof ✓" : "Video Proof (15 s)"))
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(photosTaken.contains("video") ? WRTheme.gold : .white)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Color.black.opacity(0.25))
+                .cornerRadius(14)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color("WRThemeGold").opacity(0.6), lineWidth: 1))
+            }
+            .disabled(isCompressingVideo)
+            .padFullScreenSheet(isPresented: $showVideoCapture) {
+                VideoPicker { url in queueVideo(url) }
+                    .ignoresSafeArea()
+            }
+            Toggle(isOn: $stampDateTime) {
+                Label("Print date & time on photos", systemImage: "calendar.badge.clock")
+                    .font(.caption)
+            }
+            .tint(WRTheme.gold)
+            let waiting = photoQueue.pendingCount(stopId: vm.stop.id)
+            if waiting > 0 {
+                Label("\(waiting) photo\(waiting == 1 ? "" : "s") saved on this phone - uploading when there's signal.",
+                      systemImage: "icloud.and.arrow.up")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let photoError {
+                Text(photoError).font(.caption).foregroundColor(.red)
+            }
+        }
+    }
+
+    private func photoButton(type: String, title: String) -> some View {
+        let taken = photosTaken.contains(type)
+        return Button {
+            photoError = nil
+            photoCaptureType = type
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: taken ? "checkmark.circle.fill" : "camera.fill")
+                Text(taken ? "\(title) ✓" : title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundColor(taken ? WRTheme.gold : .white)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .background(Color.black.opacity(0.25))
             .cornerRadius(14)
             .overlay(
@@ -987,62 +1078,173 @@ extension DriverStopView {
                     .stroke(Color("WRThemeGold"), lineWidth: 1)
             )
         }
+        .accessibilityLabel(taken ? "\(title) taken. Tap to take another." : "Take \(title)")
     }
 
-    // MARK: COMPLETE BUTTON
-    private var completeButton: some View {
-        Button {
-            Task {
-                // Was `proofPhotoURL = nil` - which threw away the proof
-                // the driver had just taken at the exact moment the stop
-                // was completed, so the button flipped from "Photo Added"
-                // back to "Add Photo Proof". The photo and its metadata
-                // are already in Storage/Firestore by then; this state is
-                // only the button's label.
-                await vm.markCompleted()
+    /// B7: shrink (<= 12 MB, 15 s, sound removed), then queue like a photo.
+    private func queueVideo(_ raw: URL) {
+        guard let companyId = CompanySession.shared.currentCompanyId,
+              let routeId = vm.route?.id,
+              let driverId = session.driver?.id else {
+            photoError = "Couldn't save the video - you're not signed in to a route."
+            return
+        }
+        let captured = Date()
+        let loc = LocationService.shared
+        let lat = loc.currentLocation?.latitude, lon = loc.currentLocation?.longitude
+        let fixAge = loc.lastLocationUpdate.map { max(0, Int(captured.timeIntervalSince($0))) }
+        let stopId = vm.stop.id, visitId = vm.stop.openVisitId
+        isCompressingVideo = true
+        Task {
+            defer { try? FileManager.default.removeItem(at: raw) }
+            do {
+                let result = try await VideoProofCompressor.compress(raw)
+                try await MainActor.run {
+                    try photoQueue.enqueueVideo(file: result.url, bytes: result.bytes, companyId: companyId,
+                                                routeId: routeId, stopId: stopId, driverId: driverId,
+                                                visitId: visitId, latitude: lat, longitude: lon,
+                                                gpsFixAgeSeconds: fixAge, capturedAt: captured)
+                    photosTaken.insert("video")
+                }
+            } catch {
+                await MainActor.run { photoError = error.localizedDescription }
             }
-        } label: {
-            HStack {
-                if vm.isCompleting {
-                    ProgressView().tint(.white)
-                } else {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("Mark Completed")
+            await MainActor.run { isCompressingVideo = false }
+        }
+    }
+
+    /// Saves to the on-phone queue with the capture time, the phone's
+    /// GPS fix right now, and this visit's id. Never waits on network.
+    private func queuePhoto(_ image: UIImage, type: String) {
+        guard let companyId = CompanySession.shared.currentCompanyId,
+              let routeId = vm.route?.id,
+              let driverId = session.driver?.id else {
+            photoError = "Couldn't save the photo - you're not signed in to a route."
+            return
+        }
+        let loc = LocationService.shared
+        let fixAge = loc.lastLocationUpdate.map { max(0, Int(Date().timeIntervalSince($0))) }
+        let captured = Date()
+        let tz = TimeZone(identifier: CompanySession.shared.currentCompany?.timeZoneIdentifier ?? "America/Toronto") ?? .current
+        let finalImage = stampDateTime
+            ? ProofPhotoStamp.apply(image, date: captured, address: vm.stop.address, timeZone: tz)
+            : image
+        do {
+            try photoQueue.enqueue(
+                image: finalImage, companyId: companyId, routeId: routeId, stopId: vm.stop.id,
+                driverId: driverId, type: type, visitId: vm.stop.openVisitId,
+                latitude: loc.currentLocation?.latitude, longitude: loc.currentLocation?.longitude,
+                gpsFixAgeSeconds: fixAge,
+                source: UIImagePickerController.isSourceTypeAvailable(.camera) ? "camera" : "library",
+                capturedAt: captured)
+            photosTaken.insert(type)
+        } catch {
+            photoError = "Couldn't save the photo: \(error.localizedDescription)"
+        }
+        photoCaptureType = nil
+    }
+
+    // MARK: BOTTOM ACTION BAR (Phase 4, glove-friendly)
+    //
+    // ONE big button, pinned to the bottom of the screen where a thumb
+    // already is, that always shows the next step: Start Driving ->
+    // I've Arrived -> Mark Completed. At least 72pt tall with large type,
+    // so it works with gloves on and at a glance in the dark. Everything
+    // else on the screen is secondary.
+    @ViewBuilder
+    private var bottomActionBar: some View {
+        VStack(spacing: 0) {
+            SavedOnPhoneBadge()
+            bottomActionButton
+        }
+    }
+
+    @ViewBuilder
+    private var bottomActionButton: some View {
+        if let action = nextAction {
+            Button {
+                Task { await action.run() }
+            } label: {
+                HStack(spacing: 12) {
+                    if vm.isCompleting {
+                        ProgressView().tint(.black)
+                    } else {
+                        Image(systemName: action.symbol)
+                    }
+                    Text(action.title)
+                }
+                .font(.title2.bold())
+                .foregroundColor(.black)
+                .frame(maxWidth: .infinity, minHeight: 72)
+                .background(Color("WRThemeGold"), in: RoundedRectangle(cornerRadius: 18))
+            }
+            .disabled(!action.enabled)
+            .opacity(action.enabled ? 1 : 0.5)
+            .padding(.horizontal)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+            .readableContentWidth()
+            .background(Color("WRBlack").opacity(0.95).ignoresSafeArea(edges: .bottom))
+            .accessibilityHint("Next step for this stop")
+        }
+    }
+
+    private struct NextAction {
+        let title: String
+        let symbol: String
+        let enabled: Bool
+        let run: () async -> Void
+    }
+
+    private var nextAction: NextAction? {
+        guard !vm.stop.isSkipped else { return nil }
+        switch vm.jobStatus {
+        case .scheduled:
+            // ONE tap: clock in if needed, mark en route (texts the
+            // customer), and open in-app navigation.
+            return NextAction(title: "Start Driving", symbol: "car.fill", enabled: true) {
+                if DriverSession.shared.activeShift == nil {
+                    _ = await DriverSession.shared.startShift()
+                }
+                await vm.startDriving()
+                if let coordinate = vm.stop.coordinate {
+                    await MainActor.run { nav.start(to: coordinate) }
                 }
             }
-            .font(.headline)
-            .foregroundColor(.black)
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color("WRThemeGold"))
-            .cornerRadius(14)
+        case .enRoute:
+            // Not while a completion is still saving (see markArrived).
+            return NextAction(title: "I've Arrived", symbol: "mappin.circle.fill",
+                              enabled: vm.canMarkArrived) {
+                await vm.markArrived()
+            }
+        case .arrived:
+            return NextAction(title: "Mark Completed", symbol: "checkmark.circle.fill",
+                              enabled: !vm.isCompleting && !vm.stop.isCompleted) {
+                await vm.markCompleted()
+            }
+        case .completed:
+            return nil
         }
-        .disabled(vm.isCompleting || vm.stop.isCompleted)
-        .opacity(vm.stop.isCompleted ? 0.4 : 1)
-        .padding(.top, 10)
     }
 
-    // MARK: SKIP BUTTON
+    // MARK: SKIP (behind a small menu - Phase 4)
     private var skipButton: some View {
-        Button {
-            showSkipConfirm = true
-        } label: {
-            HStack {
-                Image(systemName: "forward.end.fill")
-                Text("Skip Stop")
+        HStack {
+            Spacer()
+            Menu {
+                Button(role: .destructive) {
+                    showSkipConfirm = true
+                } label: {
+                    Label("Skip Stop", systemImage: "forward.end.fill")
+                }
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .frame(minWidth: 44, minHeight: 44)
             }
-            .font(.headline)
-            .foregroundColor(.white)
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color.black.opacity(0.25))
-            .cornerRadius(14)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color("WRThemeGold"), lineWidth: 1)
-            )
+            .disabled(vm.isCompleting)
         }
-        .disabled(vm.isCompleting)
         .padding(.top, 6)
         .confirmationDialog(
             "Skip this stop?",

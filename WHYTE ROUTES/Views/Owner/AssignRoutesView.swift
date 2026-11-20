@@ -20,10 +20,16 @@ struct AssignRoutesView: View {
     @State private var deleteError: String?
     @State private var isDeleting = false
     private let routeRepo = RouteRepository()
+    @AppStorage(SeasonFilter.storageKey) private var seasonRaw = SeasonFilter.all.rawValue
+
+    private var shownRoutes: [Route] {
+        let filter = SeasonFilter(rawValue: seasonRaw) ?? .all
+        return routeService.routes.filter { filter.includes($0.seasons) }
+    }
 
     var body: some View {
         NavigationStack {
-            List(routeService.routes) { route in
+            List(shownRoutes) { route in
                 NavigationLink(route.name) {
                     EditRouteView(routeId: route.id)
                 }
@@ -36,6 +42,12 @@ struct AssignRoutesView: View {
                 }
             }
             .readableListWidth()
+            .safeAreaInset(edge: .top) {
+                SeasonSwitch()
+                    .padding(.horizontal)
+                    .padding(.bottom, 6)
+                    .readableContentWidth()
+            }
             .navigationTitle("Assign Routes")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {

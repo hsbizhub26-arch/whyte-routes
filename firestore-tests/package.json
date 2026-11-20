@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "cp ../firestore.rules . && firebase emulators:exec --only firestore --project wr-rules-test 'node rules.test.mjs'"
+    "test": "cp ../firestore.rules . && firebase emulators:exec --only firestore --project wr-rules-test 'node rules.test.mjs'",
+    "test:storage": "cp ../storage.rules . && firebase emulators:exec --only firestore,storage --project wr-rules-test 'node storage.test.mjs'"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",

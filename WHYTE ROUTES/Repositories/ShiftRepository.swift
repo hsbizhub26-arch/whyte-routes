@@ -82,6 +82,33 @@ final class ShiftRepository {
         try await ref.document(shiftId).delete()
     }
 
+    /// B5: the driver's own snowfall answer, saved onto the shift they
+    /// just ended. Allowed by the existing rule (a driver may update
+    /// their own shift); asked AFTER the shift has ended, so it can
+    /// never hold up clocking out.
+    func setSnowfall(driverId: String, shiftId: String, cm: Int) async throws {
+        let ref = try shiftsRef(driverId: driverId)
+        try await ref.document(shiftId).updateData([
+            "snowfallCm": cm,
+            "snowfallSetAt": FieldValue.serverTimestamp()
+        ])
+    }
+
+    /// B5: every shift since a date, for the Season Log. Staff may read
+    /// any driver's shifts (firestore.rules).
+    func fetchShifts(driverId: String, since: Date) async -> [Shift] {
+        guard let ref = try? shiftsRef(driverId: driverId) else { return [] }
+        do {
+            let snapshot = try await ref
+                .whereField("startedAt", isGreaterThanOrEqualTo: Timestamp(date: since))
+                .getDocuments()
+            return snapshot.documents.compactMap { Shift(from: $0.data(), id: $0.documentID) }
+        } catch {
+            safePrint("⚠️ ShiftRepository.fetchShifts(\(driverId)) failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     /// Most recent shifts for the time-accounting report, newest first.
     func fetchRecentShifts(driverId: String, limit: Int = 10) async -> [Shift] {
         guard let ref = try? shiftsRef(driverId: driverId) else { return [] }

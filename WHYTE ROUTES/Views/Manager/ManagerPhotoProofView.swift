@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 import FirebaseFirestore
 
 /// Owner/manager-side viewer for the proof-of-work photos a driver
@@ -14,7 +15,18 @@ struct ManagerPhotoProofView: View {
         let id: String
         let url: String
         let type: String
+        /// Upload time (server).
         let timestamp: Date?
+        /// B2: when the photo was actually taken. Nil on older photos.
+        let capturedAt: Date?
+        let hasGPS: Bool
+        let gpsFixAgeSeconds: Int?
+        let fromLibrary: Bool
+        /// B7: a video clip rather than a photo.
+        let isVideo: Bool
+
+        /// What a dispute should be judged on.
+        var takenAt: Date? { capturedAt ?? timestamp }
     }
 
     @State private var photos: [ProofPhoto] = []
@@ -47,12 +59,21 @@ struct ManagerPhotoProofView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(label(for: photo))
                                 .font(.headline)
-                            AsyncImage(url: URL(string: photo.url)) { image in
-                                image.resizable().scaledToFit().cornerRadius(12)
-                            } placeholder: {
-                                ProgressView()
-                                    .frame(height: 180)
-                                    .frame(maxWidth: .infinity)
+                            ForEach(notes(for: photo), id: \.self) { note in
+                                Text(note).font(.caption).foregroundColor(.secondary)
+                            }
+                            if photo.isVideo, let url = URL(string: photo.url) {
+                                VideoPlayer(player: AVPlayer(url: url))
+                                    .frame(height: 240)
+                                    .cornerRadius(12)
+                            } else {
+                                AsyncImage(url: URL(string: photo.url)) { image in
+                                    image.resizable().scaledToFit().cornerRadius(12)
+                                } placeholder: {
+                                    ProgressView()
+                                        .frame(height: 180)
+                                        .frame(maxWidth: .infinity)
+                                }
                             }
                         }
                     }
@@ -75,11 +96,36 @@ struct ManagerPhotoProofView: View {
         switch photo.type {
         case "before":     name = "Before"
         case "after":      name = "After"
+        case "arrival":    name = "Arrival"
+        case "video":      name = "Video"
         case "completion": name = "Completed"
         default:           name = photo.type.capitalized
         }
-        guard let stamp = photo.timestamp else { return name }
+        guard let stamp = photo.takenAt else { return name }
         return "\(name) · \(stamp.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    /// Facts that matter in a dispute, stated plainly.
+    private func notes(for photo: ProofPhoto) -> [String] {
+        var out: [String] = []
+        if photo.capturedAt != nil {
+            out.append("Time is when the photo was taken.")
+            if let taken = photo.capturedAt, let uploaded = photo.timestamp,
+               uploaded.timeIntervalSince(taken) > 600 {
+                out.append("Uploaded later (\(uploaded.formatted(date: .omitted, time: .shortened))) - the phone had no signal.")
+            }
+        } else if photo.timestamp != nil {
+            out.append("Older photo: time shown is when it uploaded.")
+        }
+        if photo.hasGPS {
+            if let age = photo.gpsFixAgeSeconds, age > 120 {
+                out.append("Phone location saved, but the GPS fix was \(age / 60) min old.")
+            } else {
+                out.append("Phone location saved with the photo.")
+            }
+        }
+        if photo.fromLibrary { out.append("Chosen from the photo library, not taken with the camera.") }
+        return out
     }
 
     private func loadPhotos() {
@@ -107,13 +153,20 @@ struct ManagerPhotoProofView: View {
                 photos = (snapshot?.documents ?? []).compactMap { doc in
                     let data = doc.data()
                     guard let url = data["url"] as? String else { return nil }
+                    let gps = data["gpsAtCapture"] as? [String: Any]
                     return ProofPhoto(
                         id: doc.documentID,
                         url: url,
                         type: data["type"] as? String ?? "photo",
-                        timestamp: (data["timestamp"] as? Timestamp)?.dateValue()
+                        timestamp: (data["timestamp"] as? Timestamp)?.dateValue(),
+                        capturedAt: (data["capturedAt"] as? Timestamp)?.dateValue(),
+                        hasGPS: gps != nil,
+                        gpsFixAgeSeconds: gps?["fixAgeSeconds"] as? Int,
+                        fromLibrary: (data["source"] as? String) == "library",
+                        isVideo: (data["mediaType"] as? String) == "video"
                     )
                 }
+                .sorted { ($0.takenAt ?? .distantPast) < ($1.takenAt ?? .distantPast) }
                 isLoading = false
             }
     }

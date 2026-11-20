@@ -76,7 +76,8 @@ struct SubscriptionTierView: View {
                 return [
                     "Everything in Premium",
                     "Driver performance & time reports",
-                    "Unlimited customers"
+                    "Payroll tools",
+                    "Multi-driver dispatch"
                 ]
             }
         }
@@ -110,6 +111,11 @@ struct SubscriptionTierView: View {
                         } else {
                             pricingButtons
                         }
+
+                        Text("Customer texts included. Fair use: 1,000 text segments/month on Premium, 3,000 on Premium Plus.")
+                            .font(.caption2)
+                            .foregroundColor(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
 
                         if let error = purchaseManager.errorMessage {
                             Text(error)
@@ -147,6 +153,18 @@ struct SubscriptionTierView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
+            // Launch banner. No price-lock or duration promise on
+            // purpose - Apple's price-increase rules decide what can be
+            // promised later, and "lifetime" is never used.
+            Text("Founding Member launch pricing \u{2014} for our first 100 businesses.")
+                .font(.footnote.bold())
+                .foregroundColor(.black)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(WRTheme.gold)
+                .cornerRadius(10)
+
             Text("WHYTE ROUTES")
                 .font(.title3.bold())
                 .foregroundColor(WRTheme.gold)
@@ -205,11 +223,14 @@ struct SubscriptionTierView: View {
             if purchaseManager.products.isEmpty {
                 ProgressView().tint(.white).padding()
             } else {
+                Text(trialLine)
+                    .font(.subheadline.bold())
+                    .foregroundColor(.white)
                 if let yearly = yearlyProduct {
-                    priceButton(product: yearly, badge: "Best value")
+                    priceButton(product: yearly, badge: "Best value", title: "Year-Round Plan \u{00B7} Snow + Grass")
                 }
                 if let monthly = monthlyProduct {
-                    priceButton(product: monthly, badge: nil)
+                    priceButton(product: monthly, badge: nil, title: nil)
                 }
             }
         }
@@ -230,13 +251,23 @@ struct SubscriptionTierView: View {
         return period.value == 1 ? "per \(unit)" : "every \(period.value) \(unit)s"
     }
 
-    private func priceButton(product: Product, badge: String?) -> some View {
+    /// Read from the product's real introductory offer, so the screen
+    /// can never advertise a trial Apple isn't actually giving.
+    private var trialLine: String {
+        let offer = (yearlyProduct ?? monthlyProduct)?.subscription?.introductoryOffer
+        guard let offer, offer.paymentMode == .freeTrial else { return "Cancel anytime." }
+        let p = offer.period
+        let days = p.unit == .day ? p.value : (p.unit == .week ? p.value * 7 : p.value * 30)
+        return "\(days)-day free trial. Cancel anytime."
+    }
+
+    private func priceButton(product: Product, badge: String?, title: String?) -> some View {
         Button {
             Task { await purchaseManager.purchase(product) }
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(product.displayName.isEmpty ? product.description : product.displayName)
+                    Text(title ?? (product.displayName.isEmpty ? product.description : product.displayName))
                         .font(.headline)
                     if let badge {
                         Text(badge)

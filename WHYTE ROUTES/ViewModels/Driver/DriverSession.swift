@@ -303,13 +303,28 @@ final class DriverSession: ObservableObject {
     func completeStop(_ stop: Stop) {
         guard let routeId = assignedRoute?.id else { return }
 
+        let now = Date()
+        let visit = ServiceHistoryRepository.shared.visitId(for: stop, event: .completed, at: now)
         var updatedStops = activeStops
+        var completed: Stop?
         if let index = updatedStops.firstIndex(where: { $0.id == stop.id }) {
             updatedStops[index].isCompleted = true
+            updatedStops[index].status = JobStatus.completed.rawValue
+            updatedStops[index].completedAt = now
+            updatedStops[index].openVisitId = visit.id
+            completed = updatedStops[index]
         }
 
         activeStops = updatedStops
         stopsRepo.saveStops(forRoute: routeId, stops: updatedStops)
+        // Every way of finishing a stop leaves a history record, this
+        // older one included.
+        if let completed {
+            ServiceHistoryRepository.shared.record(
+                .completed, stop: completed, routeId: routeId,
+                routeName: assignedRoute?.name,
+                visitId: visit.id, isNew: visit.isNew, at: now)
+        }
         // Finishing one stop moves everyone behind it up the queue.
         TrackingBroadcastService.shared.refreshLinks()
     }

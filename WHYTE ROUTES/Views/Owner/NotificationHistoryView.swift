@@ -69,8 +69,9 @@ struct NotificationHistoryView: View {
 
     private func statusColor(_ deliveryStatus: String) -> Color {
         switch deliveryStatus {
-        case "accepted": return .green
-        case "failed": return .red
+        case "accepted", "delivered": return .green
+        case "failed", "undelivered": return .red
+        case "sms_allowance_reached", "sms_opted_out": return .orange
         case "no_contact_on_file", "not_opted_in", "not_entitled", "type_disabled", "channel_disabled": return .orange
         case "queued_for_morning": return WRTheme.gold
         default: return .secondary
@@ -81,6 +82,17 @@ struct NotificationHistoryView: View {
         switch event.deliveryStatus {
         case "accepted":
             return "✓ Sent (\(event.contactMethod) to \(event.contactValue))"
+        // Final carrier outcomes, written by the twilioStatusCallback
+        // function a few seconds after the send.
+        case "delivered":
+            return "✓ Delivered (\(event.contactMethod) to \(event.contactValue))"
+        case "sms_opted_out":
+            return "Not sent - this customer replied STOP. No texts until they reply START."
+        case "sms_allowance_reached":
+            return "Not sent - monthly text allowance reached. Texts resume on the 1st."
+        case "undelivered":
+            let why = (event.failureReason?.isEmpty == false) ? event.failureReason! : "the carrier didn't deliver it"
+            return "⚠️ Didn't arrive - \(why) Text this customer yourself."
         case "sending":
             return "⏳ Sending…"
         case "failed":

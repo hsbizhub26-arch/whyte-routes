@@ -117,6 +117,49 @@ final class RouteService: ObservableObject {
         }
     }
 
+    // MARK: - Offline-safe stop save (Phase 5)
+    //
+    // Firestore keeps every write in its on-phone cache until the server
+    // has it, and sends it by itself when signal comes back. But its
+    // completion only fires on the SERVER's answer, so on a dead driveway
+    // the old `await updateStop` never returned: Mark Completed spun
+    // forever and Start Driving / I've Arrived looked like dead buttons.
+    //
+    // This waits a few seconds for the server. No answer by then means
+    // the change is safely queued on the phone, so the driver moves on
+    // (.queued) and `onSynced` runs later, once the server has it - which
+    // is where anything that needs the server copy (the completion text)
+    // belongs. A real refusal that arrives in time is still .failed.
+    enum StopSaveOutcome { case synced, queued, failed }
+
+    func saveStop(routeId: String,
+                  stop: Stop,
+                  waitSeconds: Double = 6,
+                  onSynced: ((Bool) -> Void)? = nil) async -> StopSaveOutcome {
+        final class Gate: @unchecked Sendable { var resumed = false }
+        let gate = Gate()
+        return await withCheckedContinuation { continuation in
+            stopsRepo.updateStop(routeId: routeId, stop: stop) { success in
+                Task { @MainActor in
+                    if gate.resumed {
+                        PendingStopSync.shared.finish()
+                        onSynced?(success)
+                    } else {
+                        gate.resumed = true
+                        continuation.resume(returning: success ? .synced : .failed)
+                    }
+                }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(waitSeconds * 1_000_000_000))
+                guard !gate.resumed else { return }
+                gate.resumed = true
+                PendingStopSync.shared.begin()
+                continuation.resume(returning: .queued)
+            }
+        }
+    }
+
     // MARK: - Update a Single Stop (fire-and-forget)
     func updateStop(routeId: String, stop: Stop) {
         stopsRepo.updateStop(routeId: routeId, stop: stop) { success in

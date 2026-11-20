@@ -52,6 +52,70 @@ class PhotoUploader: ObservableObject {
         return url.absoluteString
     }
 
+    // MARK: - Queued proof photo (B2)
+    //
+    // Called by PhotoProofQueue. Idempotent: the photo's id is both the
+    // Storage file name and the Firestore document id, so a retry after
+    // a half-finished attempt overwrites the same objects. If the record
+    // already exists (an earlier attempt got that far before the phone
+    // lost signal), that counts as done - drivers may create photo
+    // records but only staff may update them (firestore.rules), so
+    // re-writing it would be refused forever.
+    func uploadQueued(_ photo: PendingProofPhoto, data: Data) async throws {
+        let docRef = db.collection("companies").document(photo.companyId)
+            .collection("routes").document(photo.routeId)
+            .collection("stops").document(photo.stopId)
+            .collection("photos").document(photo.id)
+
+        if (try? await docRef.getDocument())?.exists == true { return }
+
+        // B7: videos go to their own folder with their own storage rule
+        // (video/mp4, 20 MB cap). Until that rule is deployed Storage
+        // refuses them - reported as ProofUploadNotPermitted so the queue
+        // keeps the clip and stops hammering the server.
+        let folder = photo.isVideo ? "videos" : "photos"
+        let path = "companies/\(photo.companyId)/\(folder)/\(photo.driverId)/\(photo.stopId)/\(photo.type)_\(photo.id).\(photo.fileExtension)"
+        let storageRef = storage.reference().child(path)
+        let metadata: StorageMetadata
+        if photo.isVideo {
+            metadata = StorageMetadata()
+            metadata.contentType = "video/mp4"
+        } else {
+            metadata = Self.jpegMetadata
+        }
+        do {
+            _ = try await storageRef.putDataAsync(data, metadata: metadata)
+        } catch {
+            let ns = error as NSError
+            if ns.domain == StorageErrorDomain, StorageErrorCode(rawValue: ns.code) == .unauthorized {
+                throw ProofUploadNotPermitted()
+            }
+            throw error
+        }
+        let url = try await storageRef.downloadURL()
+
+        var record: [String: Any] = [
+            "url": url.absoluteString,
+            "storagePath": path,
+            "type": photo.type,
+            "driverId": photo.driverId,
+            // Upload time (kept for older screens that sort on it)...
+            "timestamp": FieldValue.serverTimestamp(),
+            // ...and the moment the photo was actually taken.
+            "capturedAt": Timestamp(date: photo.capturedAt),
+            "source": photo.source,
+            "sizeBytes": photo.sizeBytes,
+            "mediaType": photo.isVideo ? "video" : "photo"
+        ]
+        if let visitId = photo.visitId { record["visitId"] = visitId }
+        if let lat = photo.latitude, let lon = photo.longitude {
+            var gps: [String: Any] = ["latitude": lat, "longitude": lon]
+            if let age = photo.gpsFixAgeSeconds { gps["fixAgeSeconds"] = age }
+            record["gpsAtCapture"] = gps
+        }
+        try await docRef.setData(record)
+    }
+
     // MARK: - Driver's License Photo
     // Overwrites in place at a fixed filename (not a fresh UUID per
     // upload like proof-of-work) - a driver only ever has one current
