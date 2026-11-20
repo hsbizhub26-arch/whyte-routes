@@ -58,7 +58,11 @@ struct SubscriptionTierView: View {
                 // position three reading like a feature note.
                 return [
                     "One price for your whole crew - no per-driver fees",
-                    "Automatic customer arrival texts",
+                    // Was "arrival texts" - there is no arrival text (the
+                    // locked spec is shift start + link, a same-street
+                    // heads-up, and completion; the street text is not
+                    // live on real routes yet, so it isn't claimed).
+                    "Automatic customer texts: shift start and job done",
                     "Live tracking link for customers",
                     "Unlimited stops and routes",
                     "Route optimization"
