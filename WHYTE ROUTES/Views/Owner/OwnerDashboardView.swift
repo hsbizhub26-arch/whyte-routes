@@ -17,12 +17,19 @@ struct OwnerDashboardView: View {
     @State private var selectedDriverId: String?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    // Counted from the live stops subcollections (stopsByRoute). Route.stops
+    // is the old embedded array, empty on every current route, so the
+    // card read "0/0 Stops Done" for a company with 59 stops on 3 routes.
+    private var allStops: [Stop] {
+        routeService.routes.flatMap { routeService.stopsByRoute[$0.id] ?? [] }
+    }
+
     private var totalCompletedStops: Int {
-        driverVM.drivers.reduce(0) { $0 + routeService.reportFor($1).completedStops }
+        allStops.filter { $0.isCompleted }.count
     }
 
     private var totalStopsToday: Int {
-        routeService.routes.reduce(0) { $0 + $1.stops.count }
+        allStops.count
     }
 
     /// Drivers that currently have a route to run - the "actually out

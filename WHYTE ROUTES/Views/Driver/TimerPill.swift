@@ -16,7 +16,10 @@ struct TimerPill: View {
     var body: some View {
         TimelineView(.periodic(from: arrivedAt, by: 1)) { context in
             let seconds = max(0, Int(context.date.timeIntervalSince(arrivedAt)))
-            Text("At property: \(formatted(seconds))")
+            // Past 12 hours this is a stop left "arrived" from an earlier
+            // shift, not a job in progress - a ticking "20:56:22" read like
+            // a live clock. Say what it is instead.
+            Text(seconds > 12 * 3600 ? staleLabel : "At property: \(formatted(seconds))")
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(Color.black.opacity(0.85))
@@ -32,6 +35,15 @@ struct TimerPill: View {
     // nor obviously seven hours. Minutes stay unpadded under an hour so
     // the common case still reads "4:07", and become two digits once
     // there is an hours field in front of them to align against.
+    private var staleLabel: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_CA")
+        f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return "Arrived \(f.string(from: arrivedAt)) - not completed"
+    }
+
     private func formatted(_ seconds: Int) -> String {
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60

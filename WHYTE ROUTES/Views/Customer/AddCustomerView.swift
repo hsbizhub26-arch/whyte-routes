@@ -134,7 +134,7 @@ struct AddCustomerView: View {
                             .foregroundColor(.secondary)
                     }
                 } footer: {
-                    Text("Required before any arrival/completion notification can be sent to this customer.")
+                    Text("Required before any text or email (shift start, job done) can be sent to this customer.")
                 }
 
                 if notificationsOptIn {
