@@ -157,18 +157,8 @@ struct SubscriptionTierView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
-            // Launch banner. No price-lock or duration promise on
-            // purpose - Apple's price-increase rules decide what can be
-            // promised later, and "lifetime" is never used.
-            Text("Founding Member launch pricing \u{2014} for our first 100 businesses.")
-                .font(.footnote.bold())
-                .foregroundColor(.black)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(WRTheme.gold)
-                .cornerRadius(10)
-
+            // The "Founding Member" banner was removed (Hope, Nov 20): no
+            // wording that could imply price retention or grandfathering.
             Text("WHYTE ROUTES")
                 .font(.title3.bold())
                 .foregroundColor(WRTheme.gold)
@@ -181,7 +171,8 @@ struct SubscriptionTierView: View {
             // A route planner is bought per person; dispatch software
             // is bought per company, and that difference is the whole
             // argument at any crew size above one.
-            Text("Add every truck you run. The price doesn't change.")
+            // Was "The price doesn't change" - read as a price promise.
+            Text("Add every truck you run \u{2013} one price for your whole crew.")
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
