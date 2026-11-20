@@ -34,7 +34,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Camera access is needed to take photos as proof for deliveries and job completion.</string>
+	<string>Camera access is needed to take photos and short video clips as proof for deliveries and job completion.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The camera asks for the microphone while you record a short video proof clip. WHYTE ROUTES removes the sound before the clip is saved or uploaded.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>We use your location, even in the background, to track your progress for route management and delivery accuracy.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
