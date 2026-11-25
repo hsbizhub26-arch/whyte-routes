@@ -21,6 +21,15 @@ struct VisitItem: Identifiable {
     var stopId: String
     var driverId: String?
     var serviceDate: String?
+    var routeId: String = ""
+}
+
+/// One proof photo or video recorded against a visit.
+struct ProofItem: Identifiable {
+    var id: String
+    var url: URL
+    var type: String
+    var isVideo: Bool
 }
 
 extension VisitRecord {
@@ -102,11 +111,29 @@ enum RouteMemoryHistory {
         }
     }
 
+    /// Proof photos/video saved against this visit (stops/{stop}/photos,
+    /// matched by visitId). Staff can read them all; a driver only for
+    /// stops assigned to them. Anything unreadable is simply left out.
+    static func proofs(for visit: VisitItem) async -> [ProofItem] {
+        guard let companyId, !visit.routeId.isEmpty, !visit.stopId.isEmpty else { return [] }
+        let col = Firestore.firestore().collection("companies").document(companyId)
+            .collection("routes").document(visit.routeId)
+            .collection("stops").document(visit.stopId).collection("photos")
+        guard let snap = try? await col.whereField("visitId", isEqualTo: visit.id).getDocuments() else { return [] }
+        return snap.documents.compactMap { doc in
+            let d = doc.data()
+            guard let str = d["url"] as? String, let url = URL(string: str) else { return nil }
+            let video = (d["kind"] as? String) == "video" || ((d["storagePath"] as? String)?.contains("/videos/") ?? false)
+            return ProofItem(id: doc.documentID, url: url, type: d["type"] as? String ?? "", isVideo: video)
+        }
+    }
+
     private static func items(_ snap: QuerySnapshot) -> [VisitItem] {
         snap.documents.map { doc in
             let d = doc.data()
             return VisitItem(id: doc.documentID, record: VisitRecord(dict: d), stopId: d["stopId"] as? String ?? "",
-                             driverId: d["driverId"] as? String, serviceDate: d["serviceDate"] as? String)
+                             driverId: d["driverId"] as? String, serviceDate: d["serviceDate"] as? String,
+                             routeId: d["routeId"] as? String ?? "")
         }
     }
 }

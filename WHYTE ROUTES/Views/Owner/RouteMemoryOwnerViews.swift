@@ -109,7 +109,12 @@ struct RunDetailView: View {
             }
             Section("Stops") {
                 if loaded && visits.isEmpty { Text("No stops recorded for this run.").foregroundColor(.secondary) }
-                ForEach(visits) { visit in stopRow(visit.record) }
+                ForEach(visits) { visit in
+                    VStack(alignment: .leading, spacing: 8) {
+                        stopRow(visit.record)
+                        ProofStrip(visit: visit)
+                    }
+                }
             }
         }
         .navigationTitle(dayText(run.startedAt))
@@ -222,4 +227,44 @@ struct RouteMemoryShareSheet: UIViewControllerRepresentable {
         UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+/// Small row of proof photo / video thumbnails under a stop. Tapping one
+/// opens it. Shows nothing when the visit has no proof or it can't be read.
+struct ProofStrip: View {
+    let visit: VisitItem
+    @State private var proofs: [ProofItem] = []
+
+    var body: some View {
+        Group {
+            if !proofs.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(proofs) { p in
+                            Link(destination: p.url) {
+                                ZStack {
+                                    if p.isVideo {
+                                        Color.black.opacity(0.5)
+                                        Image(systemName: "play.circle.fill").font(.title2).foregroundColor(.white)
+                                    } else {
+                                        AsyncImage(url: p.url) { img in img.resizable().scaledToFill() } placeholder: { Color.gray.opacity(0.3) }
+                                    }
+                                }
+                                .frame(width: 64, height: 64)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(alignment: .bottomLeading) {
+                                    Text(p.isVideo ? "video" : p.type)
+                                        .font(.system(size: 9, weight: .bold))
+                                        .padding(.horizontal, 4)
+                                        .background(Color.black.opacity(0.65))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .task { proofs = await RouteMemoryHistory.proofs(for: visit) }
+    }
 }

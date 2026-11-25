@@ -1,0 +1,16 @@
+import { adb } from "./lib.mjs";
+const co = adb.collection("companies").doc("legacy-co");
+const docs = (await co.collection("serviceHistory").get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+const bad = [];
+const chk = (c, m) => { console.log(`${c ? "PASS" : "FAIL"}  ${m}`); if (!c) bad.push(m); };
+chk(docs.every((d) => d.propertyKey === "c-legacy"), "every visit now has propertyKey = customerId");
+const comp = docs.filter((d) => d.outcome === "completed");
+chk(comp.every((d) => d.statsAppliedAt && d.preRouteMemory === true), "every completed visit is marked processed (preRouteMemory)");
+chk(docs.filter((d) => d.outcome === "skipped").every((d) => !d.statsAppliedAt), "skipped visit not marked");
+chk(docs.every((d) => d.flagged === undefined && d.flagRatio === undefined && d.avgBeforeSec === undefined), "no flag/ratio/avgBefore invented on any old visit");
+chk(docs.filter((d) => d.durationSec != null).length === 6, `durationSec only on the 6 real timed visits (${docs.filter((d) => d.durationSec != null).length})`);
+const s = (await co.collection("propertyStats").doc("c-legacy").get()).data();
+chk(s && s.visitCount === 6, `stats visitCount = 6 (recovered/owner-ticked/skipped excluded): ${s?.visitCount}`);
+chk(s && s.avgDurationSec === 360, `stats average of last 5 = 360: ${s?.avgDurationSec}`);
+chk(s && s.lastDurationSec === 600, `stats last duration = 600: ${s?.lastDurationSec}`);
+process.exit(bad.length ? 1 : 0);

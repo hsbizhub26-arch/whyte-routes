@@ -58,9 +58,10 @@ struct DriverProfileView: View {
                     Label("My Shift History", systemImage: "clock.arrow.circlepath")
                         .font(.headline)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color.black.opacity(0.35))
+                        .background(Color.white.opacity(0.08))
                         .foregroundColor(.white)
                         .cornerRadius(14)
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color("WRThemeGold").opacity(0.6), lineWidth: 1))
                 }
                 .padding(.horizontal)
                 .sheet(isPresented: $showMyHistory) {
