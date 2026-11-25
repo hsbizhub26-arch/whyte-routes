@@ -300,11 +300,9 @@ struct DriverDashboardView: View {
                 .disabled(isTogglingShift)
             } else {
                 Button {
-                    isTogglingShift = true
-                    Task {
-                        await session.startShift()
-                        isTogglingShift = false
-                    }
+                    // Opens the run setup sheet (summary + Heavy snow);
+                    // the sheet's own button starts the shift.
+                    session.requestStartShift()
                 } label: {
                     Text(isTogglingShift ? "Starting…" : "Start Shift")
                         .font(.subheadline.bold())

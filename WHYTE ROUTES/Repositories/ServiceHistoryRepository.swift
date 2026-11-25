@@ -154,6 +154,27 @@ final class ServiceHistoryRepository {
         }
     }
 
+    // MARK: Reason chips
+
+    /// The driver's optional "why did this take longer" answer. Written
+    /// before the visit is completed (or with it); the rules refuse any
+    /// change once the server has taken its completion snapshot. A write
+    /// that fails never matters to the driver - it is optional.
+    func recordReason(visitId: String?, code: String, text: String?) {
+        guard let visitId, let companyId = CompanySession.shared.currentCompanyId else { return }
+        var d: [String: Any] = ["reasonCode": code]
+        let trimmed = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if code == "other", !trimmed.isEmpty {
+            d["reasonText"] = String(trimmed.prefix(RouteMemory.REASON_OTHER_MAX_CHARS))
+        } else {
+            d["reasonText"] = FieldValue.delete()    // free text is only allowed with "Other"
+        }
+        db.collection("companies").document(companyId).collection("serviceHistory").document(visitId)
+            .setData(d, merge: true) { error in
+                if let error { print("⚠️ ServiceHistory: reason not saved for \(visitId): \(error.localizedDescription)") }
+            }
+    }
+
     // MARK: Field building
 
     private func identityFields(stop: Stop, routeId: String, routeName: String?,
@@ -166,9 +187,14 @@ final class ServiceHistoryRepository {
             "source": "app",
             "recordedVia": recordedVia,
             "outcome": "in_progress",
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": FieldValue.serverTimestamp(),
+            // Route Memory: which property this visit counts toward (the
+            // customer, else the stop). The security rules check it.
+            "propertyKey": RouteMemoryService.propertyKey(for: stop)
         ]
         if let uid = Auth.auth().currentUser?.uid { d["recordedBy"] = uid }
+        // The run (this shift on this route) the visit belongs to.
+        if let runId = RouteMemoryService.shared.currentRunId { d["runId"] = runId }
         if let routeName { d["routeName"] = routeName }
         if let v = stop.customerId { d["customerId"] = v }
         if let v = stop.customerName { d["customerName"] = v }

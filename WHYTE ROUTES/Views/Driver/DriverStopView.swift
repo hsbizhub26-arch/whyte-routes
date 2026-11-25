@@ -13,6 +13,9 @@ final class DriverStopViewModel: ObservableObject {
     @Published var completionError: String?
     @Published var routeCompleted = false
     @Published var etaMinutes: Int?
+    /// Route Memory: the driver's optional "why did this take longer" chip.
+    @Published var reasonCode: String?
+    @Published var reasonText: String = ""
 
     private let routeService = RouteService.shared
     private let session = DriverSession.shared
@@ -152,6 +155,28 @@ final class DriverStopViewModel: ObservableObject {
     var atPropertyStart: Date? {
         guard jobStatus == .arrived else { return nil }
         return stop.arrivedAt
+    }
+
+    // MARK: Route Memory (reason chips)
+
+    /// True once the time on this property passes what was predicted.
+    func isOverPrediction(at now: Date = Date()) -> Bool {
+        guard let start = atPropertyStart else { return false }
+        return now.timeIntervalSince(start) > RouteMemoryService.shared.prediction(for: stop).sec
+    }
+
+    /// Would finishing right now be flagged? Same rule the server applies.
+    func willFlagNow(at now: Date = Date()) -> Bool {
+        guard let start = atPropertyStart else { return false }
+        let s = RouteMemoryService.shared.stats(for: stop)
+        return RouteMemoryCore.willFlag(elapsedSec: now.timeIntervalSince(start),
+                                        avgSec: s?.avgDurationSec, visitCount: s?.visitCount ?? 0)
+    }
+
+    func chooseReason(_ code: String, text: String?) {
+        reasonCode = code
+        if code != "other" { reasonText = "" }
+        history.recordReason(visitId: stop.openVisitId, code: code, text: text ?? reasonText)
     }
 
     /// False once arrived or completed - or while a completion is still
@@ -461,6 +486,7 @@ struct DriverStopView: View {
     /// Optional date/time stamp printed on proof photos. Per phone, on by default.
     @AppStorage("proof.stampDateTime") private var stampDateTime = true
     @State private var showSkipConfirm = false
+    @State private var showReasonSheet = false
     /// The map was `initialPosition:`, which means exactly what it says
     /// - it framed the stop once and then never moved again, so during
     /// navigation the driver watched their own dot walk off the edge.
@@ -581,7 +607,7 @@ struct DriverStopView: View {
                 onEnd: { nav.stop() },
                 onComplete: {
                     nav.stop()
-                    Task { await vm.markCompleted() }
+                    Task { await requestComplete() }
                 }
             )
         }
@@ -596,6 +622,12 @@ struct DriverStopView: View {
                 if let type = photoCaptureType { queuePhoto(image, type: type) }
             }
             .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showReasonSheet) {
+            ReasonSheet(vm: vm) {
+                showReasonSheet = false
+                Task { await vm.markCompleted() }
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -991,9 +1023,40 @@ extension DriverStopView {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            if !vm.stop.isCompleted && !vm.stop.isSkipped {
+                PredictionLine(stop: vm.stop)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if let arrivedAt = vm.atPropertyStart {
                 TimerPill(arrivedAt: arrivedAt)
+                // Past the predicted time: offer the optional reason chips.
+                // Tapping one saves it with the visit; ignoring them never
+                // blocks Complete.
+                TimelineView(.periodic(from: arrivedAt, by: 5)) { context in
+                    if vm.isOverPrediction(at: context.date) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Running long? Tap a reason (optional)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.white.opacity(0.8))
+                            ReasonChips(selected: vm.reasonCode, otherText: $vm.reasonText) { code, text in
+                                vm.chooseReason(code, text: text)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
+        }
+    }
+
+    /// Complete is never blocked. A stop that is running well over its
+    /// usual time and has no reason yet gets a one-tap optional sheet first.
+    private func requestComplete() async {
+        if vm.reasonCode == nil && vm.willFlagNow() {
+            showReasonSheet = true
+        } else {
+            await vm.markCompleted()
         }
     }
 
@@ -1220,7 +1283,7 @@ extension DriverStopView {
         case .arrived:
             return NextAction(title: "Mark Completed", symbol: "checkmark.circle.fill",
                               enabled: !vm.isCompleting && !vm.stop.isCompleted) {
-                await vm.markCompleted()
+                await requestComplete()
             }
         case .completed:
             return nil

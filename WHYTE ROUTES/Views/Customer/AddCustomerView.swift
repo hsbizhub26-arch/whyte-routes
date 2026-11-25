@@ -19,6 +19,7 @@ struct AddCustomerView: View {
     @State private var contractLabel = ""
     @State private var contractPriceText = ""
     @State private var contractPaid = false
+    @State private var sizeTier: SizeTier = .unknown
     @State private var latitude: Double = 0
     @State private var longitude: Double = 0
     @State private var notificationsOptIn = false
@@ -86,6 +87,29 @@ struct AddCustomerView: View {
                     Text("Notes for Drivers")
                 } footer: {
                     Text("Shown right on the stop screen every time a driver works this property.")
+                }
+
+                if let existingCustomer {
+                    Section {
+                        NavigationLink {
+                            VisitHistoryView(propertyKey: existingCustomer.id, title: existingCustomer.name)
+                        } label: {
+                            Label("Visit History", systemImage: "clock.arrow.circlepath")
+                        }
+                    }
+                }
+
+                Section {
+                    Picker("Driveway size", selection: $sizeTier) {
+                        Text("Not sure").tag(SizeTier.unknown)
+                        Text("Single").tag(SizeTier.single)
+                        Text("Double").tag(SizeTier.double)
+                        Text("Triple").tag(SizeTier.triple)
+                    }
+                } header: {
+                    Text("Property Size")
+                } footer: {
+                    Text("Used only to estimate the first visit. After a couple of visits the app uses how long this property really takes.")
                 }
 
                 Section {
@@ -199,6 +223,7 @@ struct AddCustomerView: View {
                 contractLabel = existingCustomer.contractLabel ?? ""
                 contractPriceText = existingCustomer.contractPriceCents.map(InvoiceDraftBuilder.dollars) ?? ""
                 contractPaid = existingCustomer.contractPaid
+                sizeTier = existingCustomer.sizeTier ?? .unknown
                 latitude = existingCustomer.latitude
                 longitude = existingCustomer.longitude
                 notificationsOptIn = existingCustomer.notificationsOptIn
@@ -255,7 +280,8 @@ struct AddCustomerView: View {
             contractLabel: contractLabel.trimmingCharacters(in: .whitespaces).isEmpty
                 ? nil : contractLabel.trimmingCharacters(in: .whitespaces),
             contractPriceCents: InvoiceDraftBuilder.cents(from: contractPriceText),
-            contractPaid: contractPaid
+            contractPaid: contractPaid,
+            sizeTier: sizeTier == .unknown ? nil : sizeTier
         )
 
         let onComplete: (Bool) -> Void = { success in

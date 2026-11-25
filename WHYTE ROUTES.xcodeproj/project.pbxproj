@@ -153,6 +153,12 @@
 				Views/Shared/ReportIssueView.swift,
 				Views/Shared/SettingsView.swift,
 				Views/Shared/UpgradeRequiredView.swift,
+				Services/RouteMemory/RouteMemory.swift,
+				Services/RouteMemory/RouteMemoryCore.swift,
+				Services/RouteMemory/RouteMemoryHistory.swift,
+				Services/RouteMemory/RouteMemoryService.swift,
+				Views/Driver/RouteMemoryDriverViews.swift,
+				Views/Owner/RouteMemoryOwnerViews.swift,
 			);
 			target = 8D792BE82EDC236C00586CA8 /* WHYTE ROUTES */;
 		};

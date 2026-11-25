@@ -15,6 +15,8 @@ final class DriverSession: ObservableObject {
     @Published var activeStops: [Stop] = []
     @Published var activeShift: Shift?
     @Published var shiftError: String?
+    /// Drives the Start Shift sheet (run summary + Heavy snow toggle).
+    @Published var showRunSetup = false
     /// Set when the route genuinely couldn't be read. Distinct from
     /// "no stops" - see loadStops.
     @Published var stopsError: String?
@@ -90,6 +92,7 @@ final class DriverSession: ObservableObject {
         assignedRoute = nil
         activeStops = []
         activeShift = nil
+        RouteMemoryService.shared.clear()
         stopsError = nil
         hasLoadedStops = false
         permissionRetries = 0
@@ -103,14 +106,23 @@ final class DriverSession: ObservableObject {
     private func restoreActiveShift() async {
         guard let driverId = driver?.id else { return }
         activeShift = await shiftRepo.fetchActiveShift(driverId: driverId)
+        if let shift = activeShift { RouteMemoryService.shared.restoreRun(shiftId: shift.id) }
         if activeShift != nil {
             LocationService.shared.startTracking(driverId: driverId)
             TrackingBroadcastService.shared.start()
         }
     }
 
+    /// The Start Shift BUTTON: opens the run setup sheet (summary + Heavy
+    /// snow). The one-tap "Start Driving" paths still call startShift()
+    /// directly and begin a normal run, exactly as before.
+    func requestStartShift() {
+        guard activeShift == nil else { return }
+        showRunSetup = true
+    }
+
     @discardableResult
-    func startShift() async -> Bool {
+    func startShift(snow: Bool = false) async -> Bool {
         shiftError = nil
         guard let driverId = driver?.id else {
             shiftError = "No driver profile loaded yet - try signing out and back in."
@@ -119,6 +131,10 @@ final class DriverSession: ObservableObject {
         guard activeShift == nil else { return false }
         do {
             activeShift = try await shiftRepo.startShift(driverId: driverId)
+            if let shift = activeShift {
+                RouteMemoryService.shared.beginRun(shiftId: shift.id, driver: driver, route: assignedRoute,
+                                                   stops: activeStops, snow: snow)
+            }
             LocationService.shared.startTracking(driverId: driverId)
             TrackingBroadcastService.shared.start()
 
@@ -155,6 +171,7 @@ final class DriverSession: ObservableObject {
         guard let driverId = driver?.id, let shift = activeShift else { return false }
         do {
             try await shiftRepo.endShift(driverId: driverId, shiftId: shift.id)
+            RouteMemoryService.shared.endRun()
             activeShift = nil
             LocationService.shared.stopTracking()
             TrackingBroadcastService.shared.stop()

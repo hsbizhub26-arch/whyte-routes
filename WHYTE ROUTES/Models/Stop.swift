@@ -71,6 +71,12 @@ struct Stop: Identifiable {
     var windowStartMinute: Int? = nil
     var windowEndMinute: Int? = nil
 
+    /// Route Memory: how big the property is, copied from the Customer
+    /// when the stop is built (customers are staff-only, so the driver's
+    /// phone can't read them). Only used to estimate a first visit before
+    /// the app has learned the property. nil = not set (treated as unknown).
+    var sizeTier: SizeTier? = nil
+
     var hasTimeWindow: Bool { windowStartMinute != nil && windowEndMinute != nil }
 
     /// "8:00 AM – 10:00 AM"
@@ -147,6 +153,7 @@ extension Stop {
         self.openVisitId = dict["openVisitId"] as? String
         self.windowStartMinute = (dict["windowStartMinute"] as? NSNumber)?.intValue
         self.windowEndMinute = (dict["windowEndMinute"] as? NSNumber)?.intValue
+        self.sizeTier = (dict["sizeTier"] as? String).flatMap(SizeTier.init(rawValue:))
     }
 
     // MARK: Encode for Firestore
@@ -172,6 +179,7 @@ extension Stop {
         if let arrivedAt { d["arrivedAt"] = Timestamp(date: arrivedAt) }
         if let completedAt { d["completedAt"] = Timestamp(date: completedAt) }
         if let openVisitId { d["openVisitId"] = openVisitId }
+        if let sizeTier, sizeTier != .unknown { d["sizeTier"] = sizeTier.rawValue }
         if let windowStartMinute, let windowEndMinute {
             d["windowStartMinute"] = windowStartMinute
             d["windowEndMinute"] = windowEndMinute

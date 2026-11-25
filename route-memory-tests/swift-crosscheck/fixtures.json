@@ -1,0 +1,50 @@
+{
+  "predict": [
+    {"count":0,"avg":null,"tier":"double","snow":false},
+    {"count":0,"avg":null,"tier":"single","snow":false},
+    {"count":0,"avg":null,"tier":"triple","snow":true},
+    {"count":0,"avg":null,"tier":null,"snow":false},
+    {"count":1,"avg":200,"tier":"triple","snow":false},
+    {"count":2,"avg":400,"tier":"single","snow":false},
+    {"count":3,"avg":480,"tier":"double","snow":false},
+    {"count":5,"avg":333.5,"tier":null,"snow":true},
+    {"count":20,"avg":300,"tier":null,"snow":false},
+    {"count":200,"avg":251.2,"tier":null,"snow":true}
+  ],
+  "flagTag": [2, 1.5, 1.5042, 1.505, 1.499999, 1.67, 3.14159, 12],
+  "willFlag": [
+    {"elapsed":600,"avg":300,"count":3}, {"elapsed":360,"avg":240,"count":3}, {"elapsed":361,"avg":240,"count":3},
+    {"elapsed":300,"avg":180,"count":3}, {"elapsed":900,"avg":300,"count":1}, {"elapsed":900,"avg":null,"count":5},
+    {"elapsed":361,"avg":240,"count":2}
+  ],
+  "times": [
+    {"ms":1805000000000,"tz":"America/Toronto"}, {"ms":1804876200000,"tz":"America/Toronto"},
+    {"ms":1805000000000,"tz":"UTC"}, {"ms":1793000000000,"tz":"America/Toronto"},
+    {"ms":1615705800000,"tz":"America/Toronto"}, {"ms":1615709400000,"tz":"America/Toronto"}
+  ],
+  "work": [0, 29, 60, 2400, 3600, 7200, 24000, 24030, 86399],
+  "minSec": [0, 59, 60, 600, 421.4, 421.6, 3599],
+  "summary": [
+    {"stopCount":58,"totalSec":24000,"startMs":1804876200000,"tz":"America/Toronto","driveSec":null},
+    {"stopCount":5,"totalSec":2500,"startMs":1793000000000,"tz":"America/Toronto","driveSec":null},
+    {"stopCount":1,"totalSec":7200,"startMs":1805000000000,"tz":"America/Toronto","driveSec":null},
+    {"stopCount":12,"totalSec":9000,"startMs":1793000000000,"tz":"America/Toronto","driveSec":1800}
+  ],
+  "runRow": [
+    {"startMs":1793000000000,"endMs":1793007200000,"nowMs":1800000000000,"visits":[
+      {"outcome":"completed","arrivedMs":1,"completedMs":2}, {"outcome":"completed","arrivedMs":1,"completedMs":2}, {"outcome":"skipped"}]},
+    {"startMs":1793000000000,"endMs":null,"nowMs":1793003600000,"visits":[
+      {"outcome":"in_progress","arrivedMs":1793000100000}, {"outcome":"completed","correctedOutcome":"skipped","arrivedMs":1,"completedMs":2}]}
+  ],
+  "csv": {
+    "tz": "America/Toronto", "nowMs": 1800000000000,
+    "rows": [
+      {"address":"1 Main St","driver":"Dee","outcome":"completed","arrivedMs":1793000000000,"completedMs":1793000600000,"flagged":true,"reasonCode":"deep_snow"},
+      {"address":"2 Oak, Unit \"B\"","driver":"Sam","outcome":"completed","arrivedMs":1793003600000,"completedMs":1793004021000,"flagged":false,"reasonCode":"other","reasonText":"=cmd|' /C calc'!A0"},
+      {"address":"3 Elm St","driver":"Dee","outcome":"skipped","arrivedMs":1793007200000},
+      {"address":"4 Pine","driver":"Dee","outcome":"in_progress","arrivedMs":1700000000000},
+      {"address":"5 Fir","driver":"Dee","outcome":"completed","correctedOutcome":"skipped","arrivedMs":1793010000000,"completedMs":1793010300000},
+      {"address":"6 Ash","driver":"Dee","outcome":"completed","arrivedMs":1793011000000,"completedMs":1793011600000,"correctedCompletedMs":1793011400000,"flagged":false,"reasonCode":"blocked_driveway"}
+    ]
+  }
+}

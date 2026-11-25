@@ -1,0 +1,8 @@
+{
+  "name": "route-memory-tests",
+  "private": true,
+  "type": "module",
+  "description": "Route Memory acceptance tests. Real Firebase Auth, Firestore, rules and Cloud Functions on the TEST project only - no emulator, no mocks.",
+  "scripts": { "test": "node run.mjs" },
+  "dependencies": { "firebase": "^11.0.0", "firebase-admin": "^13.10.0" }
+}

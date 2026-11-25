@@ -41,6 +41,7 @@ struct CreateRouteView: View {
         var customerEmail: String = ""
         var customerOptedIn: Bool = false
         var driverNotes: String = ""
+        var sizeTier: SizeTier? = nil
         var address: String = ""
         var latitude: Double?
         var longitude: Double?
@@ -266,6 +267,7 @@ struct CreateRouteView: View {
         stops[index].customerEmail = customer.email ?? ""
         stops[index].customerOptedIn = customer.notificationsOptIn
         stops[index].driverNotes = customer.notes ?? ""
+        stops[index].sizeTier = customer.sizeTier
         stops[index].address = customer.address
         stops[index].latitude = customer.latitude
         stops[index].longitude = customer.longitude
@@ -320,7 +322,8 @@ struct CreateRouteView: View {
                             latitude: draft.latitude,
                             longitude: draft.longitude,
                             order: index,
-                            driverId: selectedDriverId
+                            driverId: selectedDriverId,
+                            sizeTier: draft.sizeTier
                         )
                     }
 
