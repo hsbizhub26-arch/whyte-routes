@@ -13,7 +13,15 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 
 const require = createRequire(import.meta.url);
 export const core = require("../functions/routeMemoryCore.js");
-export const cfg = JSON.parse(fs.readFileSync(new URL("./test-project.config.json", import.meta.url)));
+// The committed config carries a placeholder for the test project's web API key (the repo is
+// public). The real key lives in test-project.config.local.json (git-ignored) or RM_TEST_API_KEY.
+const cfgBase = JSON.parse(fs.readFileSync(new URL("./test-project.config.json", import.meta.url)));
+const localUrl = new URL("./test-project.config.local.json", import.meta.url);
+export const cfg = { ...cfgBase, ...(fs.existsSync(localUrl) ? JSON.parse(fs.readFileSync(localUrl)) : {}) };
+if (process.env.RM_TEST_API_KEY) cfg.apiKey = process.env.RM_TEST_API_KEY;
+if (!cfg.apiKey || cfg.apiKey.startsWith("REPLACE_WITH")) {
+  throw new Error("Missing test project web API key: put it in route-memory-tests/test-project.config.local.json or set RM_TEST_API_KEY.");
+}
 
 // HARD GUARD: this suite may only ever touch the dedicated TEST project.
 if (cfg.projectId !== "whyte-routes-test-93ee0") throw new Error(`Refusing to run: ${cfg.projectId} is not the test project.`);
