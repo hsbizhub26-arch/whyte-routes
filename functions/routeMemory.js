@@ -117,8 +117,15 @@ async function applyCompletion(companyId, visitId) {
   });
 }
 
+// A Firestore trigger must run in the same region as the database. Production
+// is northamerica-northeast2 (functions/.env.whyte-routes sets
+// RM_TRIGGER_REGION); the test project's database is in the US, so it falls
+// back to us-central1. The existing syncTrackingLinkAddress trigger is pinned
+// to the same Toronto region for the same reason.
+const TRIGGER_REGION = process.env.RM_TRIGGER_REGION || "us-central1";
+
 exports.applyVisitStats = onDocumentWritten(
-  { document: "companies/{companyId}/serviceHistory/{visitId}", retry: true },
+  { document: "companies/{companyId}/serviceHistory/{visitId}", region: TRIGGER_REGION, retry: true },
   async (event) => {
     const after = event.data && event.data.after;
     if (!after || !after.exists) return;
