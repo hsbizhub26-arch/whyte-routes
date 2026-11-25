@@ -1,6 +1,8 @@
 // Pure tests for the backfill's decisions (no database, no credentials).
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 const require = createRequire(import.meta.url);
 const bf = require("../functions/routeMemoryBackfill.js");
 const T = (ms) => ({ toMillis: () => ms });
@@ -46,7 +48,7 @@ t("stats: last duration = 600, last visit f", st.k.lastDurationSec === 600 && st
 t("stats: separate property kept separate", st.other.visitCount === 1 && st.other.avgDurationSec === 50);
 
 // safety rails on the CLI (these exit before touching any database)
-const run = (args) => { try { execFileSync("node", ["../functions/routeMemoryBackfill.js", ...args], { stdio: "pipe" }); return 0; } catch (e) { return e.status; } };
+const run = (args) => { try { execFileSync("node", [path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../functions/routeMemoryBackfill.js"), ...args], { stdio: "pipe" }); return 0; } catch (e) { return e.status; } };
 t("CLI refuses production without the explicit flag", run(["--project", "whyte-routes"]) === 3);
 t("CLI refuses when no project is given", run([]) === 2);
 
