@@ -67,6 +67,10 @@ struct Customer: Identifiable {
     var contractLabel: String? = nil
     var contractPriceCents: Int? = nil
     var contractPaid: Bool = false
+    /// Route Memory: single / double / triple driveway. Optional; nil or
+    /// .unknown means "not sure", which predicts with the default estimate.
+    var sizeTier: SizeTier? = nil
+
     var hasContract: Bool { !(contractLabel ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
 }
 
@@ -102,6 +106,7 @@ extension Customer {
         self.contractLabel = dict["contractLabel"] as? String
         self.contractPriceCents = dict["contractPriceCents"] as? Int
         self.contractPaid = dict["contractPaid"] as? Bool ?? false
+        self.sizeTier = (dict["sizeTier"] as? String).flatMap(SizeTier.init(rawValue:))
     }
 
     // MARK: - Encode
@@ -123,6 +128,7 @@ extension Customer {
         if let notes { d["notes"] = notes }
         if let consentTimestamp { d["consentTimestamp"] = Timestamp(date: consentTimestamp) }
         if let createdAt { d["createdAt"] = Timestamp(date: createdAt) }
+        if let sizeTier, sizeTier != .unknown { d["sizeTier"] = sizeTier.rawValue }
         if hasContract, let contractLabel {
             d["contractLabel"] = contractLabel
             d["contractPaid"] = contractPaid

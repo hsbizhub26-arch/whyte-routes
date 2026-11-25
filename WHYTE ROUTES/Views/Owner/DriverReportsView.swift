@@ -22,6 +22,22 @@ struct DriverReportsView: View {
                             .foregroundColor(WRTheme.gold)
                             .font(.largeTitle.bold())
 
+                        // Route Memory: every run, every driver (read-only).
+                        NavigationLink {
+                            ShiftHistoryView()
+                        } label: {
+                            HStack {
+                                Label("Shift History", systemImage: "clock.arrow.circlepath")
+                                    .font(.headline)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                            }
+                            .foregroundColor(.white)
+                            .padding()
+                            .background(Color.black.opacity(0.35))
+                            .cornerRadius(14)
+                        }
+
                         ForEach(driverVM.drivers) { driver in
                             NavigationLink {
                                 // Basic completed-stops/KM summary above

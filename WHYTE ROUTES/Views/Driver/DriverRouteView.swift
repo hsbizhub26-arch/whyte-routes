@@ -71,6 +71,7 @@ struct DriverRouteView: View {
                 Text(stop.customerName ?? "Customer")
                     .foregroundColor(.white)
                     .font(.headline)
+                if !stop.isCompleted && !stop.isSkipped { PredictionLine(stop: stop) }
 
                 Text(stop.address)
                     .foregroundColor(.white.opacity(0.7))

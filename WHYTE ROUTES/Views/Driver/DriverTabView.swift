@@ -24,6 +24,7 @@ struct DriverTabView: View {
             }
         }
         .onAppear { setupDriverOnLogin() }
+        .sheet(isPresented: $session.showRunSetup) { RunSetupSheet() }
     }
 
     private var fullTabView: some View {

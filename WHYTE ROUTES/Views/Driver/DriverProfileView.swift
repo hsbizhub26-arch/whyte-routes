@@ -5,6 +5,7 @@ struct DriverProfileView: View {
 
     @ObservedObject private var session = DriverSession.shared
     @State private var showReportIssue = false
+    @State private var showMyHistory = false
 
     @StateObject private var photoUploader = PhotoUploader()
     private let driverRepo: DriverRepository = FirestoreDriverRepository()
@@ -51,6 +52,26 @@ struct DriverProfileView: View {
                 }
 
                 Divider().overlay(Color("WRThemeGold")).padding(.horizontal)
+
+                // Route Memory: this driver's own past runs.
+                Button { showMyHistory = true } label: {
+                    Label("My Shift History", systemImage: "clock.arrow.circlepath")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Color.white.opacity(0.08))
+                        .foregroundColor(.white)
+                        .cornerRadius(14)
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color("WRThemeGold").opacity(0.6), lineWidth: 1))
+                }
+                .padding(.horizontal)
+                .sheet(isPresented: $showMyHistory) {
+                    NavigationStack {
+                        ShiftHistoryView(onlyDriver: Auth.auth().currentUser?.uid)
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) { Button("Close") { showMyHistory = false } }
+                            }
+                    }
+                }
 
                 // MARK: - Driver Info
                 if let driver = session.driver {

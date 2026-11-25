@@ -31,6 +31,16 @@ const path = require("path");
 
 admin.initializeApp();
 
+// Route Memory (per-property timing stats, over-time flags, owner
+// corrections). Self-contained module: nothing above or below it is
+// touched. See routeMemory.js.
+{
+  const rm = require("./routeMemory");
+  exports.applyVisitStats = rm.applyVisitStats;
+  exports.correctVisit = rm.correctVisit;
+  exports.recomputePropertyStats = rm.recomputePropertyStats;
+}
+
 // Set once via: firebase functions:secrets:set TWILIO_ACCOUNT_SID
 // (and the other three below) - the CLI prompts for the value
 // directly, it's never typed into a file or committed anywhere.

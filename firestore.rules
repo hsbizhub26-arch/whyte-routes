@@ -502,13 +502,48 @@ service cloud.firestore {
       //  - outcome may move from in_progress to completed/skipped once;
       //  - never deleted from the app.
       match /serviceHistory/{visitId} {
+        // What the APP may write (create, and later add to).
         function historyFields() {
           return ['stopId', 'routeId', 'routeName', 'customerId', 'customerName',
                   'address', 'propertyLatitude', 'propertyLongitude',
                   'driverId', 'driverName', 'serviceDate', 'source',
                   'recordedBy', 'recordedVia', 'outcome', 'createdAt',
                   'enRouteAt', 'arrivedAt', 'completedAt', 'skippedAt',
-                  'completedLocation', 'completedLocationMissing'];
+                  'completedLocation', 'completedLocationMissing',
+                  // Route Memory: written by the app
+                  'propertyKey', 'runId', 'reasonCode', 'reasonText'];
+        }
+        // Route Memory fields only the SERVER writes (Cloud Functions /
+        // Admin SDK, which bypass these rules): the immutable completion
+        // snapshot, its idempotency marker, and the owner-correction
+        // overlay. They may EXIST on the document, so later app writes
+        // are still checked against the full list - but no app write,
+        // from anyone (owners included), can set or change them.
+        function serverFields() {
+          return ['durationSec', 'avgBeforeSec', 'visitCountBefore', 'flagRatio',
+                  'flagged', 'statsAppliedAt', 'preRouteMemory',
+                  'correctedArrivedAt', 'correctedCompletedAt', 'correctedOutcome',
+                  'correctedBy', 'correctedAt'];
+        }
+        function allHistoryFields() {
+          return historyFields().concat(serverFields());
+        }
+        // A property is the customer when the visit has one, else the stop.
+        function expectedPropertyKey(d) {
+          return ('customerId' in d && d.customerId is string) ? d.customerId : d.stopId;
+        }
+        function validPropertyKey(d) {
+          return !('propertyKey' in d) || d.propertyKey == expectedPropertyKey(d);
+        }
+        // Driver reason chips: a fixed set of codes; free text only
+        // with "other", max 80 characters.
+        function validReason(d) {
+          return (!('reasonCode' in d) || d.reasonCode == null
+                  || d.reasonCode in ['deep_snow', 'blocked_driveway', 'car_in_way',
+                                      'equipment_issue', 'first_visit', 'other'])
+              && (!('reasonText' in d) || d.reasonText == null
+                  || (d.reasonText is string && d.reasonText.size() <= 80
+                      && 'reasonCode' in d && d.reasonCode == 'other'));
         }
         // True when this write leaves key `k` alone, or sets it for
         // the first time. False when it changes or removes a value
@@ -529,6 +564,8 @@ service cloud.firestore {
                       && request.resource.data.keys().hasOnly(historyFields())
                       && request.resource.data.stopId is string
                       && request.resource.data.routeId is string
+                      && validPropertyKey(request.resource.data)
+                      && validReason(request.resource.data)
                       && validOutcome(request.resource.data.outcome)
                       && (request.resource.data.source == 'app'
                           || (request.resource.data.source == 'owner_entered' && isCompanyStaff(companyId)))
@@ -537,17 +574,75 @@ service cloud.firestore {
 
         allow update: if isCompanyMember(companyId)
                       && (isCompanyStaff(companyId) || resource.data.driverId == request.auth.uid)
-                      && request.resource.data.keys().hasOnly(historyFields())
+                      && request.resource.data.keys().hasOnly(allHistoryFields())
                       && request.resource.data.diff(resource.data).affectedKeys()
                            .hasOnly(['enRouteAt', 'arrivedAt', 'completedAt', 'skippedAt',
-                                     'completedLocation', 'completedLocationMissing', 'outcome'])
+                                     'completedLocation', 'completedLocationMissing', 'outcome',
+                                     'propertyKey', 'runId', 'reasonCode', 'reasonText'])
                       && fillOnce('enRouteAt') && fillOnce('arrivedAt')
                       && fillOnce('completedAt') && fillOnce('skippedAt')
                       && fillOnce('completedLocation') && fillOnce('completedLocationMissing')
+                      && fillOnce('propertyKey') && fillOnce('runId')
+                      && validPropertyKey(request.resource.data)
+                      && validReason(request.resource.data)
+                      // A reason can be set or changed until the server has
+                      // taken the completion snapshot, never after.
+                      && (!(request.resource.data.diff(resource.data).affectedKeys()
+                              .hasAny(['reasonCode', 'reasonText']))
+                          || !('statsAppliedAt' in resource.data))
                       && (!('outcome' in request.resource.data.diff(resource.data).affectedKeys())
                           || (resource.data.outcome == 'in_progress'
                               && request.resource.data.outcome in ['completed', 'skipped']));
 
+        allow delete: if false;
+
+        // ── corrections: the audit trail of owner edits ──────
+        // Written only by the correctVisit Cloud Function (Admin SDK).
+        // Owner-only to read; nobody can write or delete from the app.
+        match /corrections/{correctionId} {
+          allow read: if isCompanyOwnerRole(companyId);
+          allow write: if false;
+        }
+      }
+
+      // ── companies/{companyId}/propertyStats/{propertyKey} ──
+      // Route Memory's per-property rolling stats (average of the last
+      // 5 completed visits, etc). Written ONLY by Cloud Functions, and
+      // always recomputable from serviceHistory. Every member of the
+      // company reads it: the driver's phone needs it to predict.
+      match /propertyStats/{propertyKey} {
+        allow read: if isCompanyMember(companyId);
+        allow write: if false;
+      }
+
+      // ── companies/{companyId}/runs/{runId} ───────────────
+      // One per driver shift on a route: the planned stop count and
+      // predicted total, and whether "Heavy snow tonight" was on (so
+      // history can say a run's estimates were scaled). Owners AND
+      // managers read every run (read-only); a driver reads their own.
+      // The only change after creation is closing it out (endedAt, once).
+      match /runs/{runId} {
+        function runFields() {
+          return ['driverId', 'driverName', 'routeId', 'routeName', 'shiftId',
+                  'startedAt', 'endedAt', 'stopCount', 'snowFactorActive',
+                  'snowFactor', 'predictedTotalSec', 'predictedFinishAt', 'createdAt'];
+        }
+        allow read: if isCompanyStaff(companyId)
+                    || (isCompanyMember(companyId) && resource.data.driverId == request.auth.uid);
+        allow create: if isCompanyMember(companyId)
+                      && request.resource.data.keys().hasOnly(runFields())
+                      && request.resource.data.driverId is string
+                      && (isCompanyStaff(companyId) || request.resource.data.driverId == request.auth.uid)
+                      && request.resource.data.routeId is string
+                      && request.resource.data.stopCount is int
+                      && request.resource.data.snowFactorActive is bool
+                      && request.resource.data.snowFactor is number
+                      && request.resource.data.snowFactor >= 1
+                      && request.resource.data.snowFactor <= 3;
+        allow update: if isCompanyMember(companyId)
+                      && (isCompanyStaff(companyId) || resource.data.driverId == request.auth.uid)
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['endedAt'])
+                      && (!('endedAt' in resource.data) || resource.data.endedAt == null);
         allow delete: if false;
       }
 

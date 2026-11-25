@@ -125,6 +125,10 @@ final class CustomerRepository {
                             put("driverNotes", customer.notes)
                             put("latitude", customer.latitude)
                             put("longitude", customer.longitude)
+                            // Route Memory: the property size drivers' phones use to
+                            // estimate a first visit. Customers are staff-only, so
+                            // the stop carries its own copy; keep it current.
+                            put("sizeTier", customer.sizeTier == .unknown ? nil : customer.sizeTier?.rawValue)
 
                             stop.reference.setData(data, merge: true)
                         }

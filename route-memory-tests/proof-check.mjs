@@ -1,0 +1,18 @@
+import { adb, RUN, makeUser, makeCompany, getDocs, collection, query, where, denied, cleanup } from "./lib.mjs";
+const CO = `rmt-${RUN}-proof`; let bad = 0;
+const chk = (c, m) => { console.log(`${c ? "PASS" : "FAIL"}  ${m}`); if (!c) bad++; };
+await makeCompany(CO, "Proof Co");
+const owner = await makeUser("proofOwner", CO, "owner"), driver = await makeUser("proofDriver", CO, "driver");
+const stop = adb.collection("companies").doc(CO).collection("routes").doc("r1").collection("stops").doc("s1");
+await stop.parent.parent.set({ name: "R", driverId: "someone-else", status: "assigned" });
+await stop.set({ address: "1 Proof St", driverId: "someone-else", status: "completed", isCompleted: true });
+await stop.collection("photos").doc("p1").set({ url: "https://example.test/a.jpg", type: "completion", visitId: "V1", storagePath: "companies/x/photos/a.jpg" });
+await stop.collection("photos").doc("p2").set({ url: "https://example.test/v.mp4", type: "completion", visitId: "V1", kind: "video", storagePath: "companies/x/videos/v.mp4" });
+await stop.collection("photos").doc("p3").set({ url: "https://example.test/other.jpg", type: "arrival", visitId: "V2" });
+const q = (U) => getDocs(query(collection(U.db, "companies", CO, "routes", "r1", "stops", "s1", "photos"), where("visitId", "==", "V1")));
+const r = await q(owner);
+chk(r.size === 2, `owner finds exactly the 2 proofs for the visit (not the other visit's): ${r.size}`);
+chk(r.docs.some((d) => d.data().kind === "video"), "the video record is identifiable");
+chk(await denied(q(driver)), "a driver NOT assigned to that stop is denied (the app then shows no proof)");
+await cleanup([CO], [owner, driver]);
+console.log(bad ? `${bad} FAILED` : "proof lookup checks passed"); process.exit(bad ? 1 : 0);

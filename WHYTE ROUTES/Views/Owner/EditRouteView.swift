@@ -960,6 +960,7 @@ struct EditRouteView: View {
         stops[index].customerEmail = customer.email
         stops[index].customerOptedIn = customer.notificationsOptIn
         stops[index].driverNotes = customer.notes
+        stops[index].sizeTier = customer.sizeTier
         stops[index].address = customer.address
         stops[index].latitude = customer.latitude
         stops[index].longitude = customer.longitude
