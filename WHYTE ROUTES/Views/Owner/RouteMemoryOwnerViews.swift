@@ -94,8 +94,7 @@ struct RunDetailView: View {
     let onlyDriver: String?
     @State private var visits: [VisitItem] = []
     @State private var loaded = false
-    @State private var csvURL: URL?
-    @State private var showShare = false
+    @State private var shareItem: CSVShareItem?
 
     var body: some View {
         List {
@@ -120,8 +119,9 @@ struct RunDetailView: View {
                     .disabled(visits.isEmpty)
             }
         }
-        .sheet(isPresented: $showShare) {
-            if let csvURL { RouteMemoryShareSheet(url: csvURL) }
+        .sheet(item: $shareItem) { item in
+            RouteMemoryShareSheet(url: item.url)
+                .presentationDetents([.medium, .large])
         }
         .task {
             visits = await RouteMemoryHistory.visits(runId: run.id, onlyDriver: onlyDriver)
@@ -161,8 +161,7 @@ struct RunDetailView: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("run-\(f.string(from: run.startedAt))-\(run.id.prefix(6)).csv")
         do {
             try csv.write(to: url, atomically: true, encoding: .utf8)
-            csvURL = url
-            showShare = true
+            shareItem = CSVShareItem(url: url)
         } catch {
             print("⚠️ RouteMemory: couldn't write CSV: \(error.localizedDescription)")
         }
@@ -209,6 +208,11 @@ struct VisitHistoryView: View {
             loaded = true
         }
     }
+}
+
+struct CSVShareItem: Identifiable {
+    let url: URL
+    var id: String { url.path }
 }
 
 /// iOS share sheet for the exported CSV.
